@@ -13,6 +13,7 @@ public sealed class OllamaClient : IInferenceClient
     private readonly HttpClient _http;
     private readonly ResponseCache _cache;
     private readonly GenerationTuningSettings _tuning;
+    private readonly string _replyTonePreset;
     private static readonly PromptBuilder PromptBuilder = new();
     public string Model { get; private set; }
     private DateTimeOffset _lastTagsAt = DateTimeOffset.MinValue;
@@ -21,8 +22,8 @@ public sealed class OllamaClient : IInferenceClient
     private HashSet<string> _lastPs = new(StringComparer.OrdinalIgnoreCase);
     
     // Performance settings - optimized for speed
-    private const int MAX_CONTEXT_MESSAGES = 4; // Only last 4 messages (was 6)
-    private const int CONTEXT_WINDOW = 1024; // Smaller context (was 2048)
+    private const int MAX_CONTEXT_MESSAGES = 2; // Only last 2 messages for maximum speed
+    private const int CONTEXT_WINDOW = 512; // Minimal context for fastest inference
 
     /// <summary>
     /// True if the model has been warmed up and is ready for fast responses.
@@ -35,10 +36,11 @@ public sealed class OllamaClient : IInferenceClient
     /// </summary>
     public bool IsLoaded => IsWarmedUp;
 
-    public OllamaClient(string model = "qwen2.5:3b", string baseUrl = "http://localhost:11434", GenerationTuningSettings? tuning = null)
+    public OllamaClient(string model = "qwen2.5:3b", string baseUrl = "http://localhost:11434", GenerationTuningSettings? tuning = null, string replyTonePreset = "natural")
     {
         Model = model;
         _tuning = (tuning ?? GenerationTuningSettings.Default).Clamp();
+        _replyTonePreset = string.IsNullOrWhiteSpace(replyTonePreset) ? "natural" : replyTonePreset.Trim().ToLowerInvariant();
         
         // Use SocketsHttpHandler for connection pooling and better performance
         var handler = new SocketsHttpHandler
@@ -138,7 +140,8 @@ public sealed class OllamaClient : IInferenceClient
         IReadOnlyList<(string role, string content)>? history = null,
         Action<string>? onPartialReply = null,
         CancellationToken ct = default,
-        string? systemInstructions = null
+        string? systemInstructions = null,
+        string? correlationId = null
     )
     {
         // Check cache first (only for non-streaming fallback)
@@ -162,7 +165,9 @@ public sealed class OllamaClient : IInferenceClient
             intent: intent,
             requireJson: true,
             includeActivitySafetyRules: true,
-            oneToTwoSentences: false);
+            oneToTwoSentences: false,
+            includeFewShotExamples: false,
+            tonePreset: _replyTonePreset);
 
         // Trim history to last N messages for speed
         var trimmedHistory = TrimHistory(history);
@@ -195,7 +200,8 @@ public sealed class OllamaClient : IInferenceClient
         string? preferredEmotion = null,
         IReadOnlyList<(string role, string content)>? history = null,
         CancellationToken ct = default,
-        string? systemInstructions = null
+        string? systemInstructions = null,
+        string? correlationId = null
     )
     {
         // Check cache first
@@ -219,7 +225,9 @@ public sealed class OllamaClient : IInferenceClient
             intent: intent,
             requireJson: true,
             includeActivitySafetyRules: false,
-            oneToTwoSentences: true);
+            oneToTwoSentences: true,
+            includeFewShotExamples: false,
+            tonePreset: _replyTonePreset);
 
         // Trim history for speed
         var trimmedHistory = TrimHistory(history);
@@ -516,14 +524,6 @@ public sealed class OllamaClient : IInferenceClient
         return text.Trim();
     }
 
-    public async Task<string> SummarizeConversationAsync(IReadOnlyList<(string role, string content)> messages, CancellationToken ct = default)
-    {
-        if (messages == null || messages.Count == 0) return "";
-        ct.ThrowIfCancellationRequested();
-        DevLog.WriteLine("OllamaClient[Memory]: conversation summary using local memory/history only");
-        return BuildLocalConversationSummary(messages);
-    }
-
     #endregion
 
     #region Helper Methods
@@ -726,35 +726,6 @@ public sealed class OllamaClient : IInferenceClient
         s = s.Replace("\r", " ").Replace("\n", " ").Trim();
         if (s.Length > 140) s = s[..140] + "…";
         return s;
-    }
-
-    private static string BuildLocalConversationSummary(IReadOnlyList<(string role, string content)> history)
-    {
-        var userMessages = history.Where(h => string.Equals(h.role, "user", StringComparison.OrdinalIgnoreCase))
-            .Select(h => h.content.Trim())
-            .Where(x => x.Length > 0)
-            .TakeLast(3)
-            .ToList();
-
-        var assistantMessages = history.Where(h => string.Equals(h.role, "assistant", StringComparison.OrdinalIgnoreCase))
-            .Select(h => h.content.Trim())
-            .Where(x => x.Length > 0)
-            .TakeLast(2)
-            .ToList();
-
-        var lines = new List<string>();
-        if (userMessages.Count > 0)
-            lines.Add("- user: " + string.Join(" | ", userMessages.Select(TrimForSummary)));
-        if (assistantMessages.Count > 0)
-            lines.Add("- assistant: " + string.Join(" | ", assistantMessages.Select(TrimForSummary)));
-
-        return lines.Count == 0 ? "- no conversation content to summarize" : string.Join("\n", lines);
-    }
-
-    private static string TrimForSummary(string text)
-    {
-        const int max = 90;
-        return text.Length <= max ? text : text[..max] + "...";
     }
 
     public async Task<bool> IsModelAvailableAsync(string model, CancellationToken ct = default)

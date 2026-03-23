@@ -23,18 +23,18 @@
     </WindowChrome.WindowChrome>
 
     <Window.Resources>
-        <SolidColorBrush x:Key="BgPrimaryBrush" Color="#111318"/>
-        <SolidColorBrush x:Key="BgSecondaryBrush" Color="#181B22"/>
-        <SolidColorBrush x:Key="BgInputBrush" Color="#1E222B"/>
-        <SolidColorBrush x:Key="BorderBrush" Color="#2A2F3A"/>
+        <SolidColorBrush x:Key="BgPrimaryBrush" Color="#110E18"/>
+        <SolidColorBrush x:Key="BgSecondaryBrush" Color="#171320"/>
+        <SolidColorBrush x:Key="BgInputBrush" Color="#21192F"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#3A3150"/>
         <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E8EAED"/>
-        <SolidColorBrush x:Key="TextMutedBrush" Color="#9AA0AC"/>
-        <SolidColorBrush x:Key="AccentBrushRes" Color="#7C6AEF"/>
+        <SolidColorBrush x:Key="TextMutedBrush" Color="#B8AFCB"/>
+        <SolidColorBrush x:Key="AccentBrushRes" Color="#9B7BFF"/>
 
         <Style x:Key="SectionHeader" TargetType="TextBlock">
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Foreground" Value="#A78BFA"/>
+            <Setter Property="Foreground" Value="#C4B5FD"/>
             <Setter Property="Margin" Value="0,0,0,8"/>
         </Style>
 
@@ -50,13 +50,8 @@
             <Setter Property="Margin" Value="0,0,0,4"/>
         </Style>
 
-        <Style x:Key="CardBorder" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource BgSecondaryBrush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Padding" Value="16,14"/>
-            <Setter Property="Margin" Value="0,0,0,12"/>
+        <Style x:Key="SectionPanel" TargetType="StackPanel">
+            <Setter Property="Margin" Value="0,0,0,18"/>
         </Style>
 
         <Style x:Key="SettingsTextBox" TargetType="TextBox">
@@ -199,7 +194,7 @@
             </Setter>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#3A3D4A"/>
+                    <Setter Property="Background" Value="#3A3154"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -298,8 +293,24 @@
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="14,10,14,0">
                 <StackPanel>
-                    <Border Style="{StaticResource CardBorder}">
-                        <StackPanel>
+                    <StackPanel Style="{StaticResource SectionPanel}">
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Platform"/>
+                            <TextBlock Style="{StaticResource FieldHint}"
+                                       Text="Discord uses the Node bridge. VRChat voice uses your local microphone path and a virtual audio cable or routed output device."
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,10"/>
+
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Target Platform"/>
+                                <ComboBox Style="{StaticResource SettingsComboBox}"
+                                          SelectedIndex="{Binding VoicePlatformIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="Discord"/>
+                                    <ComboBoxItem Content="VRChat"/>
+                                </ComboBox>
+                            </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Style="{StaticResource SectionPanel}">
                             <TextBlock Style="{StaticResource SectionHeader}" Text="Discord Voice Integration"/>
                             <TextBlock Style="{StaticResource FieldHint}"
                                        Text="Discord token / guild / channel IDs are handled from discord-voice-bridge/.env"
@@ -310,28 +321,28 @@
                                     HorizontalAlignment="Left"
                                     Padding="12,6"
                                     Margin="0,0,0,10"
+                                    IsEnabled="{Binding IsDiscordPlatform}"
                                     Click="OpenDiscordEnv_Click"/>
 
                             <StackPanel>
                                 <TextBlock Style="{StaticResource FieldLabel}" Text="STT Mode"/>
-                                <TextBlock Style="{StaticResource FieldHint}" Text="Cloud AssemblyAI (fixed)"/>
+                                <TextBlock Style="{StaticResource FieldHint}" Text="Configured in main Settings window (AssemblyAI or Groq Whisper)"/>
                             </StackPanel>
 
                             <StackPanel Margin="0,8,0,0">
                                 <TextBlock Style="{StaticResource FieldLabel}" Text="Translation Strategy"/>
                                 <ComboBox x:Name="CmbDiscordTranslationStrategy"
                                           Style="{StaticResource SettingsComboBox}"
+                                          IsEnabled="{Binding IsDiscordPlatform}"
                                           SelectedIndex="{Binding DiscordTranslationStrategyIndex, Mode=TwoWay}">
                                     <ComboBoxItem Content="Translate Input to Japanese"/>
                                     <ComboBoxItem Content="Translate Response to Japanese"/>
                                     <ComboBoxItem Content="Bilingual - No Translation"/>
                                 </ComboBox>
                             </StackPanel>
-                        </StackPanel>
-                    </Border>
+                    </StackPanel>
 
-                    <Border Style="{StaticResource CardBorder}">
-                        <StackPanel>
+                    <StackPanel Style="{StaticResource SectionPanel}">
                             <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Audio Devices"/>
                             <Grid Margin="0,0,0,8">
                                 <Grid.ColumnDefinitions>
@@ -358,17 +369,20 @@
                                               SelectedValue="{Binding VoiceChatOutputDeviceNumber}"/>
                                 </StackPanel>
                             </Grid>
-                        </StackPanel>
-                    </Border>
+                    </StackPanel>
 
-                    <Border Style="{StaticResource CardBorder}">
-                        <StackPanel>
+                    <StackPanel Style="{StaticResource SectionPanel}">
                             <TextBlock Style="{StaticResource SectionHeader}" Text="Local Microphone Input"/>
+                            <TextBlock Style="{StaticResource FieldHint}"
+                                       Text="For VRChat, keep this enabled and route Tsuki's output to a virtual microphone or cable device that VRChat listens to."
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,10"/>
                             <StackPanel Margin="0,0,0,12">
                                 <CheckBox x:Name="UseMicrophoneToggle"
                                           Style="{StaticResource SettingsCheckBox}"
                                           Content="Use Local Microphone (instead of Discord)"
                                           IsChecked="{Binding UseMicrophoneInput}"
+                                          IsEnabled="{Binding IsDiscordPlatform}"
                                           Margin="0,0,0,8"/>
                             </StackPanel>
 
@@ -399,18 +413,57 @@
                                     Padding="12,0"
                                     IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"
                                     Margin="0,4,0,0"/>
-                        </StackPanel>
-                    </Border>
+                    </StackPanel>
 
-                    <Border Style="{StaticResource CardBorder}">
-                        <StackPanel>
+                    <StackPanel Style="{StaticResource SectionPanel}">
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="VRChat Routing"/>
+                            <TextBlock Style="{StaticResource FieldHint}"
+                                       Text="VRChat does not expose direct voice-bot injection. The practical setup is: your mic into Tsuki, Tsuki TTS to a virtual audio output, and VRChat listening to that routed device."
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,10"/>
+
+                            <StackPanel Margin="0,0,0,8">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="OSC Host"/>
+                                <TextBox Style="{StaticResource SettingsTextBox}"
+                                         Text="{Binding VrChatOscHost, Mode=TwoWay}"
+                                         IsEnabled="{Binding IsVrChatPlatform}"/>
+                            </StackPanel>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="VRChat Inbound Port"/>
+                                    <TextBox Style="{StaticResource SettingsTextBox}"
+                                             Text="{Binding VrChatOscInputPortText, Mode=TwoWay}"
+                                             IsEnabled="{Binding IsVrChatPlatform}"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="VRChat Outbound Port"/>
+                                    <TextBox Style="{StaticResource SettingsTextBox}"
+                                             Text="{Binding VrChatOscOutputPortText, Mode=TwoWay}"
+                                             IsEnabled="{Binding IsVrChatPlatform}"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <CheckBox Style="{StaticResource SettingsCheckBox}"
+                                      Content="Enable VRChat chatbox fallback for text responses later"
+                                      IsChecked="{Binding VrChatUseChatboxFallback}"
+                                      IsEnabled="{Binding IsVrChatPlatform}"/>
+                    </StackPanel>
+
+                    <StackPanel Style="{StaticResource SectionPanel}">
                             <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Chat History"/>
                             <Button Click="ClearVoiceChatHistory_Click"
                                     Style="{StaticResource SettingsButton}"
                                     HorizontalAlignment="Left"
                                     Content="Clear voice chat history"/>
-                        </StackPanel>
-                    </Border>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
 

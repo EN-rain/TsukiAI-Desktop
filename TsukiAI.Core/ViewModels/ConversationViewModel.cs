@@ -144,7 +144,7 @@ public sealed class ConversationViewModel : INotifyPropertyChanged
     {
         try
         {
-            ConversationHistoryService.SaveChatHistory(_context, _conversationText);
+            ConversationHistoryService.SaveChatHistoryAsync(_context, _conversationText).GetAwaiter().GetResult();
         }
         catch (Exception ex)
         {
@@ -160,7 +160,7 @@ public sealed class ConversationViewModel : INotifyPropertyChanged
     {
         try
         {
-            var history = ConversationHistoryService.LoadChatHistory();
+            var history = ConversationHistoryService.LoadChatHistoryAsync().GetAwaiter().GetResult();
             if (history != null)
             {
                 _context.Clear();

@@ -383,3 +383,35 @@ public sealed class InferenceServerUnreachableException : InferenceException
     public InferenceServerUnreachableException(string serverType, Exception inner)
         : base($"{serverType} server not responding. Ensure {serverType} is running and accessible.", inner) { }
 }
+
+/// <summary>
+/// Exception thrown when an API rate limit (429 Too Many Requests) is encountered.
+/// </summary>
+/// <remarks>
+/// This exception indicates that the inference provider has rate-limited the requests.
+/// When using multiple providers, this triggers automatic switching to the next available provider.
+/// 
+/// <para><strong>When Thrown:</strong></para>
+/// <list type="bullet">
+///   <item>When HTTP 429 (Too Many Requests) response is received from the API</item>
+///   <item>When free tier rate limits are exceeded</item>
+///   <item>When request quota for the current time window is exhausted</item>
+/// </list>
+/// 
+/// <para><strong>Recovery Actions:</strong></para>
+/// <list type="bullet">
+///   <item>System automatically switches to next provider if multi-provider mode is enabled</item>
+///   <item>Wait for rate limit window to reset (typically 1 minute to 1 hour)</item>
+///   <item>Upgrade to paid tier for higher rate limits</item>
+///   <item>Enable multi-provider mode to distribute load across multiple APIs</item>
+/// </list>
+/// </remarks>
+public sealed class InferenceRateLimitException : InferenceException
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="InferenceRateLimitException"/> class with a specified error message.
+    /// </summary>
+    /// <param name="message">A description of the rate limit error that occurred.</param>
+    public InferenceRateLimitException(string message)
+        : base($"Rate limit exceeded: {message}") { }
+}

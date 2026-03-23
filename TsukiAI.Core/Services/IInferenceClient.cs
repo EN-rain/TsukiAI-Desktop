@@ -52,7 +52,8 @@ public interface IInferenceClient : IDisposable
         string? preferredEmotion = null,
         IReadOnlyList<(string role, string content)>? history = null,
         CancellationToken ct = default,
-        string? systemInstructions = null);
+        string? systemInstructions = null,
+        string? correlationId = null);
     
     /// <summary>
     /// Generates a chat response with emotion detection (streaming).
@@ -72,17 +73,8 @@ public interface IInferenceClient : IDisposable
         IReadOnlyList<(string role, string content)>? history = null,
         Action<string>? onPartialReply = null,
         CancellationToken ct = default,
-        string? systemInstructions = null);
-    
-    /// <summary>
-    /// Summarizes conversation history into a concise summary.
-    /// </summary>
-    /// <param name="history">The conversation history to summarize.</param>
-    /// <param name="ct">Cancellation token to cancel the summarization operation. When cancelled, throws <see cref="OperationCanceledException"/>. Defaults to <see cref="CancellationToken.None"/>.</param>
-    /// <returns>A concise summary of the conversation.</returns>
-    Task<string> SummarizeConversationAsync(
-        IReadOnlyList<(string role, string content)> history,
-        CancellationToken ct = default);
+        string? systemInstructions = null,
+        string? correlationId = null);
     
     /// <summary>
     /// Sets the model to use for inference.

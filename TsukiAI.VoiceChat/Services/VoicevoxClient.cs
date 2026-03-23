@@ -1,6 +1,9 @@
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
+using Polly;
+using Polly.Retry;
+using TsukiAI.Core.Services;
 
 namespace TsukiAI.VoiceChat.Services;
 
@@ -11,6 +14,29 @@ public sealed class VoicevoxClient : IDisposable
     private readonly Dictionary<string, byte[]> _wavCache = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _wavCacheLru = new();
     private const int WavCacheMaxEntries = 50;
+    
+    // Resilience policy for TTS synthesis
+    private static readonly ResiliencePipeline<HttpResponseMessage> TtsRetryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+        .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
+        {
+            MaxRetryAttempts = 2,
+            Delay = TimeSpan.FromMilliseconds(500),
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true,
+            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                .HandleResult(r => 
+                    r.StatusCode == System.Net.HttpStatusCode.TooManyRequests ||
+                    r.StatusCode == System.Net.HttpStatusCode.RequestTimeout ||
+                    (int)r.StatusCode >= 500)
+                .Handle<HttpRequestException>()
+                .Handle<TaskCanceledException>(ex => !ex.CancellationToken.IsCancellationRequested),
+            OnRetry = args =>
+            {
+                DevLog.WriteLine($"VoicevoxClient[Retry]: attempt={args.AttemptNumber}, delay={args.RetryDelay.TotalMilliseconds:F0}ms");
+                return ValueTask.CompletedTask;
+            }
+        })
+        .Build();
 
     public string BaseUrl { get; private set; }
 
@@ -28,7 +54,7 @@ public sealed class VoicevoxClient : IDisposable
         try { old.Dispose(); } catch { }
     }
 
-    public async Task<byte[]> SynthesizeWavAsync(string text, int speakerStyleId, CancellationToken ct)
+    public async Task<byte[]> SynthesizeWavAsync(string text, int speakerStyleId, CancellationToken ct, string? correlationId = null)
     {
         text = (text ?? "").Trim();
         if (text.Length == 0) return Array.Empty<byte>();
@@ -38,7 +64,17 @@ public sealed class VoicevoxClient : IDisposable
             return cached;
 
         var queryUrl = $"/audio_query?text={Uri.EscapeDataString(text)}&speaker={speakerStyleId}";
-        using var queryResp = await _http.PostAsync(queryUrl, content: null, ct);
+        
+        // Wrap query call with retry policy
+        using var queryResp = await TtsRetryPipeline.ExecuteAsync(
+            async ct =>
+            {
+                using var queryRequest = new HttpRequestMessage(HttpMethod.Post, queryUrl);
+                if (!string.IsNullOrWhiteSpace(correlationId))
+                    queryRequest.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
+                return await _http.SendAsync(queryRequest, ct);
+            },
+            ct);
         queryResp.EnsureSuccessStatusCode();
 
         var queryJson = await queryResp.Content.ReadAsStringAsync(ct);
@@ -50,8 +86,13 @@ public sealed class VoicevoxClient : IDisposable
             Content = new StringContent(queryJson, Encoding.UTF8, "application/json")
         };
         synthReq.Headers.TryAddWithoutValidation("accept", "audio/wav");
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            synthReq.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
 
-        using var synthResp = await _http.SendAsync(synthReq, HttpCompletionOption.ResponseHeadersRead, ct);
+        // Wrap synthesis call with retry policy
+        using var synthResp = await TtsRetryPipeline.ExecuteAsync(
+            async ct => await _http.SendAsync(synthReq, HttpCompletionOption.ResponseHeadersRead, ct),
+            ct);
         synthResp.EnsureSuccessStatusCode();
 
         var wav = await synthResp.Content.ReadAsByteArrayAsync(ct);

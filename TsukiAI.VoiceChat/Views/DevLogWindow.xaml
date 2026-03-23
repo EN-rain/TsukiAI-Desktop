@@ -11,6 +11,7 @@
         Background="Transparent"
         AllowsTransparency="True"
         WindowStyle="None"
+        FlowDirection="LeftToRight"
         Foreground="#E8EAED"
         FontFamily="Segoe UI">
     <shell:WindowChrome.WindowChrome>
@@ -23,13 +24,13 @@
     </shell:WindowChrome.WindowChrome>
 
     <Window.Resources>
-        <Color x:Key="BgDeep">#111318</Color>
-        <Color x:Key="BgCard">#181B22</Color>
-        <Color x:Key="BgInput">#1E222B</Color>
-        <Color x:Key="Border">#2A2F3A</Color>
+        <Color x:Key="BgDeep">#110E18</Color>
+        <Color x:Key="BgCard">#171320</Color>
+        <Color x:Key="BgInput">#21192F</Color>
+        <Color x:Key="Border">#3A3150</Color>
         <Color x:Key="TextPrimary">#E8EAED</Color>
-        <Color x:Key="TextSecondary">#9AA0AC</Color>
-        <Color x:Key="Accent">#7C6AEF</Color>
+        <Color x:Key="TextSecondary">#B8AFCB</Color>
+        <Color x:Key="Accent">#9B7BFF</Color>
 
         <SolidColorBrush x:Key="BgDeepBrush" Color="{StaticResource BgDeep}"/>
         <SolidColorBrush x:Key="BgCardBrush" Color="{StaticResource BgCard}"/>
@@ -58,7 +59,7 @@
             </Setter>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#2A2F3A"/>
+                    <Setter Property="Background" Value="#2F2740"/>
                     <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                 </Trigger>
             </Style.Triggers>
@@ -122,7 +123,7 @@
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0"
-                        Background="#1E222B"
+                        Background="#21192F"
                         BorderBrush="{StaticResource BorderBrush}"
                         BorderThickness="0,0,0,1"
                         Padding="12,0"
@@ -162,19 +163,19 @@
                             BorderBrush="{StaticResource BorderBrush}"
                             BorderThickness="1"
                             CornerRadius="12">
-                        <TextBox x:Name="LogBox"
-                                 IsReadOnly="True"
-                                 TextWrapping="Wrap"
-                                 VerticalScrollBarVisibility="Auto"
-                                 HorizontalScrollBarVisibility="Disabled"
-                                 AcceptsReturn="True"
-                                 FontFamily="Consolas, Segoe UI"
-                                 FontSize="11"
-                                 Foreground="{StaticResource TextPrimaryBrush}"
-                                 Background="Transparent"
-                                 BorderThickness="0"
-                                 Padding="12"
-                                 ScrollViewer.CanContentScroll="False"/>
+                        <ScrollViewer x:Name="LogScrollViewer"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      CanContentScroll="False"
+                                      Padding="12"
+                                      FlowDirection="LeftToRight"
+                                      Background="Transparent">
+                            <TextBlock x:Name="LogTextBlock"
+                                       TextWrapping="Wrap"
+                                       FontFamily="Consolas, Segoe UI"
+                                       FontSize="11"
+                                       Foreground="{StaticResource TextPrimaryBrush}"/>
+                        </ScrollViewer>
                     </Border>
 
                     <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">

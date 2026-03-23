@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Net.Sockets;
 using NAudio.Wave;
 using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
@@ -31,12 +32,18 @@ public partial class VoiceChatSettingsWindow : Window
             VoiceChatOutputDeviceNumber = _initialSettings.VoiceChatOutputDeviceNumber,
             InputDevices                = GetInputDevices(),
             OutputDevices               = GetOutputDevices(),
+            VoicePlatformIndex          = (int)_initialSettings.VoicePlatform,
             DiscordTranslationStrategyIndex = (int)_initialSettings.DiscordTranslationStrategy,
             UseMicrophoneInput          = _initialSettings.UseMicrophoneInput,
-            MicrophonePushToTalk        = _initialSettings.MicrophonePushToTalk
+            MicrophonePushToTalk        = _initialSettings.MicrophonePushToTalk,
+            VrChatOscHost               = _initialSettings.VrChatOscHost,
+            VrChatOscInputPortText      = _initialSettings.VrChatOscInputPort.ToString(),
+            VrChatOscOutputPortText     = _initialSettings.VrChatOscOutputPort.ToString(),
+            VrChatUseChatboxFallback    = _initialSettings.VrChatUseChatboxFallback
         };
 
         DataContext = _viewModel;
+        _viewModel.ApplyPlatformDefaults();
         PopulateMicrophoneDevices(_initialSettings.MicrophoneDeviceId);
     }
 
@@ -90,17 +97,24 @@ public partial class VoiceChatSettingsWindow : Window
     {
         Result = _initialSettings with
         {
-            SttMode                     = SttMode.CloudAssemblyAI,
+            // Preserve STT mode selected in main settings instead of forcing AssemblyAI.
+            SttMode                     = _initialSettings.SttMode,
+            VoicePlatform               = (VoiceIntegrationPlatform)_viewModel.VoicePlatformIndex,
             DiscordTranslationStrategy  = (TranslationStrategy)_viewModel.DiscordTranslationStrategyIndex,
             VoiceChatInputDeviceNumber  = _viewModel.VoiceChatInputDeviceNumber,
             VoiceChatOutputDeviceNumber = _viewModel.VoiceChatOutputDeviceNumber,
             VoiceOutputDeviceNumber     = _viewModel.VoiceChatOutputDeviceNumber,
             UseMicrophoneInput          = _viewModel.UseMicrophoneInput,
             MicrophonePushToTalk        = _viewModel.MicrophonePushToTalk,
-            MicrophoneDeviceId          = GetSelectedMicrophoneDeviceId()
+            MicrophoneDeviceId          = GetSelectedMicrophoneDeviceId(),
+            VrChatOscHost               = NormalizeVrChatHost(_viewModel.VrChatOscHost),
+            VrChatOscInputPort          = ParsePort(_viewModel.VrChatOscInputPortText, 9000),
+            VrChatOscOutputPort         = ParsePort(_viewModel.VrChatOscOutputPortText, 9001),
+            VrChatUseChatboxFallback    = _viewModel.VrChatUseChatboxFallback
         };
 
         SettingsService.Save(Result);
+        UpdateDiscordBridgeEnv(Result.SttMode, Result.GroqApiKey, Result.SttLanguageCode);
         DialogResult = true;
         Close();
     }
@@ -213,6 +227,140 @@ public partial class VoiceChatSettingsWindow : Window
         return null;
     }
 
+    private static void UpdateDiscordBridgeEnv(SttMode sttMode, string groqApiKey, string sttLanguageCode)
+    {
+        var bridgeWasRunning = IsBridgeServerRunning();
+
+        try
+        {
+            var envPath = FindDiscordBridgeEnvPath();
+            if (envPath is null || !File.Exists(envPath))
+            {
+                DevLog.WriteLine("VoiceChatSettingsWindow: .env file not found");
+                return;
+            }
+
+            var lines = File.ReadAllLines(envPath).ToList();
+            var sttModeValue = sttMode == SttMode.CloudGroqWhisper ? "groq" : "assemblyai";
+
+            var sttModeIndex = lines.FindIndex(l => l.StartsWith("STT_MODE="));
+            if (sttModeIndex >= 0)
+                lines[sttModeIndex] = $"STT_MODE={sttModeValue}";
+            else
+                lines.Insert(0, $"STT_MODE={sttModeValue}");
+
+            if (sttMode == SttMode.CloudGroqWhisper && !string.IsNullOrWhiteSpace(groqApiKey))
+            {
+                var groqKeyIndex = lines.FindIndex(l => l.StartsWith("GROQ_API_KEY="));
+                if (groqKeyIndex >= 0)
+                    lines[groqKeyIndex] = $"GROQ_API_KEY={groqApiKey}";
+                else
+                    lines.Add($"GROQ_API_KEY={groqApiKey}");
+            }
+
+            var languageCode = NormalizeSttLanguageCode(sttLanguageCode);
+            var sttLangIndex = lines.FindIndex(l => l.StartsWith("STT_LANGUAGE="));
+            if (sttLangIndex >= 0)
+                lines[sttLangIndex] = $"STT_LANGUAGE={languageCode}";
+            else
+                lines.Add($"STT_LANGUAGE={languageCode}");
+
+            File.WriteAllLines(envPath, lines);
+            DevLog.WriteLine($"VoiceChatSettingsWindow: Updated STT_MODE to {sttModeValue}, STT_LANGUAGE to {languageCode}");
+            RestartBridgeIfNeeded(bridgeWasRunning, envPath);
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine($"VoiceChatSettingsWindow: Failed to update .env: {ex.Message}");
+        }
+    }
+
+    private static bool IsBridgeServerRunning()
+    {
+        try
+        {
+            using var client = new TcpClient();
+            var connectTask = client.ConnectAsync("127.0.0.1", 3001);
+            return connectTask.Wait(300) && client.Connected;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void RestartBridgeIfNeeded(bool bridgeWasRunning, string envPath)
+    {
+        if (!bridgeWasRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            MainWindow.StopBridgeProcessesOnShutdown();
+            var bridgeDir = Path.GetDirectoryName(envPath);
+            if (string.IsNullOrWhiteSpace(bridgeDir) || !Directory.Exists(bridgeDir))
+            {
+                return;
+            }
+
+            var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/c npm start",
+                WorkingDirectory = bridgeDir,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            });
+
+            if (process is null)
+            {
+                DevLog.WriteLine("VoiceChatSettingsWindow: Failed to restart bridge process");
+                return;
+            }
+
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                    DevLog.WriteLine("[Bridge] " + e.Data);
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                    DevLog.WriteLine("[Bridge:ERR] " + e.Data);
+            };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            DevLog.WriteLine("VoiceChatSettingsWindow: Restarted bridge to apply new STT mode");
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine($"VoiceChatSettingsWindow: Bridge restart failed: {ex.Message}");
+        }
+    }
+
+    private static string NormalizeSttLanguageCode(string? languageCode)
+    {
+        var code = (languageCode ?? string.Empty).Trim().ToLowerInvariant();
+        return string.IsNullOrWhiteSpace(code) ? "auto" : code;
+    }
+
+    private static string NormalizeVrChatHost(string? host)
+    {
+        var normalized = (host ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? "127.0.0.1" : normalized;
+    }
+
+    private static int ParsePort(string? raw, int fallback)
+    {
+        return int.TryParse((raw ?? string.Empty).Trim(), out var parsed) && parsed > 0 && parsed <= 65535
+            ? parsed
+            : fallback;
+    }
+
 }
 
 // =========================================================================
@@ -226,13 +374,111 @@ public class SettingsVm : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
+    private int _voicePlatformIndex;
+    private bool _useMicrophoneInput;
+    private bool _microphonePushToTalk;
+    private string _vrChatOscHost = "127.0.0.1";
+    private string _vrChatOscInputPortText = "9000";
+    private string _vrChatOscOutputPortText = "9001";
+    private bool _vrChatUseChatboxFallback;
+
     public int VoiceChatInputDeviceNumber  { get; set; } = -1;
     public int VoiceChatOutputDeviceNumber { get; set; } = -1;
     public List<AudioDeviceItem> InputDevices  { get; set; } = new();
     public List<AudioDeviceItem> OutputDevices { get; set; } = new();
     public int  DiscordTranslationStrategyIndex { get; set; }
-    public bool UseMicrophoneInput   { get; set; }
-    public bool MicrophonePushToTalk { get; set; }
+
+    public int VoicePlatformIndex
+    {
+        get => _voicePlatformIndex;
+        set
+        {
+            if (_voicePlatformIndex == value) return;
+            _voicePlatformIndex = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsDiscordPlatform));
+            OnPropertyChanged(nameof(IsVrChatPlatform));
+            ApplyPlatformDefaults();
+        }
+    }
+
+    public bool IsDiscordPlatform => VoicePlatformIndex == (int)VoiceIntegrationPlatform.Discord;
+    public bool IsVrChatPlatform => VoicePlatformIndex == (int)VoiceIntegrationPlatform.VrChat;
+
+    public bool UseMicrophoneInput
+    {
+        get => _useMicrophoneInput;
+        set
+        {
+            var forcedValue = IsVrChatPlatform ? true : value;
+            if (_useMicrophoneInput == forcedValue) return;
+            _useMicrophoneInput = forcedValue;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool MicrophonePushToTalk
+    {
+        get => _microphonePushToTalk;
+        set
+        {
+            if (_microphonePushToTalk == value) return;
+            _microphonePushToTalk = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string VrChatOscHost
+    {
+        get => _vrChatOscHost;
+        set
+        {
+            if (_vrChatOscHost == value) return;
+            _vrChatOscHost = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string VrChatOscInputPortText
+    {
+        get => _vrChatOscInputPortText;
+        set
+        {
+            if (_vrChatOscInputPortText == value) return;
+            _vrChatOscInputPortText = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string VrChatOscOutputPortText
+    {
+        get => _vrChatOscOutputPortText;
+        set
+        {
+            if (_vrChatOscOutputPortText == value) return;
+            _vrChatOscOutputPortText = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool VrChatUseChatboxFallback
+    {
+        get => _vrChatUseChatboxFallback;
+        set
+        {
+            if (_vrChatUseChatboxFallback == value) return;
+            _vrChatUseChatboxFallback = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public void ApplyPlatformDefaults()
+    {
+        if (IsVrChatPlatform)
+        {
+            UseMicrophoneInput = true;
+        }
+    }
 }
 
 public sealed class AudioDeviceItem

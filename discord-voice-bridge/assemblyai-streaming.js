@@ -1,5 +1,15 @@
 import axios from 'axios';
 
+const POLL_INITIAL_MS = parseInt(process.env.ASSEMBLYAI_POLL_INITIAL_MS || '500', 10);
+const POLL_MAX_MS = parseInt(process.env.ASSEMBLYAI_POLL_MAX_MS || '3000', 10);
+const POLL_MULTIPLIER = parseFloat(process.env.ASSEMBLYAI_POLL_MULTIPLIER || '1.5');
+const POLL_MAX_ATTEMPTS = parseInt(process.env.ASSEMBLYAI_POLL_MAX_ATTEMPTS || '30', 10);
+
+function withJitter(delayMs, jitterRatio = 0.15) {
+  const factor = 1 + ((Math.random() * 2 - 1) * jitterRatio);
+  return Math.max(50, Math.floor(delayMs * factor));
+}
+
 /**
  * Convert PCM audio to WAV format
  * @param {Buffer} pcmBuffer - Raw PCM audio data
@@ -45,9 +55,10 @@ function pcmToWav(pcmBuffer, sampleRate = 48000, channels = 2, bitsPerSample = 1
  * @param {string} apiKey - AssemblyAI API key
  * @param {Buffer} audioBuffer - PCM audio buffer (48kHz stereo)
  * @param {number} sampleRate - Sample rate of the audio
+ * @param {string} sttLanguage - Language code (e.g. en, ja) or "auto"
  * @returns {Promise<{text: string, language: string, confidence: number}>}
  */
-export async function transcribeAudio(apiKey, audioBuffer, sampleRate = 48000) {
+export async function transcribeAudio(apiKey, audioBuffer, sampleRate = 48000, sttLanguage = 'auto') {
   try {
     // Convert PCM to WAV format
     const wavBuffer = pcmToWav(audioBuffer, sampleRate, 2, 16);
@@ -70,13 +81,19 @@ export async function transcribeAudio(apiKey, audioBuffer, sampleRate = 48000) {
     console.log('[AssemblyAI] Audio uploaded:', uploadUrl);
 
     // Step 2: Request transcription
+    const languageCode = (sttLanguage || 'auto').trim().toLowerCase();
+    const transcriptRequest = {
+      audio_url: uploadUrl,
+      speech_models: ['universal'],
+      language_detection: languageCode === 'auto',
+    };
+    if (languageCode !== 'auto') {
+      transcriptRequest.language_code = languageCode;
+    }
+
     const transcriptResponse = await axios.post(
       'https://api.assemblyai.com/v2/transcript',
-      {
-        audio_url: uploadUrl,
-        language_detection: true,
-        speech_models: ['universal-2'], // Use universal-2 model
-      },
+      transcriptRequest,
       {
         headers: {
           'authorization': apiKey,
@@ -92,10 +109,10 @@ export async function transcribeAudio(apiKey, audioBuffer, sampleRate = 48000) {
     // Step 3: Poll for completion
     let transcript = null;
     let attempts = 0;
-    const maxAttempts = 60; // 60 seconds max wait
+    let delayMs = Math.max(100, POLL_INITIAL_MS);
 
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+    while (attempts < POLL_MAX_ATTEMPTS) {
+      await new Promise(resolve => setTimeout(resolve, withJitter(delayMs)));
 
       const statusResponse = await axios.get(
         `https://api.assemblyai.com/v2/transcript/${transcriptId}`,
@@ -117,6 +134,7 @@ export async function transcribeAudio(apiKey, audioBuffer, sampleRate = 48000) {
       }
 
       attempts++;
+      delayMs = Math.min(Math.floor(delayMs * POLL_MULTIPLIER), Math.max(POLL_INITIAL_MS, POLL_MAX_MS));
     }
 
     if (!transcript || transcript.status !== 'completed') {

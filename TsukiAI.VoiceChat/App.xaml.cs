@@ -23,43 +23,94 @@ public partial class App : System.Windows.Application
     private ServiceProvider? _serviceProvider;
     private WebApplication? _webApp;
     private CancellationTokenSource? _webAppCts;
+    private readonly List<Task> _backgroundTasks = new();
     public static IReadOnlyList<EnvVarStatus> EnvStatus { get; private set; } = Array.Empty<EnvVarStatus>();
+
+    private void RunBackground(string operation, Func<Task> work)
+    {
+        var task = Task.Run(async () =>
+        {
+            try
+            {
+                await work();
+            }
+            catch (Exception ex)
+            {
+                DevLog.WriteLine("App: background task '{0}' failed: {1}", operation, ex.GetBaseException().Message);
+            }
+        });
+
+        lock (_backgroundTasks)
+        {
+            _backgroundTasks.Add(task);
+        }
+    }
+
+    private Task[] SnapshotBackgroundTasks()
+    {
+        lock (_backgroundTasks)
+        {
+            _backgroundTasks.RemoveAll(t => t.IsCompleted);
+            return _backgroundTasks.ToArray();
+        }
+    }
 
     public static void ConfigureServices(IServiceCollection services, AppSettings settings)
     {
         var scriptPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "scripts", "semantic_memory_chroma.py"));
         var semanticMemory = new ChromaSqliteSemanticMemoryService(SettingsService.GetBaseDir(), scriptPath);
-        var summaryStore = new ConversationSummarySqliteStore(SettingsService.GetBaseDir());
         var generationTuning = settings.GetGenerationTuning();
-        var effectiveRemoteUrl = ResolveStartupRemoteUrl(settings.RemoteInferenceUrl);
-        var effectiveRemoteApiKey = ResolveEffectiveRemoteApiKey(settings, effectiveRemoteUrl);
+        
+        // Multi-provider support: resolve current provider from state
+        string effectiveRemoteUrl;
+        string effectiveRemoteApiKey;
+        string effectiveModelName;
+        
+        if (settings.UseMultipleAiProviders && !string.IsNullOrWhiteSpace(settings.MultiAiProvidersCsv))
+        {
+            var providerSwitcher = new ProviderSwitchingService();
+            var currentProvider = providerSwitcher.GetCurrentProvider(settings.MultiAiProvidersCsv);
+            effectiveRemoteUrl = ProviderSwitchingService.GetProviderUrl(currentProvider);
+            effectiveRemoteApiKey = ProviderSwitchingService.GetProviderApiKey(currentProvider, settings);
+            effectiveModelName = ProviderSwitchingService.GetProviderModel(currentProvider);
+            
+            DevLog.WriteLine($"App: Multi-provider mode enabled, using provider: {currentProvider}");
+            DevLog.WriteLine($"App: Provider URL: {effectiveRemoteUrl}");
+            DevLog.WriteLine($"App: Provider model: {effectiveModelName}");
+        }
+        else
+        {
+            effectiveRemoteUrl = ResolveStartupRemoteUrl(settings.RemoteInferenceUrl);
+            effectiveRemoteApiKey = ResolveEffectiveRemoteApiKey(settings, effectiveRemoteUrl);
+            effectiveModelName = settings.ModelName;
+        }
 
         IInferenceClient inferenceClient = settings.InferenceMode switch
         {
             InferenceMode.RemoteColab => new RemoteInferenceClient(
                 effectiveRemoteUrl,
                 effectiveRemoteApiKey,
-                settings.ModelName,
+                effectiveModelName,
                 semanticMemory,
-                summaryStore,
-                generationTuning),
-            _ => new OllamaClient(settings.ModelName, tuning: generationTuning)
+                generationTuning,
+                settings.ReplyTonePreset),
+            _ => new OllamaClient(settings.ModelName, tuning: generationTuning, replyTonePreset: settings.ReplyTonePreset)
         };
 
         services.AddSingleton(settings);
         services.AddSingleton<ISemanticMemoryService>(semanticMemory);
-        services.AddSingleton<IConversationSummaryStore>(summaryStore);
         services.AddSingleton<IInferenceClient>(inferenceClient);
-        services.AddSingleton<ConversationSummaryBackgroundService>();
         services.AddSingleton(new ConversationFormattingService("Tsuki", "User"));
         services.AddSingleton<ConversationViewModel>();
 
         // Voice-only services
         services.AddSingleton<VoiceConversationPipeline>();
+        services.AddSingleton<IVoiceConversationPipeline>(sp => sp.GetRequiredService<VoiceConversationPipeline>());
         services.AddSingleton(sp => new VoicevoxClient(sp.GetRequiredService<AppSettings>().VoicevoxBaseUrl));
         services.AddSingleton(sp => new VoicevoxEngineService(sp.GetRequiredService<AppSettings>().VoicevoxEnginePath));
         services.AddSingleton<TtsPlaybackService>();
         services.AddSingleton<WhisperService>();
+        services.AddSingleton<IWhisperService>(sp => sp.GetRequiredService<WhisperService>());
         services.AddSingleton<AudioRecordingService>();
         services.AddSingleton<AudioProcessingService>();
         services.AddSingleton<DiscordVoiceService>();
@@ -152,7 +203,7 @@ public partial class App : System.Windows.Application
         if (settings.VoiceRuntimeV2Enabled)
         {
             _serviceProvider.GetRequiredService<VoiceConversationPipeline>().Start();
-            _ = Task.Run(async () =>
+            RunBackground("voicevox_engine_start", async () =>
             {
                 try
                 {
@@ -166,14 +217,12 @@ public partial class App : System.Windows.Application
             });
         }
 
-        _ = Task.Run(async () =>
+        RunBackground("semantic_memory_ready", async () =>
         {
             try
             {
                 var ready = await _serviceProvider.GetRequiredService<ISemanticMemoryService>().EnsureReadyAsync();
                 DevLog.WriteLine("App: Semantic memory ready={0}", ready);
-                var summaryReady = await _serviceProvider.GetRequiredService<IConversationSummaryStore>().EnsureReadyAsync();
-                DevLog.WriteLine("App: Summary store ready={0}", summaryReady);
             }
             catch (Exception ex)
             {
@@ -181,33 +230,18 @@ public partial class App : System.Windows.Application
             }
         });
 
-        _ = Task.Run(StartHttpApiServerAsync);
+        RunBackground("http_api_server", StartHttpApiServerAsync);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         DevLog.WriteLine("App: OnExit called, shutting down...");
         
+        // Flush any pending history saves immediately
+        ConversationHistoryService.FlushAllPending();
+        
         // Ensure Discord bridge is terminated even if MainWindow cleanup was skipped.
         TsukiAI.VoiceChat.Views.MainWindow.StopBridgeProcessesOnShutdown();
-
-        try
-        {
-            var summarizer = _serviceProvider?.GetService<ConversationSummaryBackgroundService>();
-            if (summarizer is not null)
-            {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                var summaryTask = summarizer.TriggerVoiceSummaryIfNeededAsync("app_exit", cts.Token);
-                if (!summaryTask.Wait(TimeSpan.FromSeconds(5)))
-                {
-                    DevLog.WriteLine("App: exit summary job timed out.");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            DevLog.WriteLine("App: exit summary job failed: {0}", ex.Message);
-        }
 
         (_serviceProvider?.GetService<IInferenceClient>())?.Dispose();
         try
@@ -220,23 +254,22 @@ public partial class App : System.Windows.Application
             // best-effort shutdown
         }
         
-        // Stop the web server
+        // Stop the web server with async pattern
         try
         {
             _webAppCts?.Cancel();
             if (_webApp != null)
             {
                 using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var stopTask = _webApp.StopAsync(shutdownCts.Token);
-                if (!stopTask.Wait(TimeSpan.FromSeconds(4)))
+                var shutdownTasks = new List<Task>
                 {
-                    DevLog.WriteLine("App: web server stop timed out.");
-                }
-
-                var disposeTask = _webApp.DisposeAsync().AsTask();
-                if (!disposeTask.Wait(TimeSpan.FromSeconds(2)))
+                    _webApp.StopAsync(shutdownCts.Token),
+                    _webApp.DisposeAsync().AsTask()
+                };
+                
+                if (!Task.WaitAll(shutdownTasks.ToArray(), TimeSpan.FromSeconds(5)))
                 {
-                    DevLog.WriteLine("App: web server dispose timed out.");
+                    DevLog.WriteLine("App: web server shutdown timed out.");
                 }
             }
         }
@@ -248,12 +281,30 @@ public partial class App : System.Windows.Application
         {
             _webAppCts?.Dispose();
         }
+
+        // Give background startup tasks a short window to settle before disposing dependencies.
+        var backgroundTasks = SnapshotBackgroundTasks();
+        if (backgroundTasks.Length > 0)
+        {
+            try
+            {
+                if (!Task.WaitAll(backgroundTasks, TimeSpan.FromSeconds(2)))
+                {
+                    DevLog.WriteLine("App: background tasks did not finish before shutdown.");
+                }
+            }
+            catch (Exception ex)
+            {
+                DevLog.WriteLine("App: background task wait failed: {0}", ex.GetBaseException().Message);
+            }
+        }
         
         _serviceProvider?.Dispose();
+        lock (_backgroundTasks)
+        {
+            _backgroundTasks.Clear();
+        }
         base.OnExit(e);
-
-        // Ensure background workers cannot keep the hosting process alive.
-        Environment.Exit(0);
     }
 
     private async Task StartHttpApiServerAsync()
@@ -266,8 +317,8 @@ public partial class App : System.Windows.Application
         if (_serviceProvider is not null)
         {
             builder.Services.AddSingleton(_serviceProvider.GetRequiredService<AppSettings>());
-            builder.Services.AddSingleton(_serviceProvider.GetRequiredService<VoiceConversationPipeline>());
-            builder.Services.AddSingleton(_serviceProvider.GetRequiredService<WhisperService>());
+            builder.Services.AddSingleton(_serviceProvider.GetRequiredService<IVoiceConversationPipeline>());
+            builder.Services.AddSingleton(_serviceProvider.GetRequiredService<IWhisperService>());
         }
         _webApp = builder.Build();
         _webApp.MapControllers();
