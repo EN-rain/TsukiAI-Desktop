@@ -24,8 +24,8 @@ Updated: 2026-03-04
 ## Runtime Config Defaults
 
 ```env
-VAD_BATCHING_ENABLED=false
-VAD_FRAME_BATCH_SIZE=5
+VAD_BATCHING_ENABLED=true
+VAD_FRAME_BATCH_SIZE=8
 HTTP_KEEPALIVE_ENABLED=true
 HTTP_MAX_SOCKETS=10
 HTTP_MAX_FREE_SOCKETS=5
@@ -69,7 +69,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_perf_capture.ps1 -Mode ca
 | LLM latency | 400-900ms | 400-900ms | No change |
 | TTS latency | 1.5-3.6s | 1.5-3.6s | No change |
 | End-to-end total | 15-17s | 3-7s | -60% improvement |
-| VAD end-of-turn delay | 1500ms | 1000ms | -33% |
+| VAD end-of-turn delay | 1500ms | 650ms | -57% |
 | Error rate | TBD | 0% | No errors observed |
 
 ## Applied Optimizations (2026-03-05)
@@ -78,9 +78,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_perf_capture.ps1 -Mode ca
    - Reduced STT latency from 5-8s to 1.6-2.6s
    - Configuration: `STT_MODE=groq` in `.env`
 
-2. **VAD Tuning**: Reduced silence detection delays
-   - `VAD_END_OF_TURN_MS`: 1500ms → 1000ms
-   - `VAD_SILENCE_FRAMES`: 45 → 30 frames
+2. **VAD Tuning**: Reduced silence detection delays further
+   - `VAD_END_OF_TURN_MS`: 1500ms → 650ms
+   - `VAD_SILENCE_FRAMES`: 45 → 20 frames
+   - `VAD_BATCHING_ENABLED`: false → true
+   - `VAD_FRAME_BATCH_SIZE`: 5 → 8
 
 3. **Cloud TTS Disabled**: Eliminated 404 retry overhead
    - Set `TSUKI_CLOUD_TTS_URL=` (empty) to skip cloud TTS

@@ -27,7 +27,6 @@ public partial class SettingsWindow : Window
     public AppSettings Result { get; private set; }
     private readonly Action? _clearHistory;
     private readonly HashSet<string> _testedProviders = new(StringComparer.OrdinalIgnoreCase);
-    private bool _isCapturingVoiceReceptionKey;
 
     private static HttpClient CreateSharedHttpClient(TimeSpan timeout)
     {
@@ -83,17 +82,7 @@ public partial class SettingsWindow : Window
             RemoteInferenceApiKey = Result.RemoteInferenceApiKey ?? string.Empty,
             AiProvider = InferProviderFromUrl(Result.RemoteInferenceUrl),
             UseMultipleProviders = Result.UseMultipleAiProviders,
-            MultiAiProvidersCsv = Result.MultiAiProvidersCsv ?? string.Empty,
-            VoiceChatInputDeviceNumber = Result.VoiceChatInputDeviceNumber,
-            VoiceChatOutputDeviceNumber = Result.VoiceChatOutputDeviceNumber,
-            VoiceChatInputDevices = GetInputDevices(),
-            VoiceChatOutputDevices = GetVoiceChatOutputDevices(),
-            SttModeIndex = (int)Result.SttMode,
-            SttLanguageCode = NormalizeSttLanguageCode(Result.SttLanguageCode),
-            DiscordTranslationStrategyIndex = (int)Result.DiscordTranslationStrategy,
-            UseMicrophoneInput = Result.UseMicrophoneInput,
-            MicrophonePushToTalk = Result.MicrophonePushToTalk,
-            VoiceReceptionToggleKeyText = Result.VoiceReceptionToggleKey
+            MultiAiProvidersCsv = Result.MultiAiProvidersCsv ?? string.Empty
         };
         DataContext = vm;
 
@@ -135,7 +124,28 @@ public partial class SettingsWindow : Window
         UpdateProviderStatusIndicators();
         
         UpdateInferenceModeUi();
-        PopulateMicrophoneDevices(Result.MicrophoneDeviceId);
+    }
+
+    private void OpenVoiceSetup_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var window = new VoiceChatSettingsWindow { Owner = this };
+            var changed = window.ShowDialog();
+            if (changed == true)
+            {
+                Result = SettingsService.Load();
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                $"Voice Setup could not be opened.\n\n{ex.Message}",
+                "Settings",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 
 
@@ -183,49 +193,13 @@ public partial class SettingsWindow : Window
     {
         UpdateInferenceModeUi();
         ShowTab(0, animateIndicator: false); // Show Inference tab by default
-        UpdateVoiceReceptionCaptureUi();
         await AutoValidateCheckedProvidersAsync();
     }
 
 
     private void SettingsWindow_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (!_isCapturingVoiceReceptionKey || DataContext is not SettingsVm vm)
-        {
-            return;
-        }
-
-        var key = e.Key == System.Windows.Input.Key.System ? e.SystemKey : e.Key;
-        if (key is System.Windows.Input.Key.None
-            or System.Windows.Input.Key.LeftShift
-            or System.Windows.Input.Key.RightShift
-            or System.Windows.Input.Key.LeftCtrl
-            or System.Windows.Input.Key.RightCtrl
-            or System.Windows.Input.Key.LeftAlt
-            or System.Windows.Input.Key.RightAlt
-            or System.Windows.Input.Key.LWin
-            or System.Windows.Input.Key.RWin)
-        {
-            return;
-        }
-
-        if (key == System.Windows.Input.Key.Escape)
-        {
-            _isCapturingVoiceReceptionKey = false;
-            UpdateVoiceReceptionCaptureUi();
-            e.Handled = true;
-            return;
-        }
-
-        var detectedKey = key.ToString();
-        vm.VoiceReceptionToggleKeyText = detectedKey;
-        if (TxtVoiceReceptionToggleKey != null)
-        {
-            TxtVoiceReceptionToggleKey.Text = detectedKey;
-        }
-        _isCapturingVoiceReceptionKey = false;
-        UpdateVoiceReceptionCaptureUi();
-        e.Handled = true;
+        // Voice-chat hotkey capture moved to Voice Setup.
     }
 
 
@@ -351,7 +325,6 @@ public partial class SettingsWindow : Window
         var proactiveAfterMinutes = ParseIntOr(vm.ProactiveMessageAfterMinutesText, AppSettings.Default.ProactiveMessageAfterMinutes, 1, 1440);
         var proactiveMaxMinutes = ParseIntOr(vm.ProactiveMessageMaxMinutesText, AppSettings.Default.ProactiveMessageMaxMinutes, 1, 1440);
         var voiceStyleId = ParseIntOr(vm.VoicevoxSpeakerStyleIdText, AppSettings.Default.VoicevoxSpeakerStyleId, 0, 9999);
-        var voiceReceptionToggleKey = NormalizeKeyNameOr(vm.VoiceReceptionToggleKeyText, Result.VoiceReceptionToggleKey, "F8");
 
         if (proactiveMaxMinutes < proactiveAfterMinutes)
         {
@@ -437,24 +410,10 @@ public partial class SettingsWindow : Window
             GroqApiKey = updatedGroqApiKey,
             GeminiApiKey = updatedGeminiApiKey,
             GitHubApiKey = updatedGitHubApiKey,
-            MistralApiKey = updatedMistralApiKey,
-            
-            SttMode = (SttMode)vm.SttModeIndex,
-            SttLanguageCode = NormalizeSttLanguageCode(vm.SttLanguageCode),
-            DiscordTranslationStrategy = (TranslationStrategy)vm.DiscordTranslationStrategyIndex,
-            VoiceChatInputDeviceNumber = vm.VoiceChatInputDeviceNumber,
-            VoiceChatOutputDeviceNumber = vm.VoiceChatOutputDeviceNumber,
-            UseMicrophoneInput = vm.UseMicrophoneInput,
-            MicrophonePushToTalk = vm.MicrophonePushToTalk,
-            MicrophoneDeviceId = GetSelectedMicrophoneDeviceId()
-            ,
-            VoiceReceptionToggleKey = voiceReceptionToggleKey
+            MistralApiKey = updatedMistralApiKey
         };
 
         SettingsService.Save(Result);
-        
-        // Update discord-voice-bridge/.env with STT mode
-        UpdateDiscordBridgeEnv(Result.SttMode, Result.GroqApiKey, Result.SttLanguageCode);
 
         DialogResult = true;
         Close();
@@ -1375,174 +1334,6 @@ public partial class SettingsWindow : Window
             MessageBox.Show(this, $"Failed to restart application: {ex.Message}", "Restart Failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
-
-
-    private int GetSelectedMicrophoneDeviceId()
-    {
-        if (CmbMicrophoneDevice?.SelectedItem is ComboBoxItem item && item.Tag is int deviceId)
-            return deviceId;
-        return -1;
-    }
-
-
-    private void ClearVoiceChatHistory_Click(object sender, RoutedEventArgs e)
-    {
-        var confirm = MessageBox.Show(
-            "Are you sure you want to clear voice chat history?",
-            "Clear Voice Chat History",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
-
-        if (confirm != MessageBoxResult.Yes)
-            return;
-
-        ConversationHistoryService.ClearVoiceChatHistory();
-        MessageBox.Show("Voice chat history cleared.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
-
-    private static string? FindDiscordBridgeEnvPath()
-    {
-        var candidates = new[]
-        {
-            System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "discord-voice-bridge", ".env"),
-            System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "discord-voice-bridge", ".env")),
-            System.IO.Path.Combine(AppContext.BaseDirectory, "discord-voice-bridge", ".env")
-        };
-
-        foreach (var candidate in candidates)
-        {
-            var bridgeDir = System.IO.Path.GetDirectoryName(candidate);
-            if (!string.IsNullOrWhiteSpace(bridgeDir) && System.IO.Directory.Exists(bridgeDir))
-                return candidate;
-        }
-
-        return null;
-    }
-    
-    private static void UpdateDiscordBridgeEnv(SttMode sttMode, string groqApiKey, string sttLanguageCode)
-    {
-        var bridgeWasRunning = IsBridgeServerRunning();
-
-        try
-        {
-            var envPath = FindDiscordBridgeEnvPath();
-            if (envPath == null || !System.IO.File.Exists(envPath))
-            {
-                DevLog.WriteLine("UpdateDiscordBridgeEnv: .env file not found");
-                return;
-            }
-            
-            var lines = System.IO.File.ReadAllLines(envPath).ToList();
-            var sttModeValue = sttMode == SttMode.CloudGroqWhisper ? "groq" : "assemblyai";
-            
-            // Update or add STT_MODE
-            var sttModeIndex = lines.FindIndex(l => l.StartsWith("STT_MODE="));
-            if (sttModeIndex >= 0)
-                lines[sttModeIndex] = $"STT_MODE={sttModeValue}";
-            else
-                lines.Insert(0, $"STT_MODE={sttModeValue}");
-            
-            // Update or add GROQ_API_KEY if using Groq
-            if (sttMode == SttMode.CloudGroqWhisper && !string.IsNullOrWhiteSpace(groqApiKey))
-            {
-                var groqKeyIndex = lines.FindIndex(l => l.StartsWith("GROQ_API_KEY="));
-                if (groqKeyIndex >= 0)
-                    lines[groqKeyIndex] = $"GROQ_API_KEY={groqApiKey}";
-                else
-                    lines.Add($"GROQ_API_KEY={groqApiKey}");
-            }
-
-            var languageCode = NormalizeSttLanguageCode(sttLanguageCode);
-            var sttLangIndex = lines.FindIndex(l => l.StartsWith("STT_LANGUAGE="));
-            if (sttLangIndex >= 0)
-                lines[sttLangIndex] = $"STT_LANGUAGE={languageCode}";
-            else
-                lines.Add($"STT_LANGUAGE={languageCode}");
-            
-            System.IO.File.WriteAllLines(envPath, lines);
-            DevLog.WriteLine($"UpdateDiscordBridgeEnv: Updated STT_MODE to {sttModeValue}, STT_LANGUAGE to {languageCode}");
-            RestartBridgeIfNeeded(bridgeWasRunning, envPath);
-        }
-        catch (Exception ex)
-        {
-            DevLog.WriteLine($"UpdateDiscordBridgeEnv: Failed to update .env: {ex.Message}");
-        }
-    }
-
-    private static bool IsBridgeServerRunning()
-    {
-        try
-        {
-            using var client = new TcpClient();
-            var connectTask = client.ConnectAsync("127.0.0.1", 3001);
-            return connectTask.Wait(300) && client.Connected;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static void RestartBridgeIfNeeded(bool bridgeWasRunning, string envPath)
-    {
-        if (!bridgeWasRunning)
-        {
-            return;
-        }
-
-        try
-        {
-            MainWindow.StopBridgeProcessesOnShutdown();
-            var bridgeDir = System.IO.Path.GetDirectoryName(envPath);
-            if (string.IsNullOrWhiteSpace(bridgeDir) || !System.IO.Directory.Exists(bridgeDir))
-            {
-                return;
-            }
-
-            var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = "/c npm start",
-                WorkingDirectory = bridgeDir,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            });
-
-            if (process is null)
-            {
-                DevLog.WriteLine("UpdateDiscordBridgeEnv: Failed to restart bridge process");
-                return;
-            }
-
-            process.OutputDataReceived += (_, e) =>
-            {
-                if (!string.IsNullOrWhiteSpace(e.Data))
-                    DevLog.WriteLine("[Bridge] " + e.Data);
-            };
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (!string.IsNullOrWhiteSpace(e.Data))
-                    DevLog.WriteLine("[Bridge:ERR] " + e.Data);
-            };
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-            DevLog.WriteLine("UpdateDiscordBridgeEnv: Restarted bridge to apply new STT mode");
-        }
-        catch (Exception ex)
-        {
-            DevLog.WriteLine($"UpdateDiscordBridgeEnv: Bridge restart failed: {ex.Message}");
-        }
-    }
-
-    private static string NormalizeSttLanguageCode(string? languageCode)
-    {
-        var code = (languageCode ?? string.Empty).Trim().ToLowerInvariant();
-        return string.IsNullOrWhiteSpace(code) ? "auto" : code;
-    }
-
     private sealed class SettingsVm
     {
         public bool IsActivityLoggingEnabled { get; set; }
@@ -1574,16 +1365,6 @@ public partial class SettingsWindow : Window
         public string AiProvider { get; set; } = "custom";
         public bool UseMultipleProviders { get; set; }
         public string MultiAiProvidersCsv { get; set; } = string.Empty;
-        public int VoiceChatInputDeviceNumber { get; set; } = -1;
-        public int VoiceChatOutputDeviceNumber { get; set; } = -1;
-        public List<AudioDeviceItem> VoiceChatInputDevices { get; set; } = new();
-        public List<AudioDeviceItem> VoiceChatOutputDevices { get; set; } = new();
-        public int SttModeIndex { get; set; }
-        public string SttLanguageCode { get; set; } = "auto";
-        public int DiscordTranslationStrategyIndex { get; set; }
-        public bool UseMicrophoneInput { get; set; }
-        public bool MicrophonePushToTalk { get; set; }
-        public string VoiceReceptionToggleKeyText { get; set; } = "F8";
     }
 
     private static string InferProviderFromUrl(string? url)

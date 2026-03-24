@@ -130,14 +130,15 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
         Interlocked.Increment(ref _queueDepth);
         var totalSw = Stopwatch.StartNew();
         var typingStateRaised = false;
+        var runtimeSettings = GetRuntimeSettings();
         text = (text ?? string.Empty).Trim();
         if (text.Length == 0)
             return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "Empty text");
 
-        if (!_settings.VoiceTextReceptionEnabled)
+        if (!runtimeSettings.VoiceTextReceptionEnabled)
             return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "Voice text reception disabled");
 
-        if (!ShouldProcessUser(userId))
+        if (!ShouldProcessUser(userId, runtimeSettings))
             return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "User filtered");
 
         var dedupeKey = $"{userId}:{text.ToLowerInvariant()}";
@@ -161,7 +162,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
             typingStateRaised = true;
 
             var retrieveSw = Stopwatch.StartNew();
-            var history = LoadRecentHistory(20);
+            var history = LoadRecentHistory(12);
             retrieveSw.Stop();
             DevLog.WriteLine("[VoiceFlow] retrieve_recent_ms={0}", retrieveSw.ElapsedMilliseconds);
 
@@ -190,10 +191,10 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
                     DevLog.WriteLine("[VoiceFlow] rate_limit_hit={0}", rateLimitEx.Message);
                     
                     // Try to switch provider if multi-provider mode is enabled
-                    if (_settings.UseMultipleAiProviders && !string.IsNullOrWhiteSpace(_settings.MultiAiProvidersCsv))
+                    if (runtimeSettings.UseMultipleAiProviders && !string.IsNullOrWhiteSpace(runtimeSettings.MultiAiProvidersCsv))
                     {
                         var providerSwitcher = new ProviderSwitchingService();
-                        var nextProvider = providerSwitcher.SwitchToNextProvider(_settings.MultiAiProvidersCsv);
+                        var nextProvider = providerSwitcher.SwitchToNextProvider(runtimeSettings.MultiAiProvidersCsv);
                         
                         if (nextProvider != null)
                         {
@@ -217,7 +218,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
             var ttsText = StripParenthesesForTts(responseText);
             if (string.IsNullOrWhiteSpace(ttsText))
                 ttsText = responseText;
-            if (_settings.VoiceTranslateToJapanese)
+            if (runtimeSettings.VoiceTranslateToJapanese && !LooksPrimarilyJapanese(ttsText))
             {
                 if (_translationService.IsEnabled)
                 {
@@ -309,9 +310,9 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
         }
     }
 
-    private bool ShouldProcessUser(string userId)
+    private bool ShouldProcessUser(string userId, AppSettings settings)
     {
-        var focused = _settings.DiscordFocusedUserId;
+        var focused = settings.DiscordFocusedUserId;
         if (focused == ulong.MaxValue || focused == 0)
             return true;
 
@@ -380,12 +381,20 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
 
     private async Task<byte[]> SynthesizeWavAsync(string text, CancellationToken ct, string? correlationId)
     {
-        if (_settings.TtsMode == TtsMode.CloudRemote && !string.IsNullOrWhiteSpace(_settings.CloudTtsUrl))
+        var runtimeSettings = GetRuntimeSettings();
+
+        if (runtimeSettings.TtsMode == TtsMode.CloudRemote)
         {
+            if (string.IsNullOrWhiteSpace(runtimeSettings.CloudTtsUrl))
+            {
+                DevLog.WriteLine("[VoiceFlow][CloudTTS] skipped (remote mode selected but CloudTtsUrl is empty)");
+                return Array.Empty<byte>();
+            }
+
             try
             {
-                var baseUrl = _settings.CloudTtsUrl.TrimEnd('/');
-                var queryUrl = $"{baseUrl}/audio_query?text={Uri.EscapeDataString(text)}&speaker={_settings.VoicevoxSpeakerStyleId}";
+                var baseUrl = runtimeSettings.CloudTtsUrl.TrimEnd('/');
+                var queryUrl = $"{baseUrl}/audio_query?text={Uri.EscapeDataString(text)}&speaker={runtimeSettings.VoicevoxSpeakerStyleId}";
                 using var queryResp = await CloudTtsRetryPipeline.ExecuteAsync(
                     async innerCt =>
                     {
@@ -401,7 +410,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
                 using var synthResp = await CloudTtsRetryPipeline.ExecuteAsync(
                     async innerCt =>
                     {
-                        using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/synthesis?speaker={_settings.VoicevoxSpeakerStyleId}")
+                        using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/synthesis?speaker={runtimeSettings.VoicevoxSpeakerStyleId}")
                         {
                             Content = new StringContent(queryJson, System.Text.Encoding.UTF8, "application/json")
                         };
@@ -415,18 +424,31 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
             }
             catch (Exception ex)
             {
-                DevLog.WriteLine("[VoiceFlow][CloudTTS] failed ({0}), falling back to local VoiceVox", ex.GetBaseException().Message);
+                DevLog.WriteLine("[VoiceFlow][CloudTTS] failed ({0})", ex.GetBaseException().Message);
+                return Array.Empty<byte>();
             }
         }
 
         try
         {
-            return await _voicevoxClient.SynthesizeWavAsync(text, _settings.VoicevoxSpeakerStyleId, ct, correlationId);
+            return await _voicevoxClient.SynthesizeWavAsync(text, runtimeSettings.VoicevoxSpeakerStyleId, ct, correlationId);
         }
         catch (Exception ex)
         {
             DevLog.WriteLine("[VoiceFlow][LocalTTS] failed ({0}), returning text-only response", ex.GetBaseException().Message);
             return Array.Empty<byte>();
+        }
+    }
+
+    private AppSettings GetRuntimeSettings()
+    {
+        try
+        {
+            return SettingsService.Load();
+        }
+        catch
+        {
+            return _settings;
         }
     }
 
@@ -459,6 +481,22 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
 
         cleaned = Regex.Replace(cleaned, @"\s{2,}", " ").Trim();
         return cleaned;
+    }
+
+    private static bool LooksPrimarilyJapanese(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var relevantChars = text.Where(c => !char.IsWhiteSpace(c) && !char.IsPunctuation(c)).ToArray();
+        if (relevantChars.Length == 0)
+            return false;
+
+        var japaneseChars = relevantChars.Count(c =>
+            (c >= 0x3040 && c <= 0x30FF) ||
+            (c >= 0x4E00 && c <= 0x9FFF));
+
+        return japaneseChars >= relevantChars.Length * 0.4;
     }
 
     private static bool TryBuildDateTimeResponse(string userText, out string response)

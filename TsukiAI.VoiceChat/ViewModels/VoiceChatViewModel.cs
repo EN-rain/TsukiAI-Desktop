@@ -410,7 +410,9 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
     {
         void UpdateUi()
         {
+            var now = DateTime.Now.ToString("HH:mm:ss");
             var estimatedSeconds = EstimateSpeechSeconds(text);
+            AppendActivity($"[{now}] Tsuki [Manual TTS, {estimatedSeconds}s]: {text}");
             EnqueueSpeechItem(new PendingSpeechItem("Manual TTS", estimatedSeconds));
         }
 

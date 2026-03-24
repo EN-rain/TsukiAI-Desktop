@@ -326,7 +326,30 @@
 
                             <StackPanel>
                                 <TextBlock Style="{StaticResource FieldLabel}" Text="STT Mode"/>
-                                <TextBlock Style="{StaticResource FieldHint}" Text="Configured in main Settings window (AssemblyAI or Groq Whisper)"/>
+                                <TextBlock Style="{StaticResource FieldHint}" Text="Choose the speech-to-text provider used by the Discord bridge."/>
+                                <ComboBox Style="{StaticResource SettingsComboBox}"
+                                          IsEnabled="{Binding IsDiscordPlatform}"
+                                          SelectedIndex="{Binding SttModeIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="AssemblyAI (Accurate, Slower)"/>
+                                    <ComboBoxItem Content="Groq Whisper (Fast, Lower Latency)"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Margin="0,8,0,0">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="STT Language"/>
+                                <ComboBox Style="{StaticResource SettingsComboBox}"
+                                          IsEnabled="{Binding IsDiscordPlatform}"
+                                          SelectedValuePath="Tag"
+                                          SelectedValue="{Binding SttLanguageCode, Mode=TwoWay}">
+                                    <ComboBoxItem Content="Auto-detect" Tag="auto"/>
+                                    <ComboBoxItem Content="English" Tag="en"/>
+                                    <ComboBoxItem Content="Japanese" Tag="ja"/>
+                                    <ComboBoxItem Content="Chinese" Tag="zh"/>
+                                    <ComboBoxItem Content="Korean" Tag="ko"/>
+                                    <ComboBoxItem Content="Spanish" Tag="es"/>
+                                    <ComboBoxItem Content="French" Tag="fr"/>
+                                    <ComboBoxItem Content="German" Tag="de"/>
+                                </ComboBox>
                             </StackPanel>
 
                             <StackPanel Margin="0,8,0,0">
@@ -413,6 +436,12 @@
                                     Padding="12,0"
                                     IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"
                                     Margin="0,4,0,0"/>
+
+                            <StackPanel Margin="0,12,0,0">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Voice Reception Toggle Hotkey"/>
+                                <TextBox Style="{StaticResource SettingsTextBox}"
+                                         Text="{Binding VoiceReceptionToggleKeyText, Mode=TwoWay}"/>
+                            </StackPanel>
                     </StackPanel>
 
                     <StackPanel Style="{StaticResource SectionPanel}">

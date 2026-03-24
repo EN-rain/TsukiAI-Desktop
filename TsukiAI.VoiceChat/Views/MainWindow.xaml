@@ -365,18 +365,6 @@
                                Foreground="#FFFFFF"
                                FontWeight="SemiBold"
                                FontSize="16"/>
-                    <StackPanel Margin="16,8,16,0"
-                                Visibility="{Binding IsSpeechIndicatorVisible, Converter={StaticResource BoolToVisibilityConverter}}">
-                        <TextBlock Text="{Binding SpeechIndicatorText, Mode=OneWay}"
-                                   Foreground="#C4B5FD"
-                                   FontSize="11"
-                                   Margin="0,0,0,4"/>
-                        <ProgressBar IsIndeterminate="True"
-                                     Height="3"
-                                     Background="#241C36"
-                                     Foreground="#9B7BFF"
-                                     BorderThickness="0"/>
-                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -498,21 +486,42 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <Border Grid.Row="0" Background="{StaticResource BgCardBrush}" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Margin="0,0,0,12">
-                        <TextBox x:Name="ActivityFeedBox"
-                                 Margin="10"
-                                 Text="{Binding ActivityFeedText, Mode=OneWay}"
-                                 IsReadOnly="True"
-                                 IsReadOnlyCaretVisible="True"
-                                 AcceptsReturn="True"
-                                 TextWrapping="Wrap"
-                                 Background="Transparent"
-                                 BorderThickness="0"
-                                 Foreground="{StaticResource TextPrimaryBrush}"
-                                 VerticalScrollBarVisibility="Auto"
-                                 HorizontalScrollBarVisibility="Disabled"
-                                 TextChanged="ActivityFeedBox_TextChanged"/>
-                    </Border>
+                    <Grid Grid.Row="0" Margin="0,0,0,12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0"
+                                    Margin="0,0,0,8"
+                                    Visibility="{Binding IsSpeechIndicatorVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <TextBlock Text="{Binding SpeechIndicatorText, Mode=OneWay}"
+                                       Foreground="#C4B5FD"
+                                       FontSize="11"
+                                       Margin="2,0,0,4"/>
+                            <ProgressBar IsIndeterminate="True"
+                                         Height="3"
+                                         Background="#241C36"
+                                         Foreground="#9B7BFF"
+                                         BorderThickness="0"/>
+                        </StackPanel>
+
+                        <Border Grid.Row="1" Background="{StaticResource BgCardBrush}" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                            <TextBox x:Name="ActivityFeedBox"
+                                     Margin="10"
+                                     Text="{Binding ActivityFeedText, Mode=OneWay}"
+                                     IsReadOnly="True"
+                                     IsReadOnlyCaretVisible="True"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     Foreground="{StaticResource TextPrimaryBrush}"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Disabled"
+                                     TextChanged="ActivityFeedBox_TextChanged"/>
+                        </Border>
+                    </Grid>
 
                     <Grid Grid.Row="1">
                         <Grid.ColumnDefinitions>
@@ -529,6 +538,8 @@
                                          Text="Type text to test TTS..."
                                          Background="Transparent"
                                          Foreground="{StaticResource TextPrimaryBrush}"
+                                         CaretBrush="#FFFFFF"
+                                         SelectionBrush="#7C6AEF"
                                          BorderThickness="0"
                                          FontSize="13"
                                          MaxLength="1000"

@@ -33,9 +33,12 @@ public partial class VoiceChatSettingsWindow : Window
             InputDevices                = GetInputDevices(),
             OutputDevices               = GetOutputDevices(),
             VoicePlatformIndex          = (int)_initialSettings.VoicePlatform,
+            SttModeIndex                = (int)_initialSettings.SttMode,
+            SttLanguageCode             = NormalizeSttLanguageCode(_initialSettings.SttLanguageCode),
             DiscordTranslationStrategyIndex = (int)_initialSettings.DiscordTranslationStrategy,
             UseMicrophoneInput          = _initialSettings.UseMicrophoneInput,
             MicrophonePushToTalk        = _initialSettings.MicrophonePushToTalk,
+            VoiceReceptionToggleKeyText = NormalizeHotkey(_initialSettings.VoiceReceptionToggleKey),
             VrChatOscHost               = _initialSettings.VrChatOscHost,
             VrChatOscInputPortText      = _initialSettings.VrChatOscInputPort.ToString(),
             VrChatOscOutputPortText     = _initialSettings.VrChatOscOutputPort.ToString(),
@@ -97,8 +100,8 @@ public partial class VoiceChatSettingsWindow : Window
     {
         Result = _initialSettings with
         {
-            // Preserve STT mode selected in main settings instead of forcing AssemblyAI.
-            SttMode                     = _initialSettings.SttMode,
+            SttMode                     = (SttMode)_viewModel.SttModeIndex,
+            SttLanguageCode             = NormalizeSttLanguageCode(_viewModel.SttLanguageCode),
             VoicePlatform               = (VoiceIntegrationPlatform)_viewModel.VoicePlatformIndex,
             DiscordTranslationStrategy  = (TranslationStrategy)_viewModel.DiscordTranslationStrategyIndex,
             VoiceChatInputDeviceNumber  = _viewModel.VoiceChatInputDeviceNumber,
@@ -107,6 +110,7 @@ public partial class VoiceChatSettingsWindow : Window
             UseMicrophoneInput          = _viewModel.UseMicrophoneInput,
             MicrophonePushToTalk        = _viewModel.MicrophonePushToTalk,
             MicrophoneDeviceId          = GetSelectedMicrophoneDeviceId(),
+            VoiceReceptionToggleKey     = NormalizeHotkey(_viewModel.VoiceReceptionToggleKeyText),
             VrChatOscHost               = NormalizeVrChatHost(_viewModel.VrChatOscHost),
             VrChatOscInputPort          = ParsePort(_viewModel.VrChatOscInputPortText, 9000),
             VrChatOscOutputPort         = ParsePort(_viewModel.VrChatOscOutputPortText, 9001),
@@ -361,6 +365,12 @@ public partial class VoiceChatSettingsWindow : Window
             : fallback;
     }
 
+    private static string NormalizeHotkey(string? raw)
+    {
+        var value = (raw ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(value) ? "F8" : value;
+    }
+
 }
 
 // =========================================================================
@@ -386,7 +396,10 @@ public class SettingsVm : INotifyPropertyChanged
     public int VoiceChatOutputDeviceNumber { get; set; } = -1;
     public List<AudioDeviceItem> InputDevices  { get; set; } = new();
     public List<AudioDeviceItem> OutputDevices { get; set; } = new();
+    public int SttModeIndex { get; set; }
+    public string SttLanguageCode { get; set; } = "auto";
     public int  DiscordTranslationStrategyIndex { get; set; }
+    public string VoiceReceptionToggleKeyText { get; set; } = "F8";
 
     public int VoicePlatformIndex
     {

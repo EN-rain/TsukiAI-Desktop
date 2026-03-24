@@ -1,0 +1,113 @@
+﻿{
+    "captured_at_utc":  "2026-03-23T16:17:19.1210134Z",
+    "mode":  "candidate",
+    "duration_seconds":  1,
+    "sample_interval_seconds":  1,
+    "log_path":  "C:\\Users\\LENOVO\\AppData\\Roaming\\TsukiAI\\dev.log",
+    "automation":  {
+                       "dotnet_build_ms":  7339,
+                       "dotnet_test_ms":  6139
+                   },
+    "process_snapshot":  [
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  3520,
+                                 "CPU":  0.234375,
+                                 "WS":  45817856,
+                                 "PM":  54251520
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  10276,
+                                 "CPU":  0.203125,
+                                 "WS":  2686976,
+                                 "PM":  53497856
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  13488,
+                                 "CPU":  1.5,
+                                 "WS":  3039232,
+                                 "PM":  64167936
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  14532,
+                                 "CPU":  0.09375,
+                                 "WS":  4886528,
+                                 "PM":  53297152
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  14720,
+                                 "CPU":  1.484375,
+                                 "WS":  6672384,
+                                 "PM":  81436672
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  14740,
+                                 "CPU":  1.546875,
+                                 "WS":  5922816,
+                                 "PM":  83144704
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  15272,
+                                 "CPU":  1.078125,
+                                 "WS":  5705728,
+                                 "PM":  63807488
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  15816,
+                                 "CPU":  1.46875,
+                                 "WS":  6844416,
+                                 "PM":  82100224
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  15824,
+                                 "CPU":  1.359375,
+                                 "WS":  6537216,
+                                 "PM":  81821696
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  19664,
+                                 "CPU":  2.6875,
+                                 "WS":  76124160,
+                                 "PM":  81641472
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  19668,
+                                 "CPU":  2.6875,
+                                 "WS":  75616256,
+                                 "PM":  81457152
+                             },
+                             {
+                                 "ProcessName":  "node",
+                                 "Id":  20380,
+                                 "CPU":  2.171875,
+                                 "WS":  89612288,
+                                 "PM":  62939136
+                             }
+                         ],
+    "runtime_metrics":  {
+                            "bridge_cpu_avg_pct":  null,
+                            "bridge_cpu_p95_pct":  null,
+                            "stt_latency_p50_ms":  null,
+                            "stt_latency_p95_ms":  null,
+                            "llm_latency_p50_ms":  null,
+                            "llm_latency_p95_ms":  null,
+                            "tts_latency_p50_ms":  null,
+                            "tts_latency_p95_ms":  null,
+                            "end_to_end_latency_p50_ms":  null,
+                            "end_to_end_latency_p95_ms":  null,
+                            "pipeline_error_rate_pct":  null,
+                            "successful_turns":  0,
+                            "pipeline_errors":  0,
+                            "log_lines_in_window":  0
+                        }
+}
