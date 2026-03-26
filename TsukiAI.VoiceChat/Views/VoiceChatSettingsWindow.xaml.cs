@@ -72,15 +72,17 @@ public partial class VoiceChatSettingsWindow : Window
 
     private static List<AudioDeviceItem> GetOutputDevices()
     {
-        var devices = new List<AudioDeviceItem>();
+        // Include explicit "Default" entry so device IDs in the list match
+        // NAudio WaveOut device numbers (0 = first real device, -1 = OS default).
+        var devices = new List<AudioDeviceItem>
+        {
+            new AudioDeviceItem { Id = -1, Name = "Default Output" }
+        };
         for (var i = 0; i < WaveOut.DeviceCount; i++)
         {
             var caps = WaveOut.GetCapabilities(i);
             devices.Add(new AudioDeviceItem { Id = i, Name = caps.ProductName });
         }
-
-        if (devices.Count == 0)
-            devices.Add(new AudioDeviceItem { Id = -1, Name = "Default Output" });
 
         return devices;
     }
@@ -411,12 +413,14 @@ public class SettingsVm : INotifyPropertyChanged
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsDiscordPlatform));
             OnPropertyChanged(nameof(IsVrChatPlatform));
+            OnPropertyChanged(nameof(IsOtherPlatform));
             ApplyPlatformDefaults();
         }
     }
 
     public bool IsDiscordPlatform => VoicePlatformIndex == (int)VoiceIntegrationPlatform.Discord;
     public bool IsVrChatPlatform => VoicePlatformIndex == (int)VoiceIntegrationPlatform.VrChat;
+    public bool IsOtherPlatform => VoicePlatformIndex == (int)VoiceIntegrationPlatform.Other;
 
     public bool UseMicrophoneInput
     {

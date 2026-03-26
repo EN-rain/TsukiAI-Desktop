@@ -23,6 +23,7 @@
     </WindowChrome.WindowChrome>
 
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <SolidColorBrush x:Key="BgPrimaryBrush" Color="#110E18"/>
         <SolidColorBrush x:Key="BgSecondaryBrush" Color="#171320"/>
         <SolidColorBrush x:Key="BgInputBrush" Color="#21192F"/>
@@ -306,11 +307,13 @@
                                           SelectedIndex="{Binding VoicePlatformIndex, Mode=TwoWay}">
                                     <ComboBoxItem Content="Discord"/>
                                     <ComboBoxItem Content="VRChat"/>
+                                    <ComboBoxItem Content="Other (No Integration)"/>
                                 </ComboBox>
                             </StackPanel>
                     </StackPanel>
 
-                    <StackPanel Style="{StaticResource SectionPanel}">
+                    <StackPanel Style="{StaticResource SectionPanel}"
+                                Visibility="{Binding IsDiscordPlatform, Converter={StaticResource BoolToVisibilityConverter}}">
                             <TextBlock Style="{StaticResource SectionHeader}" Text="Discord Voice Integration"/>
                             <TextBlock Style="{StaticResource FieldHint}"
                                        Text="Discord token / guild / channel IDs are handled from discord-voice-bridge/.env"
@@ -406,6 +409,7 @@
                                           Content="Use Local Microphone (instead of Discord)"
                                           IsChecked="{Binding UseMicrophoneInput}"
                                           IsEnabled="{Binding IsDiscordPlatform}"
+                                          Visibility="{Binding IsDiscordPlatform, Converter={StaticResource BoolToVisibilityConverter}}"
                                           Margin="0,0,0,8"/>
                             </StackPanel>
 
@@ -444,7 +448,49 @@
                             </StackPanel>
                     </StackPanel>
 
-                    <StackPanel Style="{StaticResource SectionPanel}">
+                    <StackPanel Style="{StaticResource SectionPanel}"
+                                Visibility="{Binding IsVrChatPlatform, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="VRChat Voice Options"/>
+
+                            <StackPanel Margin="0,0,0,8">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="STT Mode"/>
+                                <TextBlock Style="{StaticResource FieldHint}" Text="Speech-to-text provider for your microphone input."/>
+                                <ComboBox Style="{StaticResource SettingsComboBox}"
+                                          SelectedIndex="{Binding SttModeIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="AssemblyAI (Accurate, Slower)"/>
+                                    <ComboBoxItem Content="Groq Whisper (Fast, Lower Latency)"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Margin="0,0,0,8">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="STT Language"/>
+                                <ComboBox Style="{StaticResource SettingsComboBox}"
+                                          SelectedValuePath="Tag"
+                                          SelectedValue="{Binding SttLanguageCode, Mode=TwoWay}">
+                                    <ComboBoxItem Content="Auto-detect" Tag="auto"/>
+                                    <ComboBoxItem Content="English" Tag="en"/>
+                                    <ComboBoxItem Content="Japanese" Tag="ja"/>
+                                    <ComboBoxItem Content="Chinese" Tag="zh"/>
+                                    <ComboBoxItem Content="Korean" Tag="ko"/>
+                                    <ComboBoxItem Content="Spanish" Tag="es"/>
+                                    <ComboBoxItem Content="French" Tag="fr"/>
+                                    <ComboBoxItem Content="German" Tag="de"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Margin="0,0,0,8">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Translation Strategy"/>
+                                <ComboBox Style="{StaticResource SettingsComboBox}"
+                                          SelectedIndex="{Binding DiscordTranslationStrategyIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="Translate Input to Japanese"/>
+                                    <ComboBoxItem Content="Translate Response to Japanese"/>
+                                    <ComboBoxItem Content="Bilingual - No Translation"/>
+                                </ComboBox>
+                            </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Style="{StaticResource SectionPanel}"
+                                Visibility="{Binding IsVrChatPlatform, Converter={StaticResource BoolToVisibilityConverter}}">
                             <TextBlock Style="{StaticResource SectionHeader}" Text="VRChat Routing"/>
                             <TextBlock Style="{StaticResource FieldHint}"
                                        Text="VRChat does not expose direct voice-bot injection. The practical setup is: your mic into Tsuki, Tsuki TTS to a virtual audio output, and VRChat listening to that routed device."

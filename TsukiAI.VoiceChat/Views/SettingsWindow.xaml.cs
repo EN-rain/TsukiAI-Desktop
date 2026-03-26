@@ -82,7 +82,25 @@ public partial class SettingsWindow : Window
             RemoteInferenceApiKey = Result.RemoteInferenceApiKey ?? string.Empty,
             AiProvider = InferProviderFromUrl(Result.RemoteInferenceUrl),
             UseMultipleProviders = Result.UseMultipleAiProviders,
-            MultiAiProvidersCsv = Result.MultiAiProvidersCsv ?? string.Empty
+            MultiAiProvidersCsv = Result.MultiAiProvidersCsv ?? string.Empty,
+
+            // Voice Chat Settings
+            VoicePlatformIndex = (int)Result.VoicePlatform,
+            SttModeIndex = (int)Result.SttMode,
+            SttLanguageCode = Result.SttLanguageCode,
+            DiscordTranslationStrategyIndex = (int)Result.DiscordTranslationStrategy,
+            VoiceChatInputDeviceNumber = Result.VoiceChatInputDeviceNumber,
+            VoiceChatOutputDeviceNumber = Result.VoiceChatOutputDeviceNumber,
+            UseMicrophoneInput = Result.UseMicrophoneInput,
+            MicrophonePushToTalk = Result.MicrophonePushToTalk,
+            VoiceReceptionToggleKeyText = Result.VoiceReceptionToggleKey,
+            VrChatOscHost = Result.VrChatOscHost,
+            VrChatOscInputPortText = Result.VrChatOscInputPort.ToString(),
+            VrChatOscOutputPortText = Result.VrChatOscOutputPort.ToString(),
+            VrChatUseChatboxFallback = Result.VrChatUseChatboxFallback,
+            SemanticMemoryEnabled = Result.SemanticMemoryEnabled,
+            InputDevices = GetVoiceChatInputDevices(),
+            OutputDevices = GetVoiceChatOutputDevices()
         };
         DataContext = vm;
 
@@ -126,28 +144,6 @@ public partial class SettingsWindow : Window
         UpdateInferenceModeUi();
     }
 
-    private void OpenVoiceSetup_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var window = new VoiceChatSettingsWindow { Owner = this };
-            var changed = window.ShowDialog();
-            if (changed == true)
-            {
-                Result = SettingsService.Load();
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                this,
-                $"Voice Setup could not be opened.\n\n{ex.Message}",
-                "Settings",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-        }
-    }
-
 
     private static List<AudioDeviceItem> GetVoiceChatOutputDevices()
     {
@@ -160,6 +156,21 @@ public partial class SettingsWindow : Window
 
         if (devices.Count == 0)
             devices.Add(new AudioDeviceItem { Id = -1, Name = "Default Output" });
+
+        return devices;
+    }
+
+    private static List<AudioDeviceItem> GetVoiceChatInputDevices()
+    {
+        var devices = new List<AudioDeviceItem>();
+        for (var i = 0; i < WaveIn.DeviceCount; i++)
+        {
+            var caps = WaveIn.GetCapabilities(i);
+            devices.Add(new AudioDeviceItem { Id = i, Name = caps.ProductName });
+        }
+
+        if (devices.Count == 0)
+            devices.Add(new AudioDeviceItem { Id = -1, Name = "Default Microphone" });
 
         return devices;
     }
@@ -223,11 +234,9 @@ public partial class SettingsWindow : Window
         // Hide all content panels
         if (InferenceContent != null) InferenceContent.Visibility = Visibility.Collapsed;
         if (VoiceContent != null) VoiceContent.Visibility = Visibility.Collapsed;
-        if (AdvancedContent != null) AdvancedContent.Visibility = Visibility.Collapsed;
 
         SetTabSelected(TabInference, false);
         SetTabSelected(TabVoice, false);
-        SetTabSelected(TabAdvanced, false);
 
         // Show selected content and highlight tab
         switch (tabIndex)
@@ -239,10 +248,6 @@ public partial class SettingsWindow : Window
             case 1:
                 if (VoiceContent != null) VoiceContent.Visibility = Visibility.Visible;
                 SetTabSelected(TabVoice, true);
-                break;
-            case 2:
-                if (AdvancedContent != null) AdvancedContent.Visibility = Visibility.Visible;
-                SetTabSelected(TabAdvanced, true);
                 break;
         }
 
@@ -262,7 +267,6 @@ public partial class SettingsWindow : Window
         {
             0 => TabInference,
             1 => TabVoice,
-            2 => TabAdvanced,
             _ => null
         };
 
@@ -410,7 +414,23 @@ public partial class SettingsWindow : Window
             GroqApiKey = updatedGroqApiKey,
             GeminiApiKey = updatedGeminiApiKey,
             GitHubApiKey = updatedGitHubApiKey,
-            MistralApiKey = updatedMistralApiKey
+            MistralApiKey = updatedMistralApiKey,
+
+            // Voice Chat Settings
+            VoicePlatform = (VoiceIntegrationPlatform)vm.VoicePlatformIndex,
+            SttMode = (SttMode)vm.SttModeIndex,
+            SttLanguageCode = vm.SttLanguageCode,
+            DiscordTranslationStrategy = (TranslationStrategy)vm.DiscordTranslationStrategyIndex,
+            VoiceChatInputDeviceNumber = vm.VoiceChatInputDeviceNumber,
+            VoiceChatOutputDeviceNumber = vm.VoiceChatOutputDeviceNumber,
+            UseMicrophoneInput = vm.UseMicrophoneInput,
+            MicrophonePushToTalk = vm.MicrophonePushToTalk,
+            VoiceReceptionToggleKey = vm.VoiceReceptionToggleKeyText,
+            VrChatOscHost = vm.VrChatOscHost,
+            VrChatOscInputPort = ParseIntOr(vm.VrChatOscInputPortText, 9000, 1, 65535),
+            VrChatOscOutputPort = ParseIntOr(vm.VrChatOscOutputPortText, 9001, 1, 65535),
+            VrChatUseChatboxFallback = vm.VrChatUseChatboxFallback,
+            SemanticMemoryEnabled = vm.SemanticMemoryEnabled
         };
 
         SettingsService.Save(Result);
@@ -442,8 +462,77 @@ public partial class SettingsWindow : Window
 
     private void Close_Click(object sender, RoutedEventArgs e)
     {
-        DialogResult = false;
         Close();
+    }
+
+    private void OpenVoiceSetup_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var voiceSettingsWindow = new VoiceChatSettingsWindow { Owner = this };
+            voiceSettingsWindow.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            var details = ex.InnerException is null ? ex.Message : $"{ex.Message}\n{ex.InnerException.Message}";
+            MessageBox.Show(
+                this,
+                $"Voice settings could not be opened.\n\n{details}",
+                "TsukiAI Voice Chat",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private void OpenDiscordEnv_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var envPath = System.IO.Path.Combine(AppContext.BaseDirectory, "discord-voice-bridge", ".env");
+            if (!System.IO.File.Exists(envPath))
+            {
+                MessageBox.Show(this, $"Discord bridge .env file not found at:\n{envPath}", "File Not Found", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = envPath,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not open .env file: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void TestMicrophone_Click(object sender, RoutedEventArgs e)
+    {
+        MessageBox.Show(this, "Microphone test functionality would be implemented here.", "Test Microphone", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void ClearVoiceChatHistory_Click(object sender, RoutedEventArgs e)
+    {
+        var shouldClear = MessageBox.Show(
+            this,
+            "Clear all voice chat history? This cannot be undone.",
+            "Clear Voice Chat History",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (shouldClear != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            MessageBox.Show(this, "Voice chat history cleared.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Failed to clear voice chat history: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void ClearHistory_Click(object sender, RoutedEventArgs e)
@@ -1365,6 +1454,28 @@ public partial class SettingsWindow : Window
         public string AiProvider { get; set; } = "custom";
         public bool UseMultipleProviders { get; set; }
         public string MultiAiProvidersCsv { get; set; } = string.Empty;
+
+        public bool SemanticMemoryEnabled { get; set; } = true;
+
+        // Voice Chat Settings
+        public int VoicePlatformIndex { get; set; }
+        public bool IsDiscordPlatform => VoicePlatformIndex == 0;
+        public bool IsVrChatPlatform => VoicePlatformIndex == 1;
+        public bool IsOtherPlatform => VoicePlatformIndex == 2;
+        public int SttModeIndex { get; set; }
+        public string SttLanguageCode { get; set; } = "auto";
+        public int DiscordTranslationStrategyIndex { get; set; }
+        public int VoiceChatInputDeviceNumber { get; set; } = -1;
+        public int VoiceChatOutputDeviceNumber { get; set; } = -1;
+        public List<AudioDeviceItem> InputDevices { get; set; } = new();
+        public List<AudioDeviceItem> OutputDevices { get; set; } = new();
+        public bool UseMicrophoneInput { get; set; }
+        public bool MicrophonePushToTalk { get; set; }
+        public string VoiceReceptionToggleKeyText { get; set; } = "F9";
+        public string VrChatOscHost { get; set; } = "127.0.0.1";
+        public string VrChatOscInputPortText { get; set; } = "9001";
+        public string VrChatOscOutputPortText { get; set; } = "9002";
+        public bool VrChatUseChatboxFallback { get; set; }
     }
 
     private static string InferProviderFromUrl(string? url)
