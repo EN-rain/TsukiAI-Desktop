@@ -56,7 +56,8 @@ public sealed class TranslationService : IDisposable
         _enabled = settings.UseDeepLTranslate && !string.IsNullOrWhiteSpace(_apiKey);
         _baseUrl = settings.UseDeepLFreeApi ? "https://api-free.deepl.com/v2" : "https://api.deepl.com/v2";
 
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        // 5s timeout — DeepL is fast; 15s was causing full-pipeline stalls on network issues
+        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         if (_enabled)
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"DeepL-Auth-Key {_apiKey}");
     }

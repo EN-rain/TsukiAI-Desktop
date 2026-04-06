@@ -85,13 +85,17 @@ public partial class App : System.Windows.Application
             effectiveModelName = settings.ModelName;
         }
 
+        // Semantic memory: pass null when disabled so RemoteInferenceClient skips all memory ops
+        ISemanticMemoryService? activeSemanticMemory = settings.SemanticMemoryEnabled ? semanticMemory : null;
+        DevLog.WriteLine("App: SemanticMemory enabled={0}", settings.SemanticMemoryEnabled);
+
         IInferenceClient inferenceClient = settings.InferenceMode switch
         {
             InferenceMode.RemoteColab => new RemoteInferenceClient(
                 effectiveRemoteUrl,
                 effectiveRemoteApiKey,
                 effectiveModelName,
-                semanticMemory,
+                activeSemanticMemory,
                 generationTuning,
                 settings.ReplyTonePreset),
             _ => new OllamaClient(settings.ModelName, tuning: generationTuning, replyTonePreset: settings.ReplyTonePreset)
@@ -224,18 +228,25 @@ public partial class App : System.Windows.Application
             }
         }
 
-        RunBackground("semantic_memory_ready", async () =>
+        if (settings.SemanticMemoryEnabled)
         {
-            try
+            RunBackground("semantic_memory_ready", async () =>
             {
-                var ready = await _serviceProvider.GetRequiredService<ISemanticMemoryService>().EnsureReadyAsync();
-                DevLog.WriteLine("App: Semantic memory ready={0}", ready);
-            }
-            catch (Exception ex)
-            {
-                DevLog.WriteLine($"App: Semantic memory startup failed: {ex.Message}");
-            }
-        });
+                try
+                {
+                    var ready = await _serviceProvider.GetRequiredService<ISemanticMemoryService>().EnsureReadyAsync();
+                    DevLog.WriteLine("App: Semantic memory ready={0}", ready);
+                }
+                catch (Exception ex)
+                {
+                    DevLog.WriteLine($"App: Semantic memory startup failed: {ex.Message}");
+                }
+            });
+        }
+        else
+        {
+            DevLog.WriteLine("App: Semantic memory disabled by settings, skipping init.");
+        }
 
         RunBackground("http_api_server", StartHttpApiServerAsync);
     }

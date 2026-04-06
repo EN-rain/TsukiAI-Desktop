@@ -63,23 +63,46 @@ public sealed class VoicevoxClient : IDisposable
         if (TryGetCachedWav(cacheKey, out var cached))
             return cached;
 
+        var queryJson = await AudioQueryAsync(text, speakerStyleId, ct, correlationId);
+        if (string.IsNullOrWhiteSpace(queryJson))
+            return Array.Empty<byte>();
+
+        var wav = await SynthesizeFromQueryAsync(queryJson, speakerStyleId, ct, correlationId);
+        if (wav.Length > 0)
+            StoreCachedWav(cacheKey, wav);
+        return wav;
+    }
+
+    /// <summary>
+    /// Step 1: Fetch VOICEVOX audio_query JSON for the given text.
+    /// Can be called concurrently with translation since it only needs the source text.
+    /// </summary>
+    public async Task<string> AudioQueryAsync(string text, int speakerStyleId, CancellationToken ct, string? correlationId = null)
+    {
+        text = (text ?? "").Trim();
+        if (text.Length == 0) return string.Empty;
+
         var queryUrl = $"/audio_query?text={Uri.EscapeDataString(text)}&speaker={speakerStyleId}";
-        
-        // Wrap query call with retry policy
         using var queryResp = await TtsRetryPipeline.ExecuteAsync(
             async ct =>
             {
-                using var queryRequest = new HttpRequestMessage(HttpMethod.Post, queryUrl);
+                using var req = new HttpRequestMessage(HttpMethod.Post, queryUrl);
                 if (!string.IsNullOrWhiteSpace(correlationId))
-                    queryRequest.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
-                return await _http.SendAsync(queryRequest, ct);
+                    req.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
+                return await _http.SendAsync(req, ct);
             },
             ct);
         queryResp.EnsureSuccessStatusCode();
+        return await queryResp.Content.ReadAsStringAsync(ct);
+    }
 
-        var queryJson = await queryResp.Content.ReadAsStringAsync(ct);
-        if (string.IsNullOrWhiteSpace(queryJson))
-            return Array.Empty<byte>();
+    /// <summary>
+    /// Step 2: Synthesize WAV from a pre-fetched audio_query JSON.
+    /// Call after AudioQueryAsync completes.
+    /// </summary>
+    public async Task<byte[]> SynthesizeFromQueryAsync(string queryJson, int speakerStyleId, CancellationToken ct, string? correlationId = null)
+    {
+        if (string.IsNullOrWhiteSpace(queryJson)) return Array.Empty<byte>();
 
         using var synthReq = new HttpRequestMessage(HttpMethod.Post, $"/synthesis?speaker={speakerStyleId}")
         {
@@ -89,16 +112,11 @@ public sealed class VoicevoxClient : IDisposable
         if (!string.IsNullOrWhiteSpace(correlationId))
             synthReq.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
 
-        // Wrap synthesis call with retry policy
         using var synthResp = await TtsRetryPipeline.ExecuteAsync(
             async ct => await _http.SendAsync(synthReq, HttpCompletionOption.ResponseHeadersRead, ct),
             ct);
         synthResp.EnsureSuccessStatusCode();
-
-        var wav = await synthResp.Content.ReadAsByteArrayAsync(ct);
-        if (wav.Length > 0)
-            StoreCachedWav(cacheKey, wav);
-        return wav;
+        return await synthResp.Content.ReadAsByteArrayAsync(ct);
     }
 
     public async Task<bool> IsAliveAsync(CancellationToken ct)

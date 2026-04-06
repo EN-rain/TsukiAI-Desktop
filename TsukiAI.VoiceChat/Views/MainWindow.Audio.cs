@@ -59,7 +59,10 @@ public partial class MainWindow
             vm.NotifyManualTtsQueued(text);
         }
 
-        await PlayVoicePreviewAsync(text, -1);
+        // Use the configured output device (e.g. VoiceMeeter virtual cable) so
+        // "Play Here" routes through the same device as live voice turns.
+        _settings = SettingsService.Load();
+        await PlayVoicePreviewAsync(text, _settings.VoiceOutputDeviceNumber);
     }
 
     private async void TtsTestPlayInDiscord_Click(object sender, RoutedEventArgs e)

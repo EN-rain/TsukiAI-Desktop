@@ -12,6 +12,8 @@ namespace TsukiAI.VoiceChat.Views;
 public partial class MainWindow : Window
 {
     private const string TtsPlaceholder = "Type text to test TTS...";
+    private const double ExpandedSidebarWidth = 280;
+    private const double CollapsedSidebarWidth = 26;
     private static readonly string BridgePath = ResolveBridgePath();
     private static readonly string BridgePidFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -23,6 +25,7 @@ public partial class MainWindow : Window
     private TsukiAI.Core.Models.AppSettings _settings = TsukiAI.Core.Models.AppSettings.Default;
     private Key _voiceReceptionToggleKey = Key.F8;
     private bool _isUpdatingServerStatusToggle;
+    private bool _isSidebarCollapsed;
 
     public MainWindow()
     {
@@ -31,7 +34,18 @@ public partial class MainWindow : Window
         PreviewKeyDown += MainWindow_PreviewKeyDown;
         LoadVoiceReceptionSettings();
         ApplyPlatformUiState();
+        ApplySidebarState();
         UpdateServerStatusUi(false);
+
+        // Auto-start bridge server on app open (only for Discord platform)
+        Loaded += async (_, _) =>
+        {
+            if (_settings.VoicePlatform == VoiceIntegrationPlatform.Discord)
+            {
+                await Task.Delay(1000); // Brief delay to let UI settle
+                TryStartBridgeServer(showSuccessMessage: false);
+            }
+        };
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
@@ -110,36 +124,33 @@ public partial class MainWindow : Window
 
     private void AllUsersFocus_Checked(object sender, RoutedEventArgs e)
     {
-        if (FocusStatusTitle == null || FocusStatusState == null || FocusStatusDescription == null)
+        if (FocusStatusTitle == null || FocusStatusDescription == null)
             return;
 
         FocusStatusTitle.Text = "All Users Mode";
-        FocusStatusState.Text = "Active";
-        FocusStatusDescription.Text = "Captures everyone in the selected voice channel.";
+        FocusStatusDescription.Text = "Active · Captures everyone in the selected voice channel.";
         if (SpecificUserPanel != null)
             SpecificUserPanel.Visibility = Visibility.Collapsed;
     }
 
     private void AutoFocus_Checked(object sender, RoutedEventArgs e)
     {
-        if (FocusStatusTitle == null || FocusStatusState == null || FocusStatusDescription == null)
+        if (FocusStatusTitle == null || FocusStatusDescription == null)
             return;
 
         FocusStatusTitle.Text = "Auto Focus Mode";
-        FocusStatusState.Text = "Active";
-        FocusStatusDescription.Text = "Automatically detects and focuses on the speaking user.";
+        FocusStatusDescription.Text = "Active · Automatically detects and focuses on the speaking user.";
         if (SpecificUserPanel != null)
             SpecificUserPanel.Visibility = Visibility.Collapsed;
     }
 
     private void SpecificUserFocus_Checked(object sender, RoutedEventArgs e)
     {
-        if (FocusStatusTitle == null || FocusStatusState == null || FocusStatusDescription == null)
+        if (FocusStatusTitle == null || FocusStatusDescription == null)
             return;
 
         FocusStatusTitle.Text = "Specific User Mode";
-        FocusStatusState.Text = "Waiting";
-        FocusStatusDescription.Text = "Enter a Discord user ID and click Apply.";
+        FocusStatusDescription.Text = "Waiting · Enter a Discord user ID and click Apply.";
         if (SpecificUserPanel != null)
             SpecificUserPanel.Visibility = Visibility.Visible;
     }
@@ -154,8 +165,7 @@ public partial class MainWindow : Window
         }
 
         FocusStatusTitle.Text = "Specific User Mode";
-        FocusStatusState.Text = "Applied";
-        FocusStatusDescription.Text = $"Focused user ID: {userId}";
+        FocusStatusDescription.Text = $"Applied · Focused user ID: {userId}";
     }
 
     private void TtsTestInput_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
@@ -220,48 +230,87 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void ToggleSidebarButton_Click(object sender, RoutedEventArgs e)
+    {
+        _isSidebarCollapsed = !_isSidebarCollapsed;
+        ApplySidebarState();
+    }
+
+    private static FrameworkElement BuildSidebarToggleIcon(double angle)
+    {
+        var path = new System.Windows.Shapes.Path
+        {
+            Data = System.Windows.Media.Geometry.Parse("M 1.5 1.5 L 12.5 1.5 L 12.5 12.5 L 1.5 12.5 Z M 4 1.5 L 4 12.5 M 9.3 4.2 L 6.8 7 L 9.3 9.8"),
+            Stroke = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xCF, 0xC7, 0xE6)),
+            StrokeThickness = 1.5,
+            StrokeStartLineCap = System.Windows.Media.PenLineCap.Round,
+            StrokeEndLineCap = System.Windows.Media.PenLineCap.Round,
+            StrokeLineJoin = System.Windows.Media.PenLineJoin.Round,
+            RenderTransform = new System.Windows.Media.RotateTransform(angle, 7, 7)
+        };
+
+        return new System.Windows.Controls.Viewbox
+        {
+            Width = 18,
+            Height = 18,
+            Child = path
+        };
+    }
+
+    private void ApplySidebarState()
+    {
+        if (LeftSidebarPanel == null || SidebarExpandedContent == null || SidebarCollapsedContent == null)
+        {
+            return;
+        }
+
+        LeftSidebarPanel.Width = _isSidebarCollapsed ? 48 : 300;
+        SidebarExpandedContent.Visibility = _isSidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        SidebarCollapsedContent.Visibility = _isSidebarCollapsed ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private void ApplyPlatformUiState()
     {
         var isVrChat = _settings.VoicePlatform == VoiceIntegrationPlatform.VrChat;
+        var isOther = _settings.VoicePlatform == VoiceIntegrationPlatform.Other;
 
         if (VoiceChatTitleText != null)
         {
-            VoiceChatTitleText.Text = isVrChat ? "🎤 Voice Chat · VRChat" : "🎤 Voice Chat · Discord";
+            VoiceChatTitleText.Text = isVrChat ? "🎤 Voice Chat · VRChat" : (isOther ? "🎤 Voice Chat" : "🎤 Voice Chat · Discord");
         }
 
-        if (ServerStatusPanel != null)
+        if (ServerStatusText != null)
         {
-            ServerStatusPanel.Visibility = isVrChat ? Visibility.Collapsed : Visibility.Visible;
-        }
-
-        if (UserFocusHeader != null)
-        {
-            UserFocusHeader.Visibility = isVrChat ? Visibility.Collapsed : Visibility.Visible;
+            var serverStatusParent = ServerStatusText.Parent as FrameworkElement;
+            if (serverStatusParent != null)
+            {
+                serverStatusParent.Visibility = (isVrChat || isOther) ? Visibility.Collapsed : Visibility.Visible;
+            }
         }
 
         if (AllUsersFocusRadio != null)
         {
-            AllUsersFocusRadio.Visibility = isVrChat ? Visibility.Collapsed : Visibility.Visible;
+            AllUsersFocusRadio.Visibility = (isVrChat || isOther) ? Visibility.Collapsed : Visibility.Visible;
         }
 
         if (AutoFocusRadio != null)
         {
-            AutoFocusRadio.Visibility = isVrChat ? Visibility.Collapsed : Visibility.Visible;
+            AutoFocusRadio.Visibility = (isVrChat || isOther) ? Visibility.Collapsed : Visibility.Visible;
         }
 
         if (SpecificUserFocusRadio != null)
         {
-            SpecificUserFocusRadio.Visibility = isVrChat ? Visibility.Collapsed : Visibility.Visible;
+            SpecificUserFocusRadio.Visibility = (isVrChat || isOther) ? Visibility.Collapsed : Visibility.Visible;
         }
 
         if (SpecificUserPanel != null)
         {
-            SpecificUserPanel.Visibility = isVrChat ? Visibility.Collapsed : SpecificUserPanel.Visibility;
+            SpecificUserPanel.Visibility = (isVrChat || isOther) ? Visibility.Collapsed : SpecificUserPanel.Visibility;
         }
 
         if (FocusStatusPanel != null)
         {
-            FocusStatusPanel.Visibility = isVrChat ? Visibility.Collapsed : Visibility.Visible;
+            FocusStatusPanel.Visibility = (isVrChat || isOther) ? Visibility.Collapsed : Visibility.Visible;
         }
 
         if (VrChatRoutePanel != null)
@@ -269,7 +318,7 @@ public partial class MainWindow : Window
             VrChatRoutePanel.Visibility = isVrChat ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        if (VrChatRouteDescription != null)
+        if (VrChatRouteDescription != null && isVrChat)
         {
             VrChatRouteDescription.Text =
                 $"Set your voice output to the routed device or virtual cable, then configure VRChat to listen on that input path. OSC defaults: {_settings.VrChatOscHost}:{_settings.VrChatOscInputPort} in, {_settings.VrChatOscOutputPort} out.";
@@ -279,12 +328,13 @@ public partial class MainWindow : Window
         {
             PlatformTipText.Text = isVrChat
                 ? "Tip: for VRChat, use a virtual cable for Tsuki output and keep local microphone mode enabled."
-                : "Tip: Right-click user in Discord -> Copy ID";
+                : (isOther ? "Standalone mode: Voice output to selected audio device only."
+                    : "Tip: Right-click user in Discord -> Copy ID");
         }
 
         if (PlatformPlaybackButton != null)
         {
-            PlatformPlaybackButton.Content = isVrChat ? "Play to VRChat Output" : "Play in Discord";
+            PlatformPlaybackButton.Content = isVrChat ? "Play to VRChat Output" : (isOther ? "Test Output" : "Play in Discord");
         }
     }
 }

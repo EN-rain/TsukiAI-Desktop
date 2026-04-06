@@ -25,6 +25,7 @@
                       UseAeroCaptionButtons="False"/>
     </WindowChrome.WindowChrome>
         <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <!-- Converters -->
         <local:StringContainsConverter x:Key="StringContainsConverter"/>
         
@@ -640,10 +641,6 @@
                             <Button x:Name="TabVoice" Content="Voice" Click="Tab_Click" Tag="1"
                                     Style="{StaticResource SettingsTabButton}"
                                     Foreground="{StaticResource TextSecondaryBrush}"
-                                    Margin="0,0,24,0"/>
-                            <Button x:Name="TabAdvanced" Content="Advanced" Click="Tab_Click" Tag="2"
-                                    Style="{StaticResource SettingsTabButton}"
-                                    Foreground="{StaticResource TextSecondaryBrush}"
                                     Margin="0"/>
                         </StackPanel>
                     </Grid>
@@ -951,10 +948,230 @@
                     </StackPanel>
                 </StackPanel>
             </Border>
-                        </StackPanel>
+        </StackPanel>
                         
                         <!-- Voice Content -->
                         <StackPanel x:Name="VoiceContent" Visibility="Collapsed">
+            <!-- ═══ Voice Platform ═══ -->
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Platform"/>
+                    <TextBlock Style="{StaticResource FieldHint}"
+                               Text="Discord uses the Node bridge. VRChat voice uses your local microphone path and a virtual audio cable or routed output device."
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,10"/>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Target Platform"/>
+                        <ComboBox Style="{StaticResource SettingsComboBox}"
+                                  SelectedIndex="{Binding VoicePlatformIndex, Mode=TwoWay}">
+                            <ComboBoxItem Content="Discord"/>
+                            <ComboBoxItem Content="VRChat"/>
+                            <ComboBoxItem Content="Other (No Integration)"/>
+                        </ComboBox>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══ Discord Voice Integration ═══ -->
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel Visibility="{Binding IsDiscordPlatform, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Discord Voice Integration"/>
+                    <TextBlock Style="{StaticResource FieldHint}"
+                               Text="Discord token / guild / channel IDs are handled from discord-voice-bridge/.env"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,10"/>
+                    <Button Style="{StaticResource SettingsButton}"
+                            Content="Open discord-voice-bridge/.env"
+                            HorizontalAlignment="Left"
+                            Padding="12,6"
+                            Margin="0,0,0,10"
+                            IsEnabled="{Binding IsDiscordPlatform}"
+                            Click="OpenDiscordEnv_Click"/>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="STT Mode"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="Choose the speech-to-text provider used by the Discord bridge."/>
+                        <ComboBox Style="{StaticResource SettingsComboBox}"
+                                  IsEnabled="{Binding IsDiscordPlatform}"
+                                  SelectedIndex="{Binding SttModeIndex, Mode=TwoWay}">
+                            <ComboBoxItem Content="AssemblyAI (Accurate, Slower)"/>
+                            <ComboBoxItem Content="Groq Whisper (Fast, Lower Latency)"/>
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Margin="0,8,0,0">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="STT Language"/>
+                        <ComboBox Style="{StaticResource SettingsComboBox}"
+                                  IsEnabled="{Binding IsDiscordPlatform}"
+                                  SelectedValuePath="Tag"
+                                  SelectedValue="{Binding SttLanguageCode, Mode=TwoWay}">
+                            <ComboBoxItem Content="Auto-detect" Tag="auto"/>
+                            <ComboBoxItem Content="English" Tag="en"/>
+                            <ComboBoxItem Content="Japanese" Tag="ja"/>
+                            <ComboBoxItem Content="Chinese" Tag="zh"/>
+                            <ComboBoxItem Content="Korean" Tag="ko"/>
+                            <ComboBoxItem Content="Spanish" Tag="es"/>
+                            <ComboBoxItem Content="French" Tag="fr"/>
+                            <ComboBoxItem Content="German" Tag="de"/>
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Margin="0,8,0,0">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Translation Strategy"/>
+                        <ComboBox x:Name="CmbDiscordTranslationStrategy"
+                                  Style="{StaticResource SettingsComboBox}"
+                                  IsEnabled="{Binding IsDiscordPlatform}"
+                                  SelectedIndex="{Binding DiscordTranslationStrategyIndex, Mode=TwoWay}">
+                            <ComboBoxItem Content="Translate Input to Japanese"/>
+                            <ComboBoxItem Content="Translate Response to Japanese"/>
+                            <ComboBoxItem Content="Bilingual - No Translation"/>
+                        </ComboBox>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══ Voice Audio Devices ═══ -->
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Audio Devices"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Input Device"/>
+                            <ComboBox Style="{StaticResource SettingsComboBox}"
+                                      ItemsSource="{Binding InputDevices}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding VoiceChatInputDeviceNumber}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Output Device"/>
+                            <ComboBox Style="{StaticResource SettingsComboBox}"
+                                      ItemsSource="{Binding OutputDevices}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding VoiceChatOutputDeviceNumber}"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══ Local Microphone Input ═══ -->
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Local Microphone Input"/>
+                    <TextBlock Style="{StaticResource FieldHint}"
+                               Text="For VRChat, keep this enabled and route Tsuki's output to a virtual microphone or cable device that VRChat listens to."
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,10"/>
+                    <StackPanel Margin="0,0,0,12">
+                        <CheckBox x:Name="UseMicrophoneToggle"
+                                  Style="{StaticResource SettingsCheckBox}"
+                                  Content="Use Local Microphone (instead of Discord)"
+                                  IsChecked="{Binding UseMicrophoneInput}"
+                                  IsEnabled="{Binding IsDiscordPlatform}"
+                                  Visibility="{Binding IsDiscordPlatform, Converter={StaticResource BoolToVisibilityConverter}}"
+                                  Margin="0,0,0,8"/>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,0,8">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Microphone Device"/>
+                        <ComboBox x:Name="CmbMicrophoneDevice"
+                                  Style="{StaticResource SettingsComboBox}"
+                                  SelectedIndex="0"
+                                  IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}">
+                            <ComboBoxItem Content="Default Microphone"/>
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,0,8">
+                        <CheckBox x:Name="PushToTalkToggle"
+                                  Style="{StaticResource SettingsCheckBox}"
+                                  Content="Push-to-Talk Mode"
+                                  IsChecked="{Binding MicrophonePushToTalk}"
+                                  IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"
+                                  Margin="0,0,0,4"/>
+                    </StackPanel>
+                    <Button x:Name="BtnTestMicrophone"
+                            Click="TestMicrophone_Click"
+                            Style="{StaticResource SettingsButton}"
+                            Content="Test Microphone"
+                            MinHeight="36"
+                            Padding="12,0"
+                            IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"
+                            Margin="0,4,0,0"/>
+                    <StackPanel Margin="0,12,0,0">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Voice Reception Toggle Hotkey"/>
+                        <TextBox Style="{StaticResource SettingsTextBox}"
+                                 Text="{Binding VoiceReceptionToggleKeyText, Mode=TwoWay}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══ VRChat Routing ═══ -->
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel Visibility="{Binding IsVrChatPlatform, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="VRChat Routing"/>
+                    <TextBlock Style="{StaticResource FieldHint}"
+                               Text="VRChat does not expose direct voice-bot injection. The practical setup is: your mic into Tsuki, Tsuki TTS to a virtual audio output, and VRChat listening to that routed device."
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,10"/>
+                    <StackPanel Margin="0,0,0,8">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="OSC Host"/>
+                        <TextBox Style="{StaticResource SettingsTextBox}"
+                                 Text="{Binding VrChatOscHost, Mode=TwoWay}"
+                                 IsEnabled="{Binding IsVrChatPlatform}"/>
+                    </StackPanel>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="VRChat Inbound Port"/>
+                            <TextBox Style="{StaticResource SettingsTextBox}"
+                                     Text="{Binding VrChatOscInputPortText, Mode=TwoWay}"
+                                     IsEnabled="{Binding IsVrChatPlatform}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="VRChat Outbound Port"/>
+                            <TextBox Style="{StaticResource SettingsTextBox}"
+                                     Text="{Binding VrChatOscOutputPortText, Mode=TwoWay}"
+                                     IsEnabled="{Binding IsVrChatPlatform}"/>
+                        </StackPanel>
+                    </Grid>
+                    <CheckBox Style="{StaticResource SettingsCheckBox}"
+                              Content="Enable VRChat chatbox fallback for text responses later"
+                              IsChecked="{Binding VrChatUseChatboxFallback}"
+                              IsEnabled="{Binding IsVrChatPlatform}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══ Semantic Memory ═══ -->
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Semantic Memory"/>
+                    <TextBlock Style="{StaticResource FieldHint}"
+                               Text="Stores conversation context in a local ChromaDB vector database for long-term recall. Disable if you experience startup delays or don't need memory across sessions."
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,10"/>
+                    <CheckBox Style="{StaticResource SettingsCheckBox}"
+                              Content="Enable semantic memory (ChromaDB)"
+                              IsChecked="{Binding SemanticMemoryEnabled}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══ Voice Chat History ═══ -->
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Chat History"/>
+                    <Button Click="ClearVoiceChatHistory_Click"
+                            Style="{StaticResource SettingsButton}"
+                            HorizontalAlignment="Left"
+                            Content="Clear voice chat history"/>
+                </StackPanel>
+            </Border>
+            
             <!-- ═══ Voice (VOICEVOX) ═══ -->
             <Border Style="{StaticResource CardBorder}">
                 <StackPanel>
@@ -1037,9 +1254,19 @@
                         <CheckBox Style="{StaticResource SettingsCheckBox}" Margin="0,0,0,4"
                                   Content="Translate voice output to Japanese"
                                   IsChecked="{Binding VoiceTranslateToJapanese}"/>
-                        <TextBlock Style="{StaticResource FieldHint}"
-                                   Text="Applies to live voice replies and manual TTS playback."
-                                   Margin="24,0,0,8"/>
+                        <TextBlock Text="Applies to live voice replies and manual TTS playback."
+                                   Margin="24,0,0,8">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource FieldHint}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding VoiceTranslateToJapanese}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                         
                         <!-- DeepL Settings (shown when translation is enabled) -->
                         <Border Background="Transparent" 
@@ -1048,12 +1275,32 @@
                                 CornerRadius="8"
                                 Padding="0"
                                 Margin="16,0,0,8">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding VoiceTranslateToJapanese}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
                             <StackPanel>
                                 <CheckBox Style="{StaticResource SettingsCheckBox}" Margin="0,0,0,12"
                                           Content="Use DeepL API (professional translation with usage tracking)"
                                           IsChecked="{Binding UseDeepLTranslate}"/>
                                 
                                 <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding UseDeepLTranslate}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
                                     <CheckBox Style="{StaticResource SettingsCheckBox}"
                                               Content="Use Free API endpoint (500,000 chars/month)"
                                               IsChecked="{Binding UseDeepLFreeApi}"/>
@@ -1072,34 +1319,6 @@
             </Border>
                         </StackPanel>
                         
-                        <!-- Advanced Content -->
-                        <StackPanel x:Name="AdvancedContent" Visibility="Collapsed">
-                            <Border Style="{StaticResource CardBorder}">
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Advanced Tools"/>
-                                    <TextBlock Style="{StaticResource FieldHint}"
-                                               Text="Voice-chat runtime settings were moved to Voice Setup so they only exist in one place."
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,10"/>
-                                    <Button Style="{StaticResource SettingsButton}"
-                                            Content="Open Voice Setup"
-                                            HorizontalAlignment="Left"
-                                            MinWidth="180"
-                                            Margin="0,0,0,10"
-                                            Click="OpenVoiceSetup_Click"/>
-
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Main Settings owns:"/>
-                                    <TextBlock Style="{StaticResource FieldHint}"
-                                               Text="AI providers, model, VoiceVox/Cloud TTS, voice output, DeepL, and general app behavior."
-                                               TextWrapping="Wrap"/>
-
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Voice Setup owns:" Margin="0,12,0,0"/>
-                                    <TextBlock Style="{StaticResource FieldHint}"
-                                               Text="Platform mode, Discord bridge/STT, voice-chat devices, microphone behavior, reception hotkey, VRChat routing, and voice-chat history."
-                                               TextWrapping="Wrap"/>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
 
         </StackPanel>
         </ScrollViewer>
