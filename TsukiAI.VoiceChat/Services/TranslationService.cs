@@ -12,6 +12,11 @@ public sealed class TranslationService : IDisposable
     private readonly string _baseUrl;
     private readonly string _apiKey;
     private readonly bool _enabled;
+    private readonly Dictionary<string, (string Text, DateTimeOffset ExpiresAt)> _cache = new(StringComparer.Ordinal);
+    private readonly LinkedList<string> _cacheLru = new();
+    private readonly object _cacheLock = new();
+    private const int CacheCapacity = 256;
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(30);
     private static readonly ResiliencePipeline<HttpResponseMessage> HttpRetryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
         .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
         {
@@ -73,6 +78,9 @@ public sealed class TranslationService : IDisposable
         text = (text ?? "").Trim();
         if (text.Length == 0) return string.Empty;
         if (!_enabled) return text;
+        var cacheKey = $"{sourceLang ?? "auto"}->{targetLang}:{text}";
+        if (TryGetCached(cacheKey, out var cached))
+            return cached;
 
         try
         {
@@ -105,7 +113,9 @@ public sealed class TranslationService : IDisposable
 
             var body = await response.Content.ReadAsStringAsync(ct);
             var result = JsonSerializer.Deserialize<DeepLResponse>(body);
-            return result?.translations?.FirstOrDefault()?.text?.Trim() ?? text;
+            var translated = result?.translations?.FirstOrDefault()?.text?.Trim() ?? text;
+            StoreCached(cacheKey, translated);
+            return translated;
         }
         catch (Exception ex)
         {
@@ -117,6 +127,48 @@ public sealed class TranslationService : IDisposable
     public void Dispose()
     {
         _httpClient.Dispose();
+    }
+
+    private bool TryGetCached(string cacheKey, out string text)
+    {
+        lock (_cacheLock)
+        {
+            if (_cache.TryGetValue(cacheKey, out var entry))
+            {
+                if (entry.ExpiresAt > DateTimeOffset.UtcNow)
+                {
+                    _cacheLru.Remove(cacheKey);
+                    _cacheLru.AddFirst(cacheKey);
+                    text = entry.Text;
+                    return true;
+                }
+
+                _cache.Remove(cacheKey);
+                _cacheLru.Remove(cacheKey);
+            }
+        }
+
+        text = string.Empty;
+        return false;
+    }
+
+    private void StoreCached(string cacheKey, string text)
+    {
+        lock (_cacheLock)
+        {
+            _cache[cacheKey] = (text, DateTimeOffset.UtcNow.Add(CacheTtl));
+            _cacheLru.Remove(cacheKey);
+            _cacheLru.AddFirst(cacheKey);
+
+            while (_cacheLru.Count > CacheCapacity)
+            {
+                var last = _cacheLru.Last?.Value;
+                if (last is null)
+                    break;
+                _cacheLru.RemoveLast();
+                _cache.Remove(last);
+            }
+        }
     }
 
     private sealed class DeepLResponse

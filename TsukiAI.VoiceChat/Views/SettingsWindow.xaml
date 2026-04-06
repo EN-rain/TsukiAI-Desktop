@@ -57,80 +57,6 @@
         <SolidColorBrush x:Key="TabInactiveBorderBrush" Color="#3A3150"/>
         <SolidColorBrush x:Key="TabHoverBackgroundBrush" Color="#221A33"/>
 
-        <!-- Scrollbar styling -->
-        <SolidColorBrush x:Key="ScrollTrackBrush" Color="#21192F"/>
-        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#5B4E79"/>
-        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#9B7BFF"/>
-
-        <Style x:Key="ThemedScrollBarThumb" TargetType="{x:Type Thumb}">
-            <Setter Property="OverridesDefaultStyle" Value="True"/>
-            <Setter Property="MinHeight" Value="24"/>
-            <Setter Property="MinWidth" Value="6"/>
-            <Setter Property="Background" Value="{StaticResource ScrollThumbBrush}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Thumb}">
-                        <Border x:Name="ThumbBorder"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="3"
-                                Margin="1"/>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource ScrollThumbHoverBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsDragging" Value="True">
-                                <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource ScrollThumbHoverBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style TargetType="{x:Type ScrollBar}">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="{StaticResource ScrollThumbBrush}"/>
-            <Setter Property="Width" Value="6"/>
-            <Setter Property="Height" Value="6"/>
-            <Setter Property="Margin" Value="0,0,2,0"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type ScrollBar}">
-                        <Grid Background="Transparent" SnapsToDevicePixels="True">
-                            <Track x:Name="PART_Track" IsDirectionReversed="True" Focusable="False">
-                                <Track.Thumb>
-                                    <Thumb Style="{StaticResource ThemedScrollBarThumb}"
-                                           Background="{TemplateBinding Foreground}"
-                                           Width="6"/>
-                                </Track.Thumb>
-                                <Track.DecreaseRepeatButton>
-                                    <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}"
-                                                  Opacity="0"
-                                                  IsTabStop="False"
-                                                  Background="Transparent"
-                                                  BorderThickness="0"/>
-                                </Track.DecreaseRepeatButton>
-                                <Track.IncreaseRepeatButton>
-                                    <RepeatButton Command="{x:Static ScrollBar.PageDownCommand}"
-                                                  Opacity="0"
-                                                  IsTabStop="False"
-                                                  Background="Transparent"
-                                                  BorderThickness="0"/>
-                                </Track.IncreaseRepeatButton>
-                            </Track>
-                        </Grid>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="Orientation" Value="Horizontal">
-                                <Setter Property="Height" Value="6"/>
-                                <Setter Property="Width" Value="Auto"/>
-                                <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
         <Style x:Key="SectionHeader" TargetType="{x:Type TextBlock}">
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -1108,9 +1034,12 @@
                     </Grid>
 
                     <StackPanel>
-                        <CheckBox Style="{StaticResource SettingsCheckBox}" Margin="0,0,0,8"
-                                  Content="Translate replies to Japanese for voice"
+                        <CheckBox Style="{StaticResource SettingsCheckBox}" Margin="0,0,0,4"
+                                  Content="Translate voice output to Japanese"
                                   IsChecked="{Binding VoiceTranslateToJapanese}"/>
+                        <TextBlock Style="{StaticResource FieldHint}"
+                                   Text="Applies to live voice replies and manual TTS playback."
+                                   Margin="24,0,0,8"/>
                         
                         <!-- DeepL Settings (shown when translation is enabled) -->
                         <Border Background="Transparent" 
@@ -1143,181 +1072,31 @@
             </Border>
                         </StackPanel>
                         
-                        <!-- Advanced Content (placeholder for future settings) -->
+                        <!-- Advanced Content -->
                         <StackPanel x:Name="AdvancedContent" Visibility="Collapsed">
-                            <!-- Discord Voice Integration -->
                             <Border Style="{StaticResource CardBorder}">
                                 <StackPanel>
-                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Discord Voice Integration"/>
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Advanced Tools"/>
                                     <TextBlock Style="{StaticResource FieldHint}"
-                                               Text="Discord token / guild / channel IDs are handled from discord-voice-bridge/.env"
+                                               Text="Voice-chat runtime settings were moved to Voice Setup so they only exist in one place."
                                                TextWrapping="Wrap"
                                                Margin="0,0,0,10"/>
                                     <Button Style="{StaticResource SettingsButton}"
-                                            Content="Open discord-voice-bridge/.env"
-                                            HorizontalAlignment="Left"
-                                            MinWidth="200"
-                                            Margin="0,0,0,10"
-                                            Click="OpenDiscordEnv_Click"/>
-
-                                    <StackPanel Margin="0,8,0,0">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Speech-to-Text Provider"/>
-                                        <ComboBox x:Name="CmbSttMode"
-                                                  Style="{StaticResource SettingsComboBox}"
-                                                  SelectedIndex="{Binding SttModeIndex, Mode=TwoWay}">
-                                            <ComboBoxItem Content="AssemblyAI (Accurate, Slower)"/>
-                                            <ComboBoxItem Content="Groq Whisper (Fast, Free)" ToolTip="Uses same Groq API key as LLM"/>
-                                        </ComboBox>
-                                        <TextBlock Style="{StaticResource FieldHint}"
-                                                   Text="Groq Whisper is faster and uses your existing Groq API key"
-                                                   TextWrapping="Wrap"
-                                                   Margin="0,4,0,0"/>
-                                    </StackPanel>
-
-                                    <StackPanel Margin="0,12,0,0">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="STT Language"/>
-                                        <ComboBox x:Name="CmbSttLanguage"
-                                                  Style="{StaticResource SettingsComboBox}"
-                                                  SelectedValuePath="Tag"
-                                                  SelectedValue="{Binding SttLanguageCode, Mode=TwoWay}">
-                                            <ComboBoxItem Content="Auto-detect" Tag="auto"/>
-                                            <ComboBoxItem Content="English" Tag="en"/>
-                                            <ComboBoxItem Content="Japanese" Tag="ja"/>
-                                            <ComboBoxItem Content="Chinese" Tag="zh"/>
-                                            <ComboBoxItem Content="Korean" Tag="ko"/>
-                                            <ComboBoxItem Content="Spanish" Tag="es"/>
-                                            <ComboBoxItem Content="French" Tag="fr"/>
-                                            <ComboBoxItem Content="German" Tag="de"/>
-                                        </ComboBox>
-                                        <TextBlock Style="{StaticResource FieldHint}"
-                                                   Text="Used by cloud STT. Auto-detect is safest for mixed languages."
-                                                   TextWrapping="Wrap"
-                                                   Margin="0,4,0,0"/>
-                                    </StackPanel>
-
-                                    <StackPanel Margin="0,12,0,0">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Translation Strategy"/>
-                                        <ComboBox x:Name="CmbDiscordTranslationStrategy"
-                                                  Style="{StaticResource SettingsComboBox}"
-                                                  SelectedIndex="{Binding DiscordTranslationStrategyIndex, Mode=TwoWay}">
-                                            <ComboBoxItem Content="Translate Input to Japanese"/>
-                                            <ComboBoxItem Content="Translate Response to Japanese"/>
-                                            <ComboBoxItem Content="Bilingual - No Translation"/>
-                                        </ComboBox>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-
-                            <!-- Voice Audio Devices -->
-                            <Border Style="{StaticResource CardBorder}">
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Audio Devices"/>
-                                    <Grid Margin="0,0,0,8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-
-                                        <StackPanel Grid.Column="0">
-                                            <TextBlock Style="{StaticResource FieldLabel}" Text="Input Device"/>
-                                            <ComboBox Style="{StaticResource SettingsComboBox}"
-                                                      ItemsSource="{Binding VoiceChatInputDevices}"
-                                                      DisplayMemberPath="Name"
-                                                      SelectedValuePath="Id"
-                                                      SelectedValue="{Binding VoiceChatInputDeviceNumber}"/>
-                                        </StackPanel>
-
-                                        <StackPanel Grid.Column="2">
-                                            <TextBlock Style="{StaticResource FieldLabel}" Text="Output Device"/>
-                                            <ComboBox Style="{StaticResource SettingsComboBox}"
-                                                      ItemsSource="{Binding VoiceChatOutputDevices}"
-                                                      DisplayMemberPath="Name"
-                                                      SelectedValuePath="Id"
-                                                      SelectedValue="{Binding VoiceChatOutputDeviceNumber}"/>
-                                        </StackPanel>
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-
-                            <!-- Local Microphone Input -->
-                            <Border Style="{StaticResource CardBorder}">
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Local Microphone Input"/>
-                                    <TextBlock Style="{StaticResource FieldHint}" 
-                                               Text="Use your computer's microphone for voice input instead of Discord voice chat"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,12"/>
-                                    <StackPanel Margin="0,0,0,12">
-                                        <CheckBox x:Name="UseMicrophoneToggle"
-                                                  Style="{StaticResource SettingsCheckBox}"
-                                                  Content="Use Local Microphone (instead of Discord)"
-                                                  IsChecked="{Binding UseMicrophoneInput}"
-                                                  Margin="0,0,0,8"/>
-                                    </StackPanel>
-
-                                    <StackPanel Margin="0,0,0,8">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Microphone Device"/>
-                                        <ComboBox x:Name="CmbMicrophoneDevice"
-                                                  Style="{StaticResource SettingsComboBox}"
-                                                  IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"/>
-                                    </StackPanel>
-
-                                    <StackPanel Margin="0,0,0,8">
-                                        <CheckBox x:Name="PushToTalkToggle"
-                                                  Style="{StaticResource SettingsCheckBox}"
-                                                  Content="Push-to-Talk Mode"
-                                                  IsChecked="{Binding MicrophonePushToTalk}"
-                                                  IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"
-                                                  Margin="0,0,0,4"/>
-                                    </StackPanel>
-
-                                    <StackPanel Margin="0,0,0,8">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Voice Reception Toggle Key"/>
-                                        <TextBlock x:Name="TxtVoiceReceptionKeyHint"
-                                                   Style="{StaticResource FieldHint}"
-                                                   Text="Press this key in main window to toggle voice reception (e.g. F8, F9, Pause)."/>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBox x:Name="TxtVoiceReceptionToggleKey"
-                                                     Grid.Column="0"
-                                                     Style="{StaticResource SettingsTextBox}"
-                                                     IsReadOnly="True"
-                                                     Text="{Binding VoiceReceptionToggleKeyText, UpdateSourceTrigger=PropertyChanged}"/>
-                                            <Button x:Name="BtnCaptureVoiceReceptionKey"
-                                                    Grid.Column="1"
-                                                    Click="CaptureVoiceReceptionKey_Click"
-                                                    Style="{StaticResource SettingsButton}"
-                                                    MinWidth="96"
-                                                    Margin="8,0,0,0"
-                                                    Content="Edit Key"/>
-                                        </Grid>
-                                    </StackPanel>
-
-                                    <Button x:Name="BtnTestMicrophone"
-                                            Click="TestMicrophone_Click"
-                                            Style="{StaticResource SettingsButton}"
-                                            Content="Test Microphone"
-                                            MinHeight="36"
-                                            HorizontalAlignment="Left"
-                                            MinWidth="140"
-                                            IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"
-                                            Margin="0,4,0,0"/>
-                                </StackPanel>
-                            </Border>
-
-                            <!-- Voice Chat History -->
-                            <Border Style="{StaticResource CardBorder}">
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Chat History"/>
-                                    <Button Click="ClearVoiceChatHistory_Click"
-                                            Style="{StaticResource SettingsButton}"
+                                            Content="Open Voice Setup"
                                             HorizontalAlignment="Left"
                                             MinWidth="180"
-                                            Content="Clear voice chat history"/>
+                                            Margin="0,0,0,10"
+                                            Click="OpenVoiceSetup_Click"/>
+
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Main Settings owns:"/>
+                                    <TextBlock Style="{StaticResource FieldHint}"
+                                               Text="AI providers, model, VoiceVox/Cloud TTS, voice output, DeepL, and general app behavior."
+                                               TextWrapping="Wrap"/>
+
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Voice Setup owns:" Margin="0,12,0,0"/>
+                                    <TextBlock Style="{StaticResource FieldHint}"
+                                               Text="Platform mode, Discord bridge/STT, voice-chat devices, microphone behavior, reception hotkey, VRChat routing, and voice-chat history."
+                                               TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>

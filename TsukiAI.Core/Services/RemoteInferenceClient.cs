@@ -28,6 +28,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
     private readonly ISemanticMemoryService? _semanticMemory;
     private readonly GenerationTuningSettings _tuning;
     private readonly string _replyTonePreset;
+    private readonly TimeSpan _semanticSearchBudget;
     private static readonly PromptBuilder PromptBuilder = new();
     private const int RemoteHistoryWindowDefault = 6;
     private const int RemoteHistoryWindowDetailed = 8;
@@ -112,6 +113,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
         _semanticMemory = semanticMemory;
         _tuning = (tuning ?? GenerationTuningSettings.Default).Clamp();
         _replyTonePreset = string.IsNullOrWhiteSpace(replyTonePreset) ? "natural" : replyTonePreset.Trim().ToLowerInvariant();
+        _semanticSearchBudget = TimeSpan.FromMilliseconds(Math.Max(50, ReadIntEnv("TSUKI_SEMANTIC_SEARCH_BUDGET_MS", 150)));
         if (_semanticMemory is not null)
         {
             _memoryWriteQueue = Channel.CreateBounded<string>(new BoundedChannelOptions(256)
@@ -146,6 +148,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
         
         DevLog.WriteLine($"RemoteInferenceClient: Initialized with remote server at: {BaseUrl}");
         DevLog.WriteLine($"RemoteInferenceClient: Model: {Model}");
+        DevLog.WriteLine($"RemoteInferenceClient: Semantic search budget ms: {(int)_semanticSearchBudget.TotalMilliseconds}");
     }
 
     /// <summary>
@@ -333,7 +336,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
             // Semantic search is already async, no need for Task.Run wrapper
             var chromaSw = System.Diagnostics.Stopwatch.StartNew();
             var memoryHits = shouldSearchPast && _semanticMemory is not null
-                ? await _semanticMemory.SearchAsync(userText, 5, ct)
+                ? await SearchSemanticMemoryWithBudgetAsync(userText, ct)
                 : Array.Empty<SemanticMemoryHit>();
             chromaSw.Stop();
             DevLog.WriteLine("RemoteInferenceClient[Memory]: retrieve_chroma_ms={0}", chromaSw.ElapsedMilliseconds);
@@ -424,6 +427,36 @@ public sealed class RemoteInferenceClient : IInferenceClient
             DevLog.WriteLine($"RemoteInferenceClient: Chat failed: {ex.Message}");
             throw new InferenceException($"Remote inference failed: {ex.Message}", ex);
         }
+    }
+
+    private async Task<IReadOnlyList<SemanticMemoryHit>> SearchSemanticMemoryWithBudgetAsync(string userText, CancellationToken ct)
+    {
+        if (_semanticMemory is null)
+            return Array.Empty<SemanticMemoryHit>();
+
+        using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budgetCts.CancelAfter(_semanticSearchBudget);
+
+        try
+        {
+            return await _semanticMemory.SearchAsync(userText, 3, budgetCts.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            DevLog.WriteLine("RemoteInferenceClient[Memory]: semantic_search_budget_exceeded_ms={0}", (int)_semanticSearchBudget.TotalMilliseconds);
+            return Array.Empty<SemanticMemoryHit>();
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine("RemoteInferenceClient[Memory]: semantic_search_failed={0}", ex.GetBaseException().Message);
+            return Array.Empty<SemanticMemoryHit>();
+        }
+    }
+
+    private static int ReadIntEnv(string key, int fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(key);
+        return int.TryParse(raw, out var parsed) ? parsed : fallback;
     }
 
     /// <summary>

@@ -8,7 +8,7 @@ public sealed class TtsPlaybackService : IDisposable
     private readonly object _lock = new();
     private IWavePlayer? _player;
     private WaveStream? _reader;
-    private string? _tempPath;
+    private MemoryStream? _stream;
     private TaskCompletionSource<bool>? _playbackTcs;
 
     public int OutputDeviceNumber { get; private set; } = -1;
@@ -48,14 +48,12 @@ public sealed class TtsPlaybackService : IDisposable
             lock (_lock)
             {
                 Stop_NoLock();
-                _tempPath = Path.Combine(Path.GetTempPath(), $"tsuki-voice-{Guid.NewGuid():N}.wav");
             }
-
-            await File.WriteAllBytesAsync(_tempPath, wavBytes, ct);
 
             lock (_lock)
             {
-                _reader = new AudioFileReader(_tempPath);
+                _stream = new MemoryStream(wavBytes, writable: false);
+                _reader = new WaveFileReader(_stream);
                 var waveOut = new WaveOutEvent { DeviceNumber = OutputDeviceNumber };
                 _playbackTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 waveOut.PlaybackStopped += (_, _) =>
@@ -90,15 +88,11 @@ public sealed class TtsPlaybackService : IDisposable
 
         try { _reader?.Dispose(); } catch { }
         _reader = null;
+        try { _stream?.Dispose(); } catch { }
+        _stream = null;
 
         try { _playbackTcs?.TrySetCanceled(); } catch { }
         _playbackTcs = null;
-
-        if (!string.IsNullOrWhiteSpace(_tempPath))
-        {
-            try { _ = Task.Run(() => File.Delete(_tempPath)); } catch { }
-            _tempPath = null;
-        }
     }
 
     private static async Task WaitWithCancellationAsync(Task task, CancellationToken ct)

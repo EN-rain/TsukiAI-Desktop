@@ -110,21 +110,21 @@ const VAD = {
   // RMS threshold to consider a frame as speech (0–32767 scale for 16-bit PCM)
   RMS_SPEECH_THRESHOLD: parseInt(process.env.VAD_RMS_THRESHOLD || '300', 10),
   // How many consecutive silent frames (20 ms each) before we finalize a segment
-  // 45 frames * 20 ms = 900 ms silence cutoff
-  SILENCE_FRAMES_CUTOFF: parseInt(process.env.VAD_SILENCE_FRAMES || '45', 10),
+  // 20 frames * 20 ms = 400 ms silence cutoff
+  SILENCE_FRAMES_CUTOFF: parseInt(process.env.VAD_SILENCE_FRAMES || '20', 10),
   // Hard max for a single audio segment in seconds
   MAX_SEGMENT_SEC: parseFloat(process.env.VAD_MAX_SEGMENT_SEC || '12'),
   // Max total turn length in seconds (across all segments before sending to LLM)
   MAX_TURN_SEC: parseFloat(process.env.VAD_MAX_TURN_SEC || '30'),
   // End-of-turn silence: if no new speech for this many ms, finalize the whole turn
-  END_OF_TURN_MS: parseInt(process.env.VAD_END_OF_TURN_MS || '1800', 10),
+  END_OF_TURN_MS: parseInt(process.env.VAD_END_OF_TURN_MS || '650', 10),
   // Per-user cooldown in ms (prevent rapid-fire triggers)
-  USER_COOLDOWN_MS: parseInt(process.env.VAD_USER_COOLDOWN_MS || '3000', 10),
+  USER_COOLDOWN_MS: parseInt(process.env.VAD_USER_COOLDOWN_MS || '2000', 10),
   // Minimum segment size in bytes to bother sending for STT (avoids tiny pops)
-  MIN_SEGMENT_BYTES: parseInt(process.env.VAD_MIN_SEGMENT_BYTES || '9600', 10), // ~50 ms stereo 48 kHz
+  MIN_SEGMENT_BYTES: parseInt(process.env.VAD_MIN_SEGMENT_BYTES || '7680', 10), // ~40 ms stereo 48 kHz
 };
-const VAD_BATCHING_ENABLED = (process.env.VAD_BATCHING_ENABLED || 'false').toLowerCase() === 'true';
-const VAD_FRAME_BATCH_SIZE = Math.max(1, Math.min(10, parseInt(process.env.VAD_FRAME_BATCH_SIZE || '5', 10)));
+const VAD_BATCHING_ENABLED = (process.env.VAD_BATCHING_ENABLED || 'true').toLowerCase() === 'true';
+const VAD_FRAME_BATCH_SIZE = Math.max(1, Math.min(10, parseInt(process.env.VAD_FRAME_BATCH_SIZE || '8', 10)));
 
 const hasCSharpIntegration = process.env.CSHARP_API_URL && process.env.CSHARP_API_URL !== 'http://localhost:5000';
 
@@ -222,25 +222,25 @@ async function finalizeTurn(userId) {
 
   const combined = Buffer.concat(segments);
   if (combined.length < VAD.MIN_SEGMENT_BYTES) {
-    console.log(`[TURN] User ${userId}: discarding tiny turn (${combined.length} bytes)`);
+    debugLog(`[TURN] User ${userId}: discarding tiny turn (${combined.length} bytes)`);
     return;
   }
 
   // Check cooldown
   const now = Date.now();
   if (now - state.lastResponseAt < VAD.USER_COOLDOWN_MS) {
-    console.log(`[TURN] User ${userId}: cooldown active, skipping`);
+    debugLog(`[TURN] User ${userId}: cooldown active, skipping`);
     return;
   }
 
   if (state.processing) {
-    console.log(`[TURN] User ${userId}: already processing, skipping`);
+    debugLog(`[TURN] User ${userId}: already processing, skipping`);
     return;
   }
 
   state.processing = true;
   try {
-    console.log(`[TURN] User ${userId}: finalizing turn (${segments.length} segment(s), ${combined.length} bytes)`);
+    debugLog(`[TURN] User ${userId}: finalizing turn (${segments.length} segment(s), ${combined.length} bytes)`);
     await sendAudioForSTT(userId, combined);
     state.lastResponseAt = Date.now();
   } finally {
@@ -266,7 +266,7 @@ function addSegmentToTurn(userId, segmentBuffer) {
   // Check max turn duration
   const turnDurationSec = (now - state.turnStartedAt) / 1000;
   if (turnDurationSec >= VAD.MAX_TURN_SEC) {
-    console.log(`[VAD] User ${userId}: max turn duration reached (${turnDurationSec.toFixed(1)}s), forcing finalize`);
+    debugLog(`[VAD] User ${userId}: max turn duration reached (${turnDurationSec.toFixed(1)}s), forcing finalize`);
     finalizeTurn(userId);
     return;
   }
@@ -276,7 +276,7 @@ function addSegmentToTurn(userId, segmentBuffer) {
     clearTimeout(state.endOfTurnTimer);
   }
   state.endOfTurnTimer = setTimeout(() => {
-    console.log(`[VAD] User ${userId}: end-of-turn silence (${VAD.END_OF_TURN_MS}ms), finalizing turn`);
+    debugLog(`[VAD] User ${userId}: end-of-turn silence (${VAD.END_OF_TURN_MS}ms), finalizing turn`);
     finalizeTurn(userId);
   }, VAD.END_OF_TURN_MS);
 }
@@ -551,7 +551,7 @@ function handleUserAudio(userId, audioStream) {
     return;
   }
 
-  console.log(`[AUDIO] User ${userId} started speaking`);
+  debugLog(`[AUDIO] User ${userId} started speaking`);
 
   const decoder = new prism.opus.Decoder({
     rate: CONFIG.SAMPLE_RATE,
@@ -649,12 +649,12 @@ function handleUserAudio(userId, audioStream) {
     speechDetected = false;
 
     if (segmentBuffer.length < VAD.MIN_SEGMENT_BYTES) {
-      console.log(`[VAD] User ${userId}: segment too small (${segmentBuffer.length} bytes), discarding`);
+      debugLog(`[VAD] User ${userId}: segment too small (${segmentBuffer.length} bytes), discarding`);
       return;
     }
 
     const durationMs = (segmentBuffer.length / BYTES_PER_SEC * 1000).toFixed(0);
-    console.log(`[VAD] User ${userId}: segment complete (${segmentBuffer.length} bytes, ~${durationMs}ms)`);
+    debugLog(`[VAD] User ${userId}: segment complete (${segmentBuffer.length} bytes, ~${durationMs}ms)`);
 
     // Add to turn (turn manager handles end-of-turn timing + sending to STT)
     addSegmentToTurn(userId, segmentBuffer);

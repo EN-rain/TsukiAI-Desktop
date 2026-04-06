@@ -203,18 +203,25 @@ public partial class App : System.Windows.Application
         if (settings.VoiceRuntimeV2Enabled)
         {
             _serviceProvider.GetRequiredService<VoiceConversationPipeline>().Start();
-            RunBackground("voicevox_engine_start", async () =>
+            if (settings.TtsMode == TtsMode.LocalVoiceVox)
             {
-                try
+                RunBackground("voicevox_engine_start", async () =>
                 {
-                    var engine = _serviceProvider.GetRequiredService<VoicevoxEngineService>();
-                    await engine.StartAsync(CancellationToken.None);
-                }
-                catch (Exception ex)
-                {
-                    DevLog.WriteLine("App: VoiceVox engine start failed: {0}", ex.Message);
-                }
-            });
+                    try
+                    {
+                        var engine = _serviceProvider.GetRequiredService<VoicevoxEngineService>();
+                        await engine.StartAsync(CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        DevLog.WriteLine("App: VoiceVox engine start failed: {0}", ex.Message);
+                    }
+                });
+            }
+            else
+            {
+                DevLog.WriteLine("App: Skipping local VoiceVox engine startup because remote TTS mode is selected.");
+            }
         }
 
         RunBackground("semantic_memory_ready", async () =>
@@ -299,6 +306,14 @@ public partial class App : System.Windows.Application
             }
         }
         
+        try
+        {
+            DevLog.FlushAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
+
         _serviceProvider?.Dispose();
         lock (_backgroundTasks)
         {
