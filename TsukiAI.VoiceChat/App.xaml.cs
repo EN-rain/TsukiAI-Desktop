@@ -122,6 +122,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<TranslationService>();
         services.AddSingleton<VoiceApiController>();
 
+        services.AddSingleton<MicrophoneCaptureService>();
         services.AddSingleton<VoiceChatViewModel>();
         services.AddSingleton<MainWindow>();
     }
@@ -228,6 +229,20 @@ public partial class App : System.Windows.Application
             }
         }
 
+        // Start local mic capture for VRChat and Other platform modes
+        // (Discord mode uses the Node bridge instead)
+        if (settings.VoiceRuntimeV2Enabled &&
+            settings.VoicePlatform != VoiceIntegrationPlatform.Discord)
+        {
+            RunBackground("mic_capture_start", async () =>
+            {
+                await Task.Delay(500); // let pipeline settle first
+                var mic = _serviceProvider!.GetRequiredService<MicrophoneCaptureService>();
+                mic.Start(settings);
+                DevLog.WriteLine("App: MicrophoneCaptureService started for platform={0}", settings.VoicePlatform);
+            });
+        }
+
         if (settings.SemanticMemoryEnabled)
         {
             RunBackground("semantic_memory_ready", async () =>
@@ -265,6 +280,7 @@ public partial class App : System.Windows.Application
         try
         {
             _serviceProvider?.GetService<VoiceConversationPipeline>()?.Stop();
+            _serviceProvider?.GetService<MicrophoneCaptureService>()?.Stop();
             _serviceProvider?.GetService<VoicevoxEngineService>()?.Stop();
         }
         catch

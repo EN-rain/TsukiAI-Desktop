@@ -490,6 +490,51 @@
                     </StackPanel>
 
                     <StackPanel Style="{StaticResource SectionPanel}"
+                                Visibility="{Binding IsOtherPlatform, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Standalone Voice Options"/>
+                            <TextBlock Style="{StaticResource FieldHint}"
+                                       Text="Tsuki listens on the selected input device and plays TTS to the output device. Route your mic and game audio through VoiceMeeter to control what Tsuki hears."
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,10"/>
+
+                            <StackPanel Margin="0,0,0,8">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="STT Mode"/>
+                                <TextBlock Style="{StaticResource FieldHint}" Text="Speech-to-text provider for microphone input."/>
+                                <ComboBox Style="{StaticResource SettingsComboBox}"
+                                          SelectedIndex="{Binding SttModeIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="AssemblyAI (Accurate, Slower)"/>
+                                    <ComboBoxItem Content="Groq Whisper (Fast, Lower Latency)"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Margin="0,0,0,8">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="STT Language"/>
+                                <ComboBox Style="{StaticResource SettingsComboBox}"
+                                          SelectedValuePath="Tag"
+                                          SelectedValue="{Binding SttLanguageCode, Mode=TwoWay}">
+                                    <ComboBoxItem Content="Auto-detect" Tag="auto"/>
+                                    <ComboBoxItem Content="English" Tag="en"/>
+                                    <ComboBoxItem Content="Japanese" Tag="ja"/>
+                                    <ComboBoxItem Content="Chinese" Tag="zh"/>
+                                    <ComboBoxItem Content="Korean" Tag="ko"/>
+                                    <ComboBoxItem Content="Spanish" Tag="es"/>
+                                    <ComboBoxItem Content="French" Tag="fr"/>
+                                    <ComboBoxItem Content="German" Tag="de"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Margin="0,0,0,8">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Translation Strategy"/>
+                                <ComboBox Style="{StaticResource SettingsComboBox}"
+                                          SelectedIndex="{Binding DiscordTranslationStrategyIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="Translate Input to Japanese"/>
+                                    <ComboBoxItem Content="Translate Response to Japanese"/>
+                                    <ComboBoxItem Content="Bilingual - No Translation"/>
+                                </ComboBox>
+                            </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Style="{StaticResource SectionPanel}"
                                 Visibility="{Binding IsVrChatPlatform, Converter={StaticResource BoolToVisibilityConverter}}">
                             <TextBlock Style="{StaticResource SectionHeader}" Text="VRChat Routing"/>
                             <TextBlock Style="{StaticResource FieldHint}"

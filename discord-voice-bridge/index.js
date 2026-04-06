@@ -126,7 +126,10 @@ const VAD = {
 const VAD_BATCHING_ENABLED = (process.env.VAD_BATCHING_ENABLED || 'true').toLowerCase() === 'true';
 const VAD_FRAME_BATCH_SIZE = Math.max(1, Math.min(10, parseInt(process.env.VAD_FRAME_BATCH_SIZE || '8', 10)));
 
-const hasCSharpIntegration = process.env.CSHARP_API_URL && process.env.CSHARP_API_URL !== 'http://localhost:5000';
+// C# integration is active whenever CSHARP_API_URL is set to any non-empty value.
+// Previously this excluded the default localhost:5000 URL which is the correct address
+// for TsukiAI running locally — that check was wrong and caused standalone mode.
+const hasCSharpIntegration = !!(process.env.CSHARP_API_URL && process.env.CSHARP_API_URL.trim().length > 0);
 
 if (hasCSharpIntegration) {
   console.log('[INFO] C# API URL configured:', CONFIG.CSHARP_API_URL);
@@ -534,6 +537,13 @@ function startBridgeHttpServer() {
         res.end(JSON.stringify({ error: err.message || 'Play TTS failed' }));
       }
     });
+  });
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[BRIDGE] Port ${BRIDGE_HTTP_PORT} already in use — bridge HTTP server skipped. Previous process may still be running.`);
+    } else {
+      console.error('[BRIDGE] HTTP server error:', err.message);
+    }
   });
   server.listen(BRIDGE_HTTP_PORT, '127.0.0.1', () => {
     console.log(`[BRIDGE] HTTP server listening on http://127.0.0.1:${BRIDGE_HTTP_PORT}/play-tts (C# can send TTS here to play in Discord)`);
