@@ -1,0 +1,538 @@
+﻿<Window x:Class="TsukiAI.VoiceChat.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="TsukiAI"
+        Icon="pack://application:,,,/tsuki_icon.jpg"
+        Width="900"
+        Height="650"
+        MinWidth="700"
+        MinHeight="500"
+        Background="Transparent"
+        FontFamily="Segoe UI"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        AllowsTransparency="True">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="40"
+                            CornerRadius="12"
+                            GlassFrameThickness="0"
+                            NonClientFrameEdges="None"
+                            ResizeBorderThickness="6"
+                            UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <SolidColorBrush x:Key="BgMainBrush" Color="#181B22"/>
+        <SolidColorBrush x:Key="BgCardBrush" Color="#111318"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#2A2F3A"/>
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E8EAED"/>
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A0A0A0"/>
+
+        <Style x:Key="TitleBarButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#A0A0A0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#2A2F3A"/>
+                    <Setter Property="Foreground" Value="#FFFFFF"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#181B22"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CaptionButton" TargetType="Button" BasedOn="{StaticResource TitleBarButton}">
+            <Setter Property="Width" Value="42"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+        </Style>
+
+        <Style x:Key="CloseCaptionButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#E81123"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#C50F1F"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="ModernButton" TargetType="Button">
+            <Setter Property="Background" Value="#2A2F3A"/>
+            <Setter Property="Foreground" Value="#E0E0E0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#3A3D4A"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#181B22"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="TabButton" TargetType="RadioButton">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#A0A0A0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="20,12"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border Background="{TemplateBinding Background}" BorderThickness="0,0,0,2" BorderBrush="{TemplateBinding BorderBrush}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="Foreground" Value="#FFFFFF"/>
+                    <Setter Property="BorderBrush" Value="#7C6AEF"/>
+                </Trigger>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="#E0E0E0"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="#404040"/>
+                    <Setter Property="Cursor" Value="Arrow"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="ModernRadioButton" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="#E0E0E0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid Background="Transparent">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="RadioBorder"
+                                    Grid.Column="0"
+                                    Width="18"
+                                    Height="18"
+                                    CornerRadius="9"
+                                    BorderBrush="#3A3D4A"
+                                    BorderThickness="2"
+                                    Background="#111318"
+                                    Margin="0,0,8,0"
+                                    VerticalAlignment="Center">
+                                <Ellipse x:Name="RadioDot" Width="8" Height="8" Fill="#7C6AEF" Opacity="0"/>
+                            </Border>
+                            <ContentPresenter Grid.Column="1" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="RadioDot" Property="Opacity" Value="1"/>
+                                <Setter TargetName="RadioBorder" Property="BorderBrush" Value="#7C6AEF"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="RadioBorder" Property="BorderBrush" Value="#5A4DC7"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ModernCheckBox" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#E0E0E0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Background="Transparent">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="CheckBorder"
+                                    Grid.Column="0"
+                                    Width="18"
+                                    Height="18"
+                                    CornerRadius="4"
+                                    BorderBrush="#3A3D4A"
+                                    BorderThickness="2"
+                                    Background="#111318"
+                                    Margin="0,0,8,0"
+                                    VerticalAlignment="Center">
+                                <Path x:Name="CheckMark"
+                                      Data="M 0,4 L 3,7 L 8,0"
+                                      Stroke="#FFFFFF"
+                                      StrokeThickness="2"
+                                      Stretch="Uniform"
+                                      Margin="2"
+                                      Opacity="0"/>
+                            </Border>
+                            <ContentPresenter Grid.Column="1" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckMark" Property="Opacity" Value="1"/>
+                                <Setter TargetName="CheckBorder" Property="Background" Value="#7C6AEF"/>
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#7C6AEF"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#5A4DC7"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ModernToggleSwitch" TargetType="ToggleButton">
+            <Setter Property="Width" Value="52"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Background" Value="#2A2F3A"/>
+            <Setter Property="BorderBrush" Value="#3A3D4A"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Grid>
+                            <Border x:Name="Track"
+                                    Background="#2A2F3A"
+                                    BorderBrush="#3A3D4A"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="13">
+                            </Border>
+                            <Border x:Name="Thumb"
+                                    Width="20"
+                                    Height="20"
+                                    CornerRadius="10"
+                                    Background="#E8EAED"
+                                    HorizontalAlignment="Left"
+                                    Margin="3,0,0,0"
+                                    VerticalAlignment="Center">
+                                <Border.RenderTransform>
+                                    <TranslateTransform x:Name="ThumbTransform" X="0"/>
+                                </Border.RenderTransform>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="#7C6AEF"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#7C6AEF"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Thumb"
+                                                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                             To="26"
+                                                             Duration="0:0:0.18">
+                                                <DoubleAnimation.EasingFunction>
+                                                    <CubicEase EasingMode="EaseOut"/>
+                                                </DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                            <ColorAnimation Storyboard.TargetName="Track"
+                                                            Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
+                                                            To="#7C6AEF"
+                                                            Duration="0:0:0.18"/>
+                                            <ColorAnimation Storyboard.TargetName="Track"
+                                                            Storyboard.TargetProperty="(Border.BorderBrush).(SolidColorBrush.Color)"
+                                                            To="#7C6AEF"
+                                                            Duration="0:0:0.18"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Thumb"
+                                                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                             To="0"
+                                                             Duration="0:0:0.18">
+                                                <DoubleAnimation.EasingFunction>
+                                                    <CubicEase EasingMode="EaseOut"/>
+                                                </DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                            <ColorAnimation Storyboard.TargetName="Track"
+                                                            Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
+                                                            To="#2A2F3A"
+                                                            Duration="0:0:0.18"/>
+                                            <ColorAnimation Storyboard.TargetName="Track"
+                                                            Storyboard.TargetProperty="(Border.BorderBrush).(SolidColorBrush.Color)"
+                                                            To="#3A3D4A"
+                                                            Duration="0:0:0.18"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#5A4DC7"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Margin="8"
+            CornerRadius="12"
+            Background="{StaticResource BgMainBrush}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="30" ShadowDepth="0" Opacity="0.5" Color="Black"/>
+        </Border.Effect>
+
+        <Grid shell:WindowChrome.IsHitTestVisibleInChrome="True">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Background="{StaticResource BgCardBrush}" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" shell:WindowChrome.IsHitTestVisibleInChrome="False">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="🌙" FontSize="16" Margin="0,0,8,0"/>
+                    <TextBlock Text="TsukiAI" FontSize="14" FontWeight="SemiBold" Foreground="#FFFFFF"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="0,0,8,0">
+                    <Button Content="Dev Logs" Style="{StaticResource TitleBarButton}" Click="DevLogs_Click" Width="Auto" Padding="8,0" FontSize="12" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    <Button Content="Settings" Style="{StaticResource TitleBarButton}" Click="OpenMainSettings_Click" Width="Auto" Padding="8,0" FontSize="12" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    <Button Content="&#xE921;" Style="{StaticResource CaptionButton}" Click="Minimize_Click" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    <Button x:Name="MaximizeButton" Content="&#xE922;" Style="{StaticResource CaptionButton}" Click="Maximize_Click" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    <Button x:Name="RestoreButton" Content="&#xE923;" Style="{StaticResource CaptionButton}" Click="Maximize_Click" Visibility="Collapsed" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    <Button Content="&#xE8BB;" Style="{StaticResource CloseCaptionButton}" Click="Close_Click" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+                </StackPanel>
+            </Grid>
+
+            <Border Grid.Row="1" Background="{StaticResource BgCardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,1">
+                <TextBlock Text="🎤 Voice Chat"
+                           HorizontalAlignment="Center"
+                           Margin="0,10,0,8"
+                           Foreground="#FFFFFF"
+                           FontWeight="SemiBold"
+                           FontSize="16"/>
+            </Border>
+
+            <Grid Grid.Row="2" Margin="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="280"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Background="{StaticResource BgCardBrush}" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="16">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Server Status"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock x:Name="ServerStatusText"
+                                           Text="Stopped"
+                                           Foreground="#9AA0AC"
+                                           FontSize="11"/>
+                            </StackPanel>
+                            <ToggleButton x:Name="ServerStatusToggle"
+                                          Grid.Column="1"
+                                          Margin="12,0,0,0"
+                                          VerticalAlignment="Center"
+                                          Style="{StaticResource ModernToggleSwitch}"
+                                          Checked="ServerStatusToggle_Checked"
+                                          Unchecked="ServerStatusToggle_Unchecked"/>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Text="Voice Reception Enabled"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       VerticalAlignment="Center"/>
+                            <ToggleButton x:Name="VoiceReceptionToggle"
+                                          Grid.Column="1"
+                                          Margin="12,0,0,0"
+                                          IsChecked="True"
+                                          Style="{StaticResource ModernToggleSwitch}"/>
+                        </Grid>
+
+                        <TextBlock Text="User Focus" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,4,0,16"/>
+
+                        <RadioButton x:Name="AllUsersFocusRadio" Content="All Users" Style="{StaticResource ModernRadioButton}" Margin="0,0,0,12" Checked="AllUsersFocus_Checked"/>
+                        <RadioButton x:Name="AutoFocusRadio" Content="Auto Focus" Style="{StaticResource ModernRadioButton}" IsChecked="True" Margin="0,0,0,12" Checked="AutoFocus_Checked"/>
+                        <RadioButton x:Name="SpecificUserFocusRadio" Content="Specific User" Style="{StaticResource ModernRadioButton}" Margin="0,0,0,8" Checked="SpecificUserFocus_Checked"/>
+
+                        <Grid x:Name="SpecificUserPanel" Margin="0,0,0,12" Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="FocusedUserIdInput"
+                                     Grid.Column="0"
+                                     Background="#111318"
+                                     Foreground="{StaticResource TextPrimaryBrush}"
+                                     BorderBrush="{StaticResource BorderBrush}"
+                                     BorderThickness="1"
+                                     Padding="8,6"
+                                     FontSize="11"
+                                     Text=""/>
+                            <Button Grid.Column="2"
+                                    Content="Apply"
+                                    Style="{StaticResource ModernButton}"
+                                    Padding="10,6"
+                                    FontSize="11"
+                                    Click="ApplyFocusedUser_Click"/>
+                        </Grid>
+
+                        <Border x:Name="FocusStatusPanel" Background="#181B22" CornerRadius="6" Padding="12" Margin="0,8,0,0">
+                            <StackPanel>
+                                <TextBlock x:Name="FocusStatusTitle" Text="Auto Focus Mode" FontSize="11" Foreground="#808080" Margin="0,0,0,8"/>
+                                <TextBlock x:Name="FocusStatusState" Text="Active" FontSize="13" FontWeight="SemiBold" Foreground="#7C6AEF" Margin="0,0,0,4"/>
+                                <TextBlock x:Name="FocusStatusDescription" Text="Automatically detects and focuses on the speaking user"
+                                           FontSize="11"
+                                           Foreground="#A0A0A0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="Tip: Right-click user in Discord -> Copy ID"
+                                   FontSize="10"
+                                   Foreground="#606060"
+                                   TextWrapping="Wrap"
+                                   Margin="0,16,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <Grid Grid.Column="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="{StaticResource BgCardBrush}" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Margin="0,0,0,12">
+                        <TextBox x:Name="ActivityFeedBox"
+                                 Margin="10"
+                                 Text="{Binding ActivityFeedText, Mode=OneWay}"
+                                 IsReadOnly="True"
+                                 IsReadOnlyCaretVisible="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Foreground="{StaticResource TextPrimaryBrush}"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Disabled"
+                                 TextChanged="ActivityFeedBox_TextChanged"/>
+                    </Border>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0" Background="{StaticResource BgCardBrush}" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="12">
+                            <Grid>
+                                <TextBox x:Name="TtsTestInput"
+                                         Text="Type text to test TTS..."
+                                         Background="Transparent"
+                                         Foreground="{StaticResource TextPrimaryBrush}"
+                                         BorderThickness="0"
+                                         FontSize="13"
+                                         MaxLength="1000"
+                                         TextChanged="TtsTestInput_TextChanged"
+                                         GotFocus="TtsTestInput_GotFocus"
+                                         LostFocus="TtsTestInput_LostFocus"/>
+                                <TextBlock x:Name="TtsCharCounter" Text="0 / 1000"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Bottom"
+                                           Foreground="#606060"
+                                           FontSize="10"/>
+                            </Grid>
+                        </Border>
+
+                        <Button Grid.Column="2" Content="Play Here" Style="{StaticResource ModernButton}" Background="#3498DB" Foreground="White" Padding="24,10" FontWeight="SemiBold" Click="TtsTestPlayHere_Click"/>
+                        <Button Grid.Column="4" Content="Play in Discord" Style="{StaticResource ModernButton}" Background="#27AE60" Foreground="White" Padding="24,10" FontWeight="SemiBold" Click="TtsTestPlayInDiscord_Click"/>
+                    </Grid>
+                </Grid>
+            </Grid>
+
+            <Border Grid.Row="3" Background="{StaticResource BgCardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{Binding StatusText, Mode=OneWay}" FontSize="11" Foreground="#808080"/>
+                    <TextBlock Grid.Column="2" FontSize="11" Foreground="#808080">
+                        <Run Text="Model: "/>
+                        <Run Text="{Binding ModelName, Mode=OneWay}" FontWeight="SemiBold"/>
+                        <Run Text=" | "/>
+                        <Run Text="{Binding CurrentTime, Mode=OneWay}"/>
+                    </TextBlock>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

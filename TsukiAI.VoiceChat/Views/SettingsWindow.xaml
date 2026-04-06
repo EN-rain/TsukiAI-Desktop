@@ -1,0 +1,1343 @@
+<Window x:Class="TsukiAI.VoiceChat.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:TsukiAI.VoiceChat.Views"
+        Title="Settings"
+        Icon="pack://application:,,,/tsuki_icon.jpg"
+        Width="480"
+        Height="620"
+        MinWidth="440"
+        MinHeight="520"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        Background="Transparent"
+        Foreground="#E8EAED"
+        FontFamily="Segoe UI"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Loaded="Window_Loaded">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="32"
+                      CornerRadius="12"
+                      GlassFrameThickness="0"
+                      NonClientFrameEdges="None"
+                      ResizeBorderThickness="6"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+        <Window.Resources>
+        <!-- Converters -->
+        <local:StringContainsConverter x:Key="StringContainsConverter"/>
+        
+        <!-- Force dropdown/popup surfaces dark -->
+        <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#111318"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#E8EAED"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#2A2F3A"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#FFFFFFFF"/>
+
+        <!-- ── Palette ── -->
+        <Color x:Key="BgDeep">#111318</Color>
+        <Color x:Key="BgCard">#181B22</Color>
+        <Color x:Key="BgInput">#1E222B</Color>
+        <Color x:Key="Border">#2A2F3A</Color>
+        <Color x:Key="TextPrimary">#E8EAED</Color>
+        <Color x:Key="TextSecondary">#9AA0AC</Color>
+        <Color x:Key="TextMuted">#636A78</Color>
+        <Color x:Key="Accent">#7C6AEF</Color>
+
+        <SolidColorBrush x:Key="BgDeepBrush" Color="{StaticResource BgDeep}"/>
+        <SolidColorBrush x:Key="BgCardBrush" Color="{StaticResource BgCard}"/>
+        <SolidColorBrush x:Key="BgInputBrush" Color="{StaticResource BgInput}"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource Border}"/>
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimary}"/>
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondary}"/>
+        <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMuted}"/>
+        <SolidColorBrush x:Key="AccentBrushRes" Color="{StaticResource Accent}"/>
+        <SolidColorBrush x:Key="TabActiveBackgroundBrush" Color="#252B3A"/>
+        <SolidColorBrush x:Key="TabInactiveBackgroundBrush" Color="Transparent"/>
+        <SolidColorBrush x:Key="TabInactiveBorderBrush" Color="#2A2F3A"/>
+        <SolidColorBrush x:Key="TabHoverBackgroundBrush" Color="#1A2030"/>
+
+        <!-- Scrollbar styling -->
+        <SolidColorBrush x:Key="ScrollTrackBrush" Color="#1E222B"/>
+        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#3D4451"/>
+        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#7C6AEF"/>
+
+        <Style x:Key="ThemedScrollBarThumb" TargetType="{x:Type Thumb}">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="MinHeight" Value="24"/>
+            <Setter Property="MinWidth" Value="6"/>
+            <Setter Property="Background" Value="{StaticResource ScrollThumbBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Thumb}">
+                        <Border x:Name="ThumbBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="3"
+                                Margin="1"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource ScrollThumbHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource ScrollThumbHoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="{x:Type ScrollBar}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource ScrollThumbBrush}"/>
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Margin" Value="0,0,2,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ScrollBar}">
+                        <Grid Background="Transparent" SnapsToDevicePixels="True">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True" Focusable="False">
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource ThemedScrollBarThumb}"
+                                           Background="{TemplateBinding Foreground}"
+                                           Width="6"/>
+                                </Track.Thumb>
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}"
+                                                  Opacity="0"
+                                                  IsTabStop="False"
+                                                  Background="Transparent"
+                                                  BorderThickness="0"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static ScrollBar.PageDownCommand}"
+                                                  Opacity="0"
+                                                  IsTabStop="False"
+                                                  Background="Transparent"
+                                                  BorderThickness="0"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Orientation" Value="Horizontal">
+                                <Setter Property="Height" Value="6"/>
+                                <Setter Property="Width" Value="Auto"/>
+                                <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SectionHeader" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentBrushRes}"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+
+        <Style x:Key="FieldLabel" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+        </Style>
+
+        <Style x:Key="FieldHint" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+        </Style>
+
+        <Style x:Key="SettingsTextBox" TargetType="{x:Type TextBox}">
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="Background" Value="{StaticResource BgInputBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="SelectionBrush" Value="#447C6AEF"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="ToolTip" Value="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type TextBox}">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                SnapsToDevicePixels="True">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="0"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Modern CheckBox Style -->
+        <Style x:Key="SettingsCheckBox" TargetType="{x:Type CheckBox}">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,3,0,3"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Background="Transparent">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            
+                            <!-- Custom Checkbox Square -->
+                            <Border x:Name="CheckBorder"
+                                    Grid.Column="0"
+                                    Width="18"
+                                    Height="18"
+                                    CornerRadius="4"
+                                    BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="2"
+                                    Background="{StaticResource BgInputBrush}"
+                                    Margin="0,0,8,0"
+                                    VerticalAlignment="Top">
+                                <Path x:Name="CheckMark"
+                                      Data="M 0,4 L 3,7 L 8,0"
+                                      Stroke="#FFFFFF"
+                                      StrokeThickness="2"
+                                      Stretch="Uniform"
+                                      Margin="2"
+                                      Opacity="0"/>
+                            </Border>
+                            
+                            <!-- Content -->
+                            <ContentPresenter Grid.Column="1"
+                                            VerticalAlignment="Top"
+                                            RecognizesAccessKey="True">
+                                <ContentPresenter.Resources>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextWrapping" Value="Wrap"/>
+                                    </Style>
+                                </ContentPresenter.Resources>
+                            </ContentPresenter>
+                        </Grid>
+                        
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckMark" Property="Opacity" Value="1"/>
+                                <Setter TargetName="CheckBorder" Property="Background" Value="{StaticResource AccentBrushRes}"/>
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="{StaticResource AccentBrushRes}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#6C5CE7"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="{StaticResource TextMutedBrush}"/>
+                                <Setter TargetName="CheckMark" Property="Stroke" Value="{StaticResource TextMutedBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Modern RadioButton Style -->
+        <Style x:Key="SettingsRadioButton" TargetType="{x:Type RadioButton}">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,3,0,3"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid Background="Transparent">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            
+                            <!-- Custom Radio Circle -->
+                            <Border x:Name="RadioBorder"
+                                    Grid.Column="0"
+                                    Width="18"
+                                    Height="18"
+                                    CornerRadius="9"
+                                    BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="2"
+                                    Background="{StaticResource BgInputBrush}"
+                                    Margin="0,0,8,0"
+                                    VerticalAlignment="Top">
+                                <Ellipse x:Name="RadioDot"
+                                         Width="8"
+                                         Height="8"
+                                         Fill="{StaticResource AccentBrushRes}"
+                                         Opacity="0"/>
+                            </Border>
+                            
+                            <!-- Content -->
+                            <ContentPresenter Grid.Column="1"
+                                            VerticalAlignment="Top"
+                                            RecognizesAccessKey="True">
+                                <ContentPresenter.Resources>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextWrapping" Value="Wrap"/>
+                                    </Style>
+                                </ContentPresenter.Resources>
+                            </ContentPresenter>
+                        </Grid>
+                        
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="RadioDot" Property="Opacity" Value="1"/>
+                                <Setter TargetName="RadioBorder" Property="BorderBrush" Value="{StaticResource AccentBrushRes}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="RadioBorder" Property="BorderBrush" Value="#6C5CE7"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+                                <Setter TargetName="RadioBorder" Property="BorderBrush" Value="{StaticResource TextMutedBrush}"/>
+                                <Setter TargetName="RadioDot" Property="Fill" Value="{StaticResource TextMutedBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsButton" TargetType="{x:Type Button}">
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="16,0"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="{StaticResource BgInputBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8" SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#252A35"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#2E3440"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ProviderInlineLinkButton" TargetType="{x:Type Button}">
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrushRes}"/>
+                                <Setter Property="Background" Value="#182033"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrushRes}"/>
+                                <Setter Property="Background" Value="#1E2740"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="EditApiButton" TargetType="{x:Type Button}">
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding Tag, RelativeSource={RelativeSource Self}, Converter={StaticResource StringContainsConverter}, ConverterParameter='|active'}" Value="True"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrushRes}"/>
+                            </MultiDataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ProviderTestButton" TargetType="{x:Type Button}" BasedOn="{StaticResource SettingsButton}">
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Padding" Value="12,4"/>
+            <Setter Property="Background" Value="{StaticResource AccentBrushRes}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBrushRes}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#8B7BFF"/>
+                                <Setter Property="BorderBrush" Value="#8B7BFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#6F5EE2"/>
+                                <Setter Property="BorderBrush" Value="#6F5EE2"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsTabButton" TargetType="{x:Type Button}">
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrushRes}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CardBorder" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="CornerRadius" Value="0"/>
+            <Setter Property="Padding" Value="0,0,0,16"/>
+            <Setter Property="Margin" Value="0,0,0,16"/>
+        </Style>
+
+        <Style x:Key="CaptionButton" TargetType="{x:Type Button}">
+            <Setter Property="Width" Value="42"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#2A2F3A"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#353B48"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CloseCaptionButton" TargetType="{x:Type Button}" BasedOn="{StaticResource CaptionButton}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#E81123"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#F1707A"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsComboBox" TargetType="{x:Type ComboBox}">
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="Background" Value="{StaticResource BgInputBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ComboBox}">
+                        <Grid>
+                            <ToggleButton x:Name="ToggleButton"
+                                          Background="{TemplateBinding Background}"
+                                          BorderBrush="{TemplateBinding BorderBrush}"
+                                          BorderThickness="{TemplateBinding BorderThickness}"
+                                          Focusable="False"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          ClickMode="Press">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                        <Border Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="8"
+                                                SnapsToDevicePixels="True">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition/>
+                                                    <ColumnDefinition Width="20"/>
+                                                </Grid.ColumnDefinitions>
+                                                <ContentPresenter Grid.Column="0" Margin="10,7" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                                                <Path Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                      Data="M 0 0 L 4 4 L 8 0 Z" Fill="{StaticResource TextSecondaryBrush}"/>
+                                            </Grid>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="ContentSite"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                              Margin="10,7"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Left"
+                                              IsHitTestVisible="False"/>
+                            <Popup x:Name="Popup"
+                                   Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   PopupAnimation="Slide">
+                                <Grid MinWidth="{TemplateBinding ActualWidth}" MaxHeight="200">
+                                    <Border Background="{StaticResource BgCardBrush}"
+                                            BorderBrush="{StaticResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Margin="0,4,0,0">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                        </ScrollViewer>
+                                    </Border>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrushRes}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="{x:Type ComboBoxItem}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter Property="Background" Value="{StaticResource BgInputBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="{StaticResource BgInputBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrushRes}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Border Margin="14"
+                CornerRadius="12"
+                Background="{StaticResource BgDeepBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                ClipToBounds="True">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.4" Color="Black"/>
+            </Border.Effect>
+
+            <Grid ClipToBounds="True">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="32"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Title Bar -->
+                <Border Grid.Row="0"
+                        Background="#1E222B"
+                        BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="0,0,0,1"
+                        Padding="12,0"
+                        MouseLeftButtonDown="TitleBar_MouseLeftButtonDown"
+                        WindowChrome.IsHitTestVisibleInChrome="False">
+                    <DockPanel LastChildFill="True" Background="Transparent">
+                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Image Width="16" Height="16" Source="pack://application:,,,/tsuki_icon.jpg" Margin="0,0,8,0"/>
+                            <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Text="Settings" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" WindowChrome.IsHitTestVisibleInChrome="True">
+                            <Button x:Name="CloseButton" Style="{StaticResource CloseCaptionButton}" Content="&#xE8BB;" Click="Close_Click" ToolTip="Close"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <!-- Tab Navigation -->
+                <Border Grid.Row="1" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Background="Transparent">
+                    <Grid Margin="18,12,18,8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="2"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <Border x:Name="ActiveTabIndicator"
+                                Grid.Row="0"
+                                Width="34"
+                                Height="2"
+                                Background="{StaticResource AccentBrushRes}"
+                                CornerRadius="1"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Top"
+                                Opacity="0.95">
+                            <Border.RenderTransform>
+                                <TranslateTransform x:Name="ActiveTabIndicatorTransform"/>
+                            </Border.RenderTransform>
+                        </Border>
+
+                        <StackPanel x:Name="TabStripPanel"
+                                    Grid.Row="1"
+                                    Orientation="Horizontal"
+                                    Margin="0">
+                            <Button x:Name="TabInference" Content="Inference" Click="Tab_Click" Tag="0"
+                                    Style="{StaticResource SettingsTabButton}"
+                                    Foreground="{StaticResource AccentBrushRes}"
+                                    Margin="0,0,24,0"/>
+                            <Button x:Name="TabVoice" Content="Voice" Click="Tab_Click" Tag="1"
+                                    Style="{StaticResource SettingsTabButton}"
+                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                    Margin="0,0,24,0"/>
+                            <Button x:Name="TabAdvanced" Content="Advanced" Click="Tab_Click" Tag="2"
+                                    Style="{StaticResource SettingsTabButton}"
+                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                    Margin="0,0,24,0"/>
+                            <Button x:Name="TabRateLimit" Content="Rate Limit" Click="Tab_Click" Tag="3"
+                                    Style="{StaticResource SettingsTabButton}"
+                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                    Margin="0"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Scrollable content -->
+                <ScrollViewer Grid.Row="2"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              PanningMode="VerticalOnly"
+                              HorizontalContentAlignment="Stretch"
+                              Padding="18,16,18,16">
+                    <StackPanel Margin="0"
+                                HorizontalAlignment="Stretch">
+                        
+                        <!-- Inference Content -->
+                        <StackPanel x:Name="InferenceContent">
+<!-- Inference Mode -->
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Model Routing"/>
+                    
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="LLM Source"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="AI provider uses official API endpoints. Custom AI is for ngrok/tunnel endpoints."/>
+                        <ComboBox x:Name="CmbInferenceMode"
+                                  Style="{StaticResource SettingsComboBox}"
+                                  SelectionChanged="InferenceModeOption_SelectionChanged">
+                            <ComboBoxItem Content="Use AI provider" Tag="provider"/>
+                            <ComboBoxItem Content="Use custom AI" Tag="custom"/>
+                        </ComboBox>
+                    </StackPanel>
+                    
+                    <StackPanel x:Name="RemoteSettingsPanel" Margin="0,8,0,0">
+                        <Border Background="Transparent" 
+                                BorderBrush="Transparent"
+                                BorderThickness="0"
+                                CornerRadius="8"
+                                Padding="0">
+                            <StackPanel>
+                                <StackPanel x:Name="AiProviderPanel" Margin="0,0,0,12">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Provider/s"/>
+                                    <ComboBox x:Name="CmbProviderMode"
+                                              Style="{StaticResource SettingsComboBox}"
+                                              SelectionChanged="ProviderMode_SelectionChanged"
+                                              Margin="0,0,0,8">
+                                        <ComboBoxItem Content="Use one only" Tag="one"/>
+                                        <ComboBoxItem Content="Use multiple" Tag="multiple"/>
+                                    </ComboBox>
+                                    <TextBlock x:Name="TxtProviderRateLimitIndicator"
+                                               Style="{StaticResource FieldHint}"
+                                               Margin="0,0,0,8"
+                                               Visibility="Collapsed"/>
+
+                                    <StackPanel x:Name="SingleProviderPanel">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="AI Provider"/>
+                                        <TextBlock Style="{StaticResource FieldHint}" Text="Choose your remote LLM provider"/>
+                                        <ComboBox x:Name="CmbAiProvider"
+                                                  Style="{StaticResource SettingsComboBox}"
+                                                  SelectionChanged="AiProvider_SelectionChanged">
+                                            <ComboBoxItem Content="GroqCloud" Tag="groq"/>
+                                            <ComboBoxItem Content="Cerebras" Tag="cerebras"/>
+                                            <ComboBoxItem Content="Google Gemini" Tag="gemini"/>
+                                            <ComboBoxItem Content="Mistral" Tag="mistral"/>
+                                            <ComboBoxItem Content="GitHub Models" Tag="github"/>
+                                            <ComboBoxItem Content="OpenRouter" Tag="openrouter"/>
+                                            <ComboBoxItem Content="OpenAI" Tag="openai"/>
+                                            <ComboBoxItem Content="Cohere" Tag="cohere"/>
+                                            <ComboBoxItem Content="DeepSeek" Tag="deepseek"/>
+                                            <ComboBoxItem Content="Anthropic (proxy endpoint)" Tag="anthropic"/>
+                                        </ComboBox>
+                                    </StackPanel>
+
+                                    <StackPanel x:Name="MultipleProvidersPanel" Visibility="Collapsed" Margin="0,8,0,0">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Multi-provider Pool"/>
+                                        <TextBlock Style="{StaticResource FieldHint}" Text="Select providers to include in auto-switch pool"/>
+                                        
+                                        <!-- Cerebras -->
+                                        <Grid Margin="0,4,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse x:Name="StatusCerebras" Grid.Column="0" Width="8" Height="8" Fill="LimeGreen" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <CheckBox x:Name="ChkCerebras" Grid.Column="1" Style="{StaticResource SettingsCheckBox}" Content="Cerebras" Checked="ProviderCheckBox_Changed" Unchecked="ProviderCheckBox_Changed"/>
+                                            <TextBlock Grid.Column="2" Text="(priority #2, very fast)" Foreground="#888" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                            <Button Grid.Column="3" Content="Edit API" Click="EditProviderApi_Click" Tag="cerebras" Style="{StaticResource EditApiButton}"/>
+                                        </Grid>
+                                        <StackPanel x:Name="PanelCerebrasApiKey" Visibility="Collapsed" Margin="24,4,0,8">
+                                            <TextBlock Style="{StaticResource FieldHint}" Text="API Key" Margin="0,0,0,4"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <PasswordBox x:Name="TxtCerebrasApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2A2F3A" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
+                                                <Button x:Name="BtnTestCerebras" Grid.Column="1" Content="Test Connection" Click="TestProviderConnection_Click" Tag="cerebras" Style="{StaticResource ProviderTestButton}"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TxtCerebrasStatus" Margin="0,4,0,0" Foreground="Gray" FontSize="11"/>
+                                        </StackPanel>
+                                        
+                                        <!-- Groq -->
+                                        <Grid Margin="0,4,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse x:Name="StatusGroq" Grid.Column="0" Width="8" Height="8" Fill="LimeGreen" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <CheckBox x:Name="ChkGroq" Grid.Column="1" Style="{StaticResource SettingsCheckBox}" Content="GroqCloud" Checked="ProviderCheckBox_Changed" Unchecked="ProviderCheckBox_Changed"/>
+                                            <TextBlock Grid.Column="2" Text="(priority #1, fastest)" Foreground="#888" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                            <Button Grid.Column="3" Content="Edit API" Click="EditProviderApi_Click" Tag="groq" Style="{StaticResource EditApiButton}"/>
+                                        </Grid>
+                                        <StackPanel x:Name="PanelGroqApiKey" Visibility="Collapsed" Margin="24,4,0,8">
+                                            <TextBlock Style="{StaticResource FieldHint}" Text="API Key" Margin="0,0,0,4"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <PasswordBox x:Name="TxtGroqApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2A2F3A" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
+                                                <Button x:Name="BtnTestGroq" Grid.Column="1" Content="Test Connection" Click="TestProviderConnection_Click" Tag="groq" Style="{StaticResource ProviderTestButton}"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TxtGroqStatus" Margin="0,4,0,0" Foreground="Gray" FontSize="11"/>
+                                        </StackPanel>
+                                        
+                                        <!-- Gemini -->
+                                        <Grid Margin="0,4,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse x:Name="StatusGemini" Grid.Column="0" Width="8" Height="8" Fill="LimeGreen" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <CheckBox x:Name="ChkGemini" Grid.Column="1" Style="{StaticResource SettingsCheckBox}" Content="Google Gemini" Checked="ProviderCheckBox_Changed" Unchecked="ProviderCheckBox_Changed"/>
+                                            <TextBlock Grid.Column="2" Text="(priority #3, stable)" Foreground="#888" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                            <Button Grid.Column="3" Content="Edit API" Click="EditProviderApi_Click" Tag="gemini" Style="{StaticResource EditApiButton}"/>
+                                        </Grid>
+                                        <StackPanel x:Name="PanelGeminiApiKey" Visibility="Collapsed" Margin="24,4,0,8">
+                                            <TextBlock Style="{StaticResource FieldHint}" Text="API Key" Margin="0,0,0,4"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <PasswordBox x:Name="TxtGeminiApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2A2F3A" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
+                                                <Button x:Name="BtnTestGemini" Grid.Column="1" Content="Test Connection" Click="TestProviderConnection_Click" Tag="gemini" Style="{StaticResource ProviderTestButton}"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TxtGeminiStatus" Margin="0,4,0,0" Foreground="Gray" FontSize="11"/>
+                                        </StackPanel>
+                                        
+                                        
+                                        <!-- GitHub Models -->
+                                        <Grid Margin="0,4,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse x:Name="StatusGitHub" Grid.Column="0" Width="8" Height="8" Fill="LimeGreen" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <CheckBox x:Name="ChkGitHub" Grid.Column="1" Style="{StaticResource SettingsCheckBox}" Content="GitHub Models" Checked="ProviderCheckBox_Changed" Unchecked="ProviderCheckBox_Changed"/>
+                                            <TextBlock Grid.Column="2" Text="(priority #5, slowest)" Foreground="#888" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                            <Button Grid.Column="3" Content="Edit API" Click="EditProviderApi_Click" Tag="github" Style="{StaticResource EditApiButton}"/>
+                                        </Grid>
+                                        <StackPanel x:Name="PanelGitHubApiKey" Visibility="Collapsed" Margin="24,4,0,8">
+                                            <TextBlock Style="{StaticResource FieldHint}" Text="GitHub Personal Access Token" Margin="0,0,0,4"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <PasswordBox x:Name="TxtGitHubApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2A2F3A" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
+                                                <Button x:Name="BtnTestGitHub" Grid.Column="1" Content="Test Connection" Click="TestProviderConnection_Click" Tag="github" Style="{StaticResource ProviderTestButton}"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TxtGitHubStatus" Margin="0,4,0,0" Foreground="Gray" FontSize="11"/>
+                                        </StackPanel>
+
+                                        <!-- Mistral -->
+                                        <Grid Margin="0,4,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse x:Name="StatusMistral" Grid.Column="0" Width="8" Height="8" Fill="LimeGreen" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <CheckBox x:Name="ChkMistral" Grid.Column="1" Style="{StaticResource SettingsCheckBox}" Content="Mistral API" Checked="ProviderCheckBox_Changed" Unchecked="ProviderCheckBox_Changed"/>
+                                            <TextBlock Grid.Column="2" Text="(priority #4, moderate)" Foreground="#888" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                            <Button Grid.Column="3" Content="Edit API" Click="EditProviderApi_Click" Tag="mistral" Style="{StaticResource EditApiButton}"/>
+                                        </Grid>
+                                        <StackPanel x:Name="PanelMistralApiKey" Visibility="Collapsed" Margin="24,4,0,8">
+                                            <TextBlock Style="{StaticResource FieldHint}" Text="API Key" Margin="0,0,0,4"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <PasswordBox x:Name="TxtMistralApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2A2F3A" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
+                                                <Button x:Name="BtnTestMistral" Grid.Column="1" Content="Test Connection" Click="TestProviderConnection_Click" Tag="mistral" Style="{StaticResource ProviderTestButton}"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TxtMistralStatus" Margin="0,4,0,0" Foreground="Gray" FontSize="11"/>
+                                        </StackPanel>
+                                        
+                                        <CheckBox x:Name="ChkAutoSwitchOnRateLimit" Style="{StaticResource SettingsCheckBox}" Content="Auto-switch provider when rate limit is hit" IsChecked="True" Margin="0,4,0,0"/>
+
+                                        <StackPanel Visibility="Collapsed">
+                                            <Path x:Name="RingCerebras"/><TextBlock x:Name="RingCerebrasLabel"/>
+                                            <Path x:Name="RingGroq"/><TextBlock x:Name="RingGroqLabel"/>
+                                            <Path x:Name="RingGemini"/><TextBlock x:Name="RingGeminiLabel"/>
+                                            <Path x:Name="RingGitHub"/><TextBlock x:Name="RingGitHubLabel"/>
+                                            <Path x:Name="RingMistral"/><TextBlock x:Name="RingMistralLabel"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <StackPanel x:Name="RemoteUrlPanel" Margin="0,0,0,12" Visibility="Collapsed">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Custom Tunnel URL"/>
+                                    <TextBlock Style="{StaticResource FieldHint}" Text="Use your ngrok or Cloudflare tunnel endpoint for custom server mode"/>
+                                    <TextBox x:Name="TxtRemoteUrl" 
+                                             Style="{StaticResource SettingsTextBox}"
+                                             Text="{Binding RemoteInferenceUrl, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Custom tunnel endpoint URL"/>
+                                </StackPanel>
+                                
+                                <StackPanel x:Name="SingleProviderApiKeyPanel" Margin="0,0,0,12">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="API Key"/>
+                                    <TextBlock Style="{StaticResource FieldHint}" Text="Paste your API key (no Bearer prefix)"/>
+                                    <PasswordBox x:Name="TxtRemoteApiKey"
+                                                 MinHeight="36"
+                                                 Padding="10,7"
+                                                 Background="{StaticResource BgDeepBrush}"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
+                                                 BorderBrush="{StaticResource BorderBrush}"
+                                                 BorderThickness="1"
+                                                 ToolTip="API key only, no Bearer prefix">
+                                        <PasswordBox.Resources>
+                                            <Style TargetType="Border">
+                                                <Setter Property="CornerRadius" Value="8"/>
+                                            </Style>
+                                        </PasswordBox.Resources>
+                                    </PasswordBox>
+                                </StackPanel>
+                                
+                                <StackPanel x:Name="SingleProviderTestPanel">
+                                    <Button x:Name="BtnTestRemoteConnection" 
+                                            Click="BtnTestRemoteConnection_Click"
+                                            Style="{StaticResource SettingsButton}"
+                                            Content="Test Connection"
+                                            HorizontalAlignment="Left"
+                                            MinWidth="140"
+                                            Margin="0,0,0,8"/>
+                                    <TextBlock x:Name="TxtConnectionStatus"
+                                               FontSize="11"
+                                               Foreground="{StaticResource TextMutedBrush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </Border><!-- ═══ AI Model ═══ -->
+            <Border x:Name="AiModelPanel" Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="AI Model"/>
+
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Model name"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="e.g. qwen2.5:3b"/>
+                        <TextBox Style="{StaticResource SettingsTextBox}"
+                                 Text="{Binding ModelName, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,0,0,12">
+                        <CheckBox Style="{StaticResource SettingsCheckBox}" Margin="0,0,0,8"
+                                  Content="Auto-start Ollama on launch"
+                                  IsChecked="{Binding AutoStartOllama}"/>
+                        <CheckBox Style="{StaticResource SettingsCheckBox}" Margin="0,0,0,8"
+                                  Content="Unload model on exit"
+                                  IsChecked="{Binding StopOllamaOnExit}"/>
+                        <CheckBox Style="{StaticResource SettingsCheckBox}"
+                                  Content="Use GPU acceleration"
+                                  IsChecked="{Binding UseGpu}"/>
+                    </StackPanel>
+
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Custom model directory"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="Leave empty for default location"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" Style="{StaticResource SettingsTextBox}" Margin="0,0,8,0"
+                                     Text="{Binding ModelDirectory, UpdateSourceTrigger=PropertyChanged}"/>
+                            <Button Grid.Column="1" x:Name="BrowseButton" Click="Browse_Click"
+                                    Style="{StaticResource SettingsButton}" Content="Browse"
+                                    MinHeight="36" Padding="12,0" VerticalAlignment="Stretch"/>
+                        </Grid>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+                        </StackPanel>
+                        
+                        <!-- Voice Content -->
+                        <StackPanel x:Name="VoiceContent" Visibility="Collapsed">
+            <!-- ═══ Voice (VOICEVOX) ═══ -->
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice (VOICEVOX)"/>
+
+                    <StackPanel Margin="0,0,0,12">
+                        <CheckBox Style="{StaticResource SettingsCheckBox}"
+                                  Content="Enable voice output"
+                                  IsChecked="{Binding VoiceEnabled}"/>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="TTS Mode"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="Choose between local VoiceVox or cloud TTS"/>
+                        <StackPanel Margin="0,8,0,0">
+                            <RadioButton x:Name="RadioLocalTts" 
+                                         Style="{StaticResource SettingsRadioButton}"
+                                         GroupName="TtsMode"
+                                         Checked="RadioTtsMode_Changed"
+                                         Margin="0,4">
+                                <TextBlock Text="Local VoiceVox" TextWrapping="Wrap"/>
+                            </RadioButton>
+                            <RadioButton x:Name="RadioCloudTts" 
+                                         Style="{StaticResource SettingsRadioButton}"
+                                         GroupName="TtsMode"
+                                         Checked="RadioTtsMode_Changed"
+                                         Margin="0,4">
+                                <TextBlock Text="Remote TTS (ngrok tunnel)" TextWrapping="Wrap"/>
+                            </RadioButton>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel x:Name="LocalTtsPanel" Margin="0,0,0,12">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="VoiceVox Engine URL"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="Auto-detected if left default"/>
+                        <TextBox Style="{StaticResource SettingsTextBox}"
+                                 Text="{Binding VoicevoxBaseUrl, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+
+                    <StackPanel x:Name="CloudTtsPanel" Margin="0,0,0,12" Visibility="Collapsed">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Cloud TTS URL"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="Enter your ngrok tunnel root URL (e.g., https://xxxx.ngrok-free.dev)"/>
+                        <TextBox Style="{StaticResource SettingsTextBox}"
+                                 Text="{Binding CloudTtsUrl, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Remote TTS endpoint URL via ngrok tunnel"/>
+                        <Button x:Name="TestCloudTtsButton" 
+                                Click="TestCloudTts_Click"
+                                Style="{StaticResource SettingsButton}" 
+                                Content="Test Connection"
+                                Margin="0,8,0,0"
+                                MinHeight="36" 
+                                Padding="12,0"/>
+                    </StackPanel>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Speaker style ID"/>
+                            <!-- Hidden hint to align height with right column -->
+                            <TextBlock Style="{StaticResource FieldHint}" Text=" " Visibility="Hidden"/>
+                            <TextBox Style="{StaticResource SettingsTextBox}"
+                                     Text="{Binding VoicevoxSpeakerStyleIdText, UpdateSourceTrigger=PropertyChanged}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Audio output device"/>
+                            <TextBlock Style="{StaticResource FieldHint}" Text="Select output"/>
+                            <ComboBox Style="{StaticResource SettingsComboBox}"
+                                      ItemsSource="{Binding AudioDevices}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding VoiceOutputDeviceNumber}"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel>
+                        <CheckBox Style="{StaticResource SettingsCheckBox}" Margin="0,0,0,8"
+                                  Content="Translate replies to Japanese for voice"
+                                  IsChecked="{Binding VoiceTranslateToJapanese}"/>
+                        
+                        <!-- DeepL Settings (shown when translation is enabled) -->
+                        <Border Background="Transparent" 
+                                BorderBrush="Transparent"
+                                BorderThickness="0"
+                                CornerRadius="8"
+                                Padding="0"
+                                Margin="16,0,0,8">
+                            <StackPanel>
+                                <CheckBox Style="{StaticResource SettingsCheckBox}" Margin="0,0,0,12"
+                                          Content="Use DeepL API (professional translation with usage tracking)"
+                                          IsChecked="{Binding UseDeepLTranslate}"/>
+                                
+                                <StackPanel>
+                                    <CheckBox Style="{StaticResource SettingsCheckBox}"
+                                              Content="Use Free API endpoint (500,000 chars/month)"
+                                              IsChecked="{Binding UseDeepLFreeApi}"/>
+                                    <TextBlock Style="{StaticResource FieldHint}" 
+                                               Text="Uncheck if you have a DeepL Pro subscription"
+                                               Margin="24,4,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        
+                        <CheckBox Style="{StaticResource SettingsCheckBox}"
+                                  Content="Sync typewriter speed to voice"
+                                  IsChecked="{Binding VoicePlayBeforeTypewriter}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+                        </StackPanel>
+                        
+                        <!-- Advanced Content (placeholder for future settings) -->
+                        <StackPanel x:Name="AdvancedContent" Visibility="Collapsed">
+                            <!-- Discord Voice Integration -->
+                            <Border Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Discord Voice Integration"/>
+                                    <TextBlock Style="{StaticResource FieldHint}"
+                                               Text="Discord token / guild / channel IDs are handled from discord-voice-bridge/.env"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,10"/>
+                                    <Button Style="{StaticResource SettingsButton}"
+                                            Content="Open discord-voice-bridge/.env"
+                                            HorizontalAlignment="Left"
+                                            MinWidth="200"
+                                            Margin="0,0,0,10"
+                                            Click="OpenDiscordEnv_Click"/>
+
+                                    <StackPanel Margin="0,8,0,0">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Translation Strategy"/>
+                                        <ComboBox x:Name="CmbDiscordTranslationStrategy"
+                                                  Style="{StaticResource SettingsComboBox}"
+                                                  SelectedIndex="{Binding DiscordTranslationStrategyIndex, Mode=TwoWay}">
+                                            <ComboBoxItem Content="Translate Input to Japanese"/>
+                                            <ComboBoxItem Content="Translate Response to Japanese"/>
+                                            <ComboBoxItem Content="Bilingual - No Translation"/>
+                                        </ComboBox>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Voice Audio Devices -->
+                            <Border Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Audio Devices"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="Input Device"/>
+                                            <ComboBox Style="{StaticResource SettingsComboBox}"
+                                                      ItemsSource="{Binding VoiceChatInputDevices}"
+                                                      DisplayMemberPath="Name"
+                                                      SelectedValuePath="Id"
+                                                      SelectedValue="{Binding VoiceChatInputDeviceNumber}"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="Output Device"/>
+                                            <ComboBox Style="{StaticResource SettingsComboBox}"
+                                                      ItemsSource="{Binding VoiceChatOutputDevices}"
+                                                      DisplayMemberPath="Name"
+                                                      SelectedValuePath="Id"
+                                                      SelectedValue="{Binding VoiceChatOutputDeviceNumber}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Local Microphone Input -->
+                            <Border Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Local Microphone Input"/>
+                                    <TextBlock Style="{StaticResource FieldHint}" 
+                                               Text="Use your computer's microphone for voice input instead of Discord voice chat"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,12"/>
+                                    <StackPanel Margin="0,0,0,12">
+                                        <CheckBox x:Name="UseMicrophoneToggle"
+                                                  Style="{StaticResource SettingsCheckBox}"
+                                                  Content="Use Local Microphone (instead of Discord)"
+                                                  IsChecked="{Binding UseMicrophoneInput}"
+                                                  Margin="0,0,0,8"/>
+                                    </StackPanel>
+
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Microphone Device"/>
+                                        <ComboBox x:Name="CmbMicrophoneDevice"
+                                                  Style="{StaticResource SettingsComboBox}"
+                                                  IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Margin="0,0,0,8">
+                                        <CheckBox x:Name="PushToTalkToggle"
+                                                  Style="{StaticResource SettingsCheckBox}"
+                                                  Content="Push-to-Talk Mode"
+                                                  IsChecked="{Binding MicrophonePushToTalk}"
+                                                  IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"
+                                                  Margin="0,0,0,4"/>
+                                    </StackPanel>
+
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Voice Reception Toggle Key"/>
+                                        <TextBlock x:Name="TxtVoiceReceptionKeyHint"
+                                                   Style="{StaticResource FieldHint}"
+                                                   Text="Press this key in main window to toggle voice reception (e.g. F8, F9, Pause)."/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox x:Name="TxtVoiceReceptionToggleKey"
+                                                     Grid.Column="0"
+                                                     Style="{StaticResource SettingsTextBox}"
+                                                     IsReadOnly="True"
+                                                     Text="{Binding VoiceReceptionToggleKeyText, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <Button x:Name="BtnCaptureVoiceReceptionKey"
+                                                    Grid.Column="1"
+                                                    Click="CaptureVoiceReceptionKey_Click"
+                                                    Style="{StaticResource SettingsButton}"
+                                                    MinWidth="96"
+                                                    Margin="8,0,0,0"
+                                                    Content="Edit Key"/>
+                                        </Grid>
+                                    </StackPanel>
+
+                                    <Button x:Name="BtnTestMicrophone"
+                                            Click="TestMicrophone_Click"
+                                            Style="{StaticResource SettingsButton}"
+                                            Content="Test Microphone"
+                                            MinHeight="36"
+                                            HorizontalAlignment="Left"
+                                            MinWidth="140"
+                                            IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"
+                                            Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Voice Chat History -->
+                            <Border Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Chat History"/>
+                                    <Button Click="ClearVoiceChatHistory_Click"
+                                            Style="{StaticResource SettingsButton}"
+                                            HorizontalAlignment="Left"
+                                            MinWidth="180"
+                                            Content="Clear voice chat history"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- Rate Limit Content -->
+                        <StackPanel x:Name="RateLimitContent" Visibility="Collapsed">
+                            <Border Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Provider Rate Limiting"/>
+                                    <StackPanel Margin="0,0,0,12">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Fallback cooldown (seconds)"/>
+                                        <TextBlock Style="{StaticResource FieldHint}" Text="Used when provider returns 429 without Retry-After header."/>
+                                        <TextBox Style="{StaticResource SettingsTextBox}"
+                                                 Text="{Binding ProviderRateLimitCooldownSecondsText, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Current rate-limit status"/>
+                                        <TextBlock x:Name="TxtRateLimitStatus"
+                                                   Style="{StaticResource FieldHint}"
+                                                   Text="No active provider cooldowns."/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        
+        </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer buttons -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,18,14">
+            <Button Width="100" Margin="0,0,10,0" Click="Cancel_Click"
+                    Style="{StaticResource SettingsButton}"
+                    Content="Cancel"/>
+            <Button Width="100" Click="Save_Click"
+                    Style="{StaticResource SettingsButton}"
+                    Background="{StaticResource AccentBrushRes}"
+                    Foreground="White"
+                    BorderThickness="0"
+                    Content="Save"/>
+        </StackPanel>
+        </Grid>
+        </Border>
+    </Grid>
+</Window>
+
+
+
+
+
+
+
+
+

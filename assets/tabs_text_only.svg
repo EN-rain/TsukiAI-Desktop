@@ -1,0 +1,8 @@
+<svg width="900" height="240" xmlns="http://www.w3.org/2000/svg">
+  <!-- Active indicator line above Voice -->
+  <line x1="360" y1="50" x2="540" y2="50" stroke="#7B68EE" stroke-width="4" stroke-linecap="round"/>
+  
+  <text x="200" y="155" font-family="Arial, sans-serif" font-size="60" font-weight="400" fill="#888888" text-anchor="middle">Inference</text>
+  <text x="450" y="155" font-family="Arial, sans-serif" font-size="60" font-weight="500" fill="#FFFFFF" text-anchor="middle">Voice</text>
+  <text x="700" y="155" font-family="Arial, sans-serif" font-size="60" font-weight="400" fill="#888888" text-anchor="middle">Advanced</text>
+</svg>
