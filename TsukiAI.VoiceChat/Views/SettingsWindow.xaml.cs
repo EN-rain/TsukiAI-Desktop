@@ -8,6 +8,9 @@ using System.Windows.Shapes;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Diagnostics;
 using NAudio.Wave;
 using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
@@ -18,18 +21,23 @@ namespace TsukiAI.VoiceChat.Views;
 
 public partial class SettingsWindow : Window
 {
+    private static readonly HttpClient CloudTtsTestClient = CreateSharedHttpClient(TimeSpan.FromSeconds(25));
+    private static readonly HttpClient ProviderProbeClient = CreateSharedHttpClient(TimeSpan.FromSeconds(12));
+
     public AppSettings Result { get; private set; }
     private readonly Action? _clearHistory;
-    private readonly Dictionary<string, DateTimeOffset> _providerRateLimitedUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _testedProviders = new(StringComparer.OrdinalIgnoreCase);
-    private const int DefaultProviderCooldownSeconds = 60;
-    private int _providerCooldownFallbackSeconds = DefaultProviderCooldownSeconds;
     private bool _isCapturingVoiceReceptionKey;
+
+    private static HttpClient CreateSharedHttpClient(TimeSpan timeout)
+    {
+        var client = new HttpClient { Timeout = timeout };
+        client.DefaultRequestHeaders.TryAddWithoutValidation("ngrok-skip-browser-warning", "true");
+        return client;
+    }
 
     public SettingsWindow(
         AppSettings? initial = null,
-        string? fiveMinuteSummaries = null,
-        string? hourlySummaries = null,
         Window? owner = null,
         Action? clearHistory = null
     )
@@ -49,10 +57,9 @@ public partial class SettingsWindow : Window
         {
             IsActivityLoggingEnabled = Result.IsActivityLoggingEnabled,
             SampleIntervalMinutesText = Result.SampleIntervalMinutes.ToString(),
-            SummarizeIntervalMinutesText = Result.SummarizeIntervalMinutes.ToString(),
-            RetentionHoursForRawText = Result.RetentionHoursForRaw.ToString(),
             CaptureModeIndex = Result.CaptureMode == ScreenshotCaptureMode.ActiveWindow ? 1 : 0,
             ModelName = Result.ModelName,
+            ReplyTonePreset = NormalizeReplyTonePreset(Result.ReplyTonePreset),
             AutoStartOllama = Result.AutoStartOllama,
             StopOllamaOnExit = Result.StopOllamaOnExit,
             StartupGreetingEnabled = Result.StartupGreetingEnabled,
@@ -72,19 +79,17 @@ public partial class SettingsWindow : Window
             AudioDevices = GetOutputDevices(),
             VoicePlayBeforeTypewriter = Result.VoicePlayBeforeTypewriter,
             TessdataDirectory = Result.TessdataDirectory ?? string.Empty,
-            FiveMinuteSummariesText = fiveMinuteSummaries ?? string.Empty,
-            HourlySummariesText = hourlySummaries ?? string.Empty,
             RemoteInferenceUrl = Result.RemoteInferenceUrl ?? string.Empty,
             RemoteInferenceApiKey = Result.RemoteInferenceApiKey ?? string.Empty,
             AiProvider = InferProviderFromUrl(Result.RemoteInferenceUrl),
             UseMultipleProviders = Result.UseMultipleAiProviders,
             MultiAiProvidersCsv = Result.MultiAiProvidersCsv ?? string.Empty,
-            AutoSwitchProviderOnRateLimit = Result.AutoSwitchProviderOnRateLimit,
-            ProviderRateLimitCooldownSecondsText = Result.ProviderRateLimitCooldownSeconds.ToString(),
             VoiceChatInputDeviceNumber = Result.VoiceChatInputDeviceNumber,
             VoiceChatOutputDeviceNumber = Result.VoiceChatOutputDeviceNumber,
             VoiceChatInputDevices = GetInputDevices(),
             VoiceChatOutputDevices = GetVoiceChatOutputDevices(),
+            SttModeIndex = (int)Result.SttMode,
+            SttLanguageCode = NormalizeSttLanguageCode(Result.SttLanguageCode),
             DiscordTranslationStrategyIndex = (int)Result.DiscordTranslationStrategy,
             UseMicrophoneInput = Result.UseMicrophoneInput,
             MicrophonePushToTalk = Result.MicrophonePushToTalk,
@@ -129,44 +134,10 @@ public partial class SettingsWindow : Window
         // Update status indicators
         UpdateProviderStatusIndicators();
         
-        if (ChkAutoSwitchOnRateLimit != null)
-        {
-            ChkAutoSwitchOnRateLimit.IsChecked = vm.AutoSwitchProviderOnRateLimit;
-        }
         UpdateInferenceModeUi();
-        RefreshProviderLimitRings();
         PopulateMicrophoneDevices(Result.MicrophoneDeviceId);
-        _providerCooldownFallbackSeconds = Result.ProviderRateLimitCooldownSeconds > 0
-            ? Result.ProviderRateLimitCooldownSeconds
-            : DefaultProviderCooldownSeconds;
     }
 
-    private static List<AudioDeviceItem> GetOutputDevices()
-    {
-        var devices = new List<AudioDeviceItem> { new() { Id = -1, Name = "Default Device" } };
-        for (var i = 0; i < WaveOut.DeviceCount; i++)
-        {
-            var caps = WaveOut.GetCapabilities(i);
-            devices.Add(new AudioDeviceItem { Id = i, Name = caps.ProductName });
-        }
-
-        return devices;
-    }
-
-    private static List<AudioDeviceItem> GetInputDevices()
-    {
-        var devices = new List<AudioDeviceItem>();
-        for (var i = 0; i < WaveIn.DeviceCount; i++)
-        {
-            var caps = WaveIn.GetCapabilities(i);
-            devices.Add(new AudioDeviceItem { Id = i, Name = caps.ProductName });
-        }
-
-        if (devices.Count == 0)
-            devices.Add(new AudioDeviceItem { Id = -1, Name = "Default Input" });
-
-        return devices;
-    }
 
     private static List<AudioDeviceItem> GetVoiceChatOutputDevices()
     {
@@ -193,7 +164,7 @@ public partial class SettingsWindow : Window
         if (!string.IsNullOrEmpty(NormalizeApiKey(TxtRemoteApiKey.Password)))
         {
             TxtConnectionStatus.Text = "API Key is configured";
-            TxtConnectionStatus.Foreground = System.Windows.Media.Brushes.LimeGreen;
+            TxtConnectionStatus.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x9B, 0x7B, 0xFF));
             return;
         }
 
@@ -212,20 +183,10 @@ public partial class SettingsWindow : Window
     {
         UpdateInferenceModeUi();
         ShowTab(0, animateIndicator: false); // Show Inference tab by default
-        UpdateProviderRateLimitIndicator();
         UpdateVoiceReceptionCaptureUi();
         await AutoValidateCheckedProvidersAsync();
     }
 
-    private void CaptureVoiceReceptionKey_Click(object sender, RoutedEventArgs e)
-    {
-        _isCapturingVoiceReceptionKey = !_isCapturingVoiceReceptionKey;
-        UpdateVoiceReceptionCaptureUi();
-        if (_isCapturingVoiceReceptionKey)
-        {
-            Focus();
-        }
-    }
 
     private void SettingsWindow_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
@@ -267,27 +228,6 @@ public partial class SettingsWindow : Window
         e.Handled = true;
     }
 
-    private void UpdateVoiceReceptionCaptureUi()
-    {
-        if (BtnCaptureVoiceReceptionKey != null)
-        {
-            BtnCaptureVoiceReceptionKey.Content = _isCapturingVoiceReceptionKey ? "Cancel" : "Edit Key";
-        }
-
-        if (TxtVoiceReceptionKeyHint != null)
-        {
-            TxtVoiceReceptionKeyHint.Text = _isCapturingVoiceReceptionKey
-                ? "Press any key now to set toggle key. Press Esc to cancel."
-                : "Press this key in main window to toggle voice reception (e.g. F8, F9, Pause).";
-        }
-
-        if (TxtVoiceReceptionToggleKey != null)
-        {
-            TxtVoiceReceptionToggleKey.BorderBrush = _isCapturingVoiceReceptionKey
-                ? (FindResource("AccentBrushRes") as System.Windows.Media.Brush ?? System.Windows.Media.Brushes.MediumPurple)
-                : (FindResource("BorderBrush") as System.Windows.Media.Brush ?? System.Windows.Media.Brushes.Gray);
-        }
-    }
 
     private void Tab_Click(object sender, RoutedEventArgs e)
     {
@@ -310,12 +250,10 @@ public partial class SettingsWindow : Window
         if (InferenceContent != null) InferenceContent.Visibility = Visibility.Collapsed;
         if (VoiceContent != null) VoiceContent.Visibility = Visibility.Collapsed;
         if (AdvancedContent != null) AdvancedContent.Visibility = Visibility.Collapsed;
-        if (RateLimitContent != null) RateLimitContent.Visibility = Visibility.Collapsed;
 
         SetTabSelected(TabInference, false);
         SetTabSelected(TabVoice, false);
         SetTabSelected(TabAdvanced, false);
-        SetTabSelected(TabRateLimit, false);
 
         // Show selected content and highlight tab
         switch (tabIndex)
@@ -331,10 +269,6 @@ public partial class SettingsWindow : Window
             case 2:
                 if (AdvancedContent != null) AdvancedContent.Visibility = Visibility.Visible;
                 SetTabSelected(TabAdvanced, true);
-                break;
-            case 3:
-                if (RateLimitContent != null) RateLimitContent.Visibility = Visibility.Visible;
-                SetTabSelected(TabRateLimit, true);
                 break;
         }
 
@@ -355,7 +289,6 @@ public partial class SettingsWindow : Window
             0 => TabInference,
             1 => TabVoice,
             2 => TabAdvanced,
-            3 => TabRateLimit,
             _ => null
         };
 
@@ -406,104 +339,6 @@ public partial class SettingsWindow : Window
         tab.FontWeight = FontWeights.Normal;
     }
 
-    private void RadioTtsMode_Changed(object sender, RoutedEventArgs e)
-    {
-        UpdateTtsPanelVisibility(RadioLocalTts.IsChecked == true ? TtsMode.LocalVoiceVox : TtsMode.CloudRemote);
-    }
-
-    private void UpdateTtsPanelVisibility(TtsMode mode)
-    {
-        if (LocalTtsPanel == null || CloudTtsPanel == null)
-        {
-            return;
-        }
-
-        LocalTtsPanel.Visibility = mode == TtsMode.LocalVoiceVox ? Visibility.Visible : Visibility.Collapsed;
-        CloudTtsPanel.Visibility = mode == TtsMode.CloudRemote ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private async void TestCloudTts_Click(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not SettingsVm vm)
-        {
-            return;
-        }
-
-        var url = NormalizeCloudTtsUrl(vm.CloudTtsUrl);
-        vm.CloudTtsUrl = url;
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            MessageBox.Show(this, "Please enter a Remote TTS URL first.", "No URL", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        TestCloudTtsButton.IsEnabled = false;
-        TestCloudTtsButton.Content = "Testing...";
-
-        try
-        {
-            using var httpClient = new System.Net.Http.HttpClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(25);
-            httpClient.DefaultRequestHeaders.Add("ngrok-skip-browser-warning", "true");
-
-            using var versionResp = await httpClient.GetAsync($"{url}/version");
-            var versionBody = await versionResp.Content.ReadAsStringAsync();
-            if (!versionResp.IsSuccessStatusCode)
-            {
-                var details = BuildRemoteTtsErrorDetails(url, versionResp.StatusCode, versionResp.ReasonPhrase, versionBody, "/version");
-                MessageBox.Show(this, details, "Remote TTS Connection", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            var probeText = "connection test";
-            using var queryResp = await httpClient.PostAsync(
-                $"{url}/audio_query?text={Uri.EscapeDataString(probeText)}&speaker={Result.VoicevoxSpeakerStyleId}",
-                content: null);
-            var queryBody = await queryResp.Content.ReadAsStringAsync();
-            if (!queryResp.IsSuccessStatusCode || string.IsNullOrWhiteSpace(queryBody))
-            {
-                var details = BuildRemoteTtsErrorDetails(url, queryResp.StatusCode, queryResp.ReasonPhrase, queryBody, "/audio_query");
-                MessageBox.Show(this, details, "Remote TTS Connection", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            using var synthReq = new System.Net.Http.HttpRequestMessage(
-                System.Net.Http.HttpMethod.Post,
-                $"{url}/synthesis?speaker={Result.VoicevoxSpeakerStyleId}")
-            {
-                Content = new System.Net.Http.StringContent(queryBody, System.Text.Encoding.UTF8, "application/json")
-            };
-            synthReq.Headers.TryAddWithoutValidation("accept", "audio/wav");
-            using var synthResp = await httpClient.SendAsync(synthReq, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
-            var wavBytes = await synthResp.Content.ReadAsByteArrayAsync();
-
-            if (!synthResp.IsSuccessStatusCode || wavBytes.Length == 0)
-            {
-                var synthBody = string.Empty;
-                try { synthBody = System.Text.Encoding.UTF8.GetString(wavBytes); } catch { }
-                var details = BuildRemoteTtsErrorDetails(url, synthResp.StatusCode, synthResp.ReasonPhrase, synthBody, "/synthesis");
-                MessageBox.Show(this, details, "Remote TTS Connection", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            var version = (versionBody ?? string.Empty).Trim().Trim('"');
-            MessageBox.Show(
-                this,
-                $"Connection successful.\nEngine version: {version}\nSynthesis: OK ({wavBytes.Length} bytes)",
-                "Remote TTS Connection",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, $"Remote TTS connection failed:\n{ex.Message}", "Connection Test", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            TestCloudTtsButton.IsEnabled = true;
-            TestCloudTtsButton.Content = "Test Connection";
-        }
-    }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
@@ -513,14 +348,10 @@ public partial class SettingsWindow : Window
         }
 
         var sampleMinutes = ParseIntOr(vm.SampleIntervalMinutesText, AppSettings.Default.SampleIntervalMinutes, 1, 1440);
-        var summarizeMinutes = ParseIntOr(vm.SummarizeIntervalMinutesText, AppSettings.Default.SummarizeIntervalMinutes, 1, 1440);
-        var retentionHours = ParseIntOr(vm.RetentionHoursForRawText, AppSettings.Default.RetentionHoursForRaw, 1, 168);
         var proactiveAfterMinutes = ParseIntOr(vm.ProactiveMessageAfterMinutesText, AppSettings.Default.ProactiveMessageAfterMinutes, 1, 1440);
         var proactiveMaxMinutes = ParseIntOr(vm.ProactiveMessageMaxMinutesText, AppSettings.Default.ProactiveMessageMaxMinutes, 1, 1440);
         var voiceStyleId = ParseIntOr(vm.VoicevoxSpeakerStyleIdText, AppSettings.Default.VoicevoxSpeakerStyleId, 0, 9999);
-        var providerCooldownSeconds = ParseIntOr(vm.ProviderRateLimitCooldownSecondsText, DefaultProviderCooldownSeconds, 5, 3600);
         var voiceReceptionToggleKey = NormalizeKeyNameOr(vm.VoiceReceptionToggleKeyText, Result.VoiceReceptionToggleKey, "F8");
-        _providerCooldownFallbackSeconds = providerCooldownSeconds;
 
         if (proactiveMaxMinutes < proactiveAfterMinutes)
         {
@@ -541,7 +372,6 @@ public partial class SettingsWindow : Window
         {
             vm.RemoteInferenceUrl = EnsureProviderUrl(vm.AiProvider, vm.RemoteInferenceUrl);
         }
-        vm.AutoSwitchProviderOnRateLimit = ChkAutoSwitchOnRateLimit?.IsChecked == true;
         vm.MultiAiProvidersCsv = GetSelectedMultiProvidersCsv();
         var deepLApiKeyFromEnv = EnvConfiguration.ApplyToSettings(Result).DeepLApiKey;
         var normalizedRemoteApiKey = NormalizeApiKey(TxtRemoteApiKey.Password);
@@ -573,10 +403,9 @@ public partial class SettingsWindow : Window
             EnabledMode = newMode,
             IsActivityLoggingEnabled = vm.IsActivityLoggingEnabled,
             SampleIntervalMinutes = sampleMinutes,
-            SummarizeIntervalMinutes = summarizeMinutes,
             CaptureMode = captureMode,
-            RetentionHoursForRaw = retentionHours,
             ModelName = resolvedModelName,
+            ReplyTonePreset = NormalizeReplyTonePreset(vm.ReplyTonePreset),
             AutoStartOllama = vm.AutoStartOllama,
             StopOllamaOnExit = vm.StopOllamaOnExit,
             StartupGreetingEnabled = vm.StartupGreetingEnabled,
@@ -602,8 +431,6 @@ public partial class SettingsWindow : Window
             RemoteInferenceApiKey = runtimeApiKey,
             UseMultipleAiProviders = vm.UseMultipleProviders,
             MultiAiProvidersCsv = vm.MultiAiProvidersCsv,
-            AutoSwitchProviderOnRateLimit = vm.AutoSwitchProviderOnRateLimit,
-            ProviderRateLimitCooldownSeconds = providerCooldownSeconds,
             
             // Save multi-provider API keys (only if changed from masked version)
             CerebrasApiKey = updatedCerebrasApiKey,
@@ -612,7 +439,8 @@ public partial class SettingsWindow : Window
             GitHubApiKey = updatedGitHubApiKey,
             MistralApiKey = updatedMistralApiKey,
             
-            SttMode = SttMode.CloudAssemblyAI,
+            SttMode = (SttMode)vm.SttModeIndex,
+            SttLanguageCode = NormalizeSttLanguageCode(vm.SttLanguageCode),
             DiscordTranslationStrategy = (TranslationStrategy)vm.DiscordTranslationStrategyIndex,
             VoiceChatInputDeviceNumber = vm.VoiceChatInputDeviceNumber,
             VoiceChatOutputDeviceNumber = vm.VoiceChatOutputDeviceNumber,
@@ -624,6 +452,9 @@ public partial class SettingsWindow : Window
         };
 
         SettingsService.Save(Result);
+        
+        // Update discord-voice-bridge/.env with STT mode
+        UpdateDiscordBridgeEnv(Result.SttMode, Result.GroqApiKey, Result.SttLanguageCode);
 
         DialogResult = true;
         Close();
@@ -729,97 +560,7 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void AiProvider_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (DataContext is not SettingsVm vm || CmbAiProvider.SelectedItem is not ComboBoxItem item)
-        {
-            return;
-        }
 
-        var tag = (item.Tag as string ?? "openrouter").ToLowerInvariant();
-        vm.AiProvider = tag;
-
-        if (GetInferenceModeSelectionTag() != "provider")
-        {
-            return;
-        }
-
-        // In provider mode, selecting a provider should map away from custom/ngrok URLs.
-        // For Kimi, keep an existing moonshot .ai/.cn URL if already configured.
-        vm.RemoteInferenceUrl = EnsureProviderUrl(tag, vm.RemoteInferenceUrl);
-        vm.ModelName = EnsureProviderModel(tag, vm.ModelName);
-    }
-
-    private async void BtnTestRemoteConnection_Click(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not SettingsVm vm)
-        {
-            return;
-        }
-
-        var isProviderMode = GetInferenceModeSelectionTag() == "provider";
-        var provider = (CmbAiProvider?.SelectedItem as ComboBoxItem)?.Tag as string ?? "custom";
-        var url = isProviderMode
-            ? EnsureProviderUrl(provider, vm.RemoteInferenceUrl?.Trim())
-            : (vm.RemoteInferenceUrl?.Trim() ?? string.Empty);
-        vm.RemoteInferenceUrl = url;
-        if (string.IsNullOrEmpty(url))
-        {
-            TxtConnectionStatus.Text = "Please enter a URL";
-            TxtConnectionStatus.Foreground = System.Windows.Media.Brushes.Red;
-            return;
-        }
-
-        TxtConnectionStatus.Text = isProviderMode ? "Testing API key..." : "Testing tunnel server...";
-        TxtConnectionStatus.Foreground = System.Windows.Media.Brushes.Gray;
-        BtnTestRemoteConnection.IsEnabled = false;
-
-        try
-        {
-            (bool ok, string message) result;
-            if (isProviderMode)
-            {
-                if (TryGetProviderCooldown(provider, out var remaining))
-                {
-                    TxtConnectionStatus.Text = $"Rate limited for {provider}. Try again in {(int)Math.Ceiling(remaining.TotalSeconds)}s.";
-                    TxtConnectionStatus.Foreground = System.Windows.Media.Brushes.Goldenrod;
-                    UpdateProviderRateLimitIndicator();
-                    return;
-                }
-
-                var providerApiInput = GetProviderApiInput(provider);
-                var providerApiKey = ResolveProviderApiKeyForTest(provider, providerApiInput);
-                var probe = await TestApiKeyAsync(provider, url, providerApiKey, _providerCooldownFallbackSeconds);
-                if (probe.RateLimited)
-                {
-                    MarkProviderRateLimited(provider, probe.RetryAfterSeconds);
-                }
-                result = (probe.Ok, probe.Message);
-            }
-            else
-            {
-                using var client = new RemoteInferenceClient(url, string.Empty);
-                var reachable = await client.IsServerReachableAsync();
-                result = reachable
-                    ? (true, "Tunnel server reachable.")
-                    : (false, "Tunnel server not reachable.");
-            }
-
-            var (ok, message) = result;
-            TxtConnectionStatus.Text = message;
-            TxtConnectionStatus.Foreground = ok ? System.Windows.Media.Brushes.LimeGreen : System.Windows.Media.Brushes.Red;
-            UpdateProviderRateLimitIndicator();
-        }
-        catch (Exception ex)
-        {
-            TxtConnectionStatus.Text = $"Error: {ex.Message}";
-            TxtConnectionStatus.Foreground = System.Windows.Media.Brushes.Red;
-        }
-        finally
-        {
-            BtnTestRemoteConnection.IsEnabled = true;
-        }
-    }
 
     private void InferenceModeOption_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -829,7 +570,6 @@ public partial class SettingsWindow : Window
     private void ProviderMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         UpdateProviderModeUi();
-        RefreshProviderLimitRings();
     }
 
     private void UpdateInferenceModeUi()
@@ -908,7 +648,6 @@ public partial class SettingsWindow : Window
         {
             MultipleProvidersPanel.Visibility = isMulti ? Visibility.Visible : Visibility.Collapsed;
         }
-        UpdateProviderRateLimitIndicator();
     }
 
     private string GetInferenceModeSelectionTag()
@@ -993,16 +732,6 @@ public partial class SettingsWindow : Window
         if (ChkMistral?.IsChecked == true) selected.Add("mistral");
         if (ChkGitHub?.IsChecked == true) selected.Add("github");
         return string.Join(",", selected);
-    }
-
-    private void RefreshProviderLimitRings()
-    {
-        // Placeholder values until runtime metrics are wired from API responses/rate-limit headers.
-        SetRingProgress(RingCerebras, RingCerebrasLabel, 1.0);
-        SetRingProgress(RingGroq, RingGroqLabel, 1.0);
-        SetRingProgress(RingGemini, RingGeminiLabel, 1.0);
-        SetRingProgress(RingGitHub, RingGitHubLabel, 1.0);
-        SetRingProgress(RingMistral, RingMistralLabel, 1.0);
     }
 
     private void ProviderCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -1106,188 +835,8 @@ public partial class SettingsWindow : Window
         return null;
     }
 
-    private void EditProviderApi_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not System.Windows.Controls.Button button)
-        {
-            return;
-        }
 
-        // Extract provider name from Tag (handle both "provider" and "provider|active" formats)
-        string provider = button.Tag?.ToString()?.Split('|')[0] ?? "";
-        
-        var panel = provider switch
-        {
-            "cerebras" => PanelCerebrasApiKey,
-            "groq" => PanelGroqApiKey,
-            "gemini" => PanelGeminiApiKey,
-            "github" => PanelGitHubApiKey,
-            "mistral" => PanelMistralApiKey,
-            _ => null
-        };
 
-        if (panel != null)
-        {
-            // Toggle visibility for this specific provider only
-            bool isNowVisible = panel.Visibility != Visibility.Visible;
-            panel.Visibility = isNowVisible ? Visibility.Visible : Visibility.Collapsed;
-            
-            // Update button Tag to reflect active state
-            button.Tag = isNowVisible ? $"{provider}|active" : provider;
-        }
-    }
-
-    private async void TestProviderConnection_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not System.Windows.Controls.Button button || button.Tag is not string provider)
-        {
-            return;
-        }
-
-        var (apiKeyBox, statusText, url) = provider switch
-        {
-            "cerebras" => (TxtCerebrasApiKey, TxtCerebrasStatus, "https://api.cerebras.ai/v1"),
-            "groq" => (TxtGroqApiKey, TxtGroqStatus, "https://api.groq.com/openai/v1"),
-            "gemini" => (TxtGeminiApiKey, TxtGeminiStatus, "https://generativelanguage.googleapis.com/v1beta/openai"),
-            "github" => (TxtGitHubApiKey, TxtGitHubStatus, "https://models.github.ai/inference"),
-            "mistral" => (TxtMistralApiKey, TxtMistralStatus, "https://api.mistral.ai/v1"),
-            _ => (null, null, null)
-        };
-
-        if (apiKeyBox == null || statusText == null || url == null)
-        {
-            return;
-        }
-
-        var apiKey = ResolveProviderApiKeyForTest(provider, apiKeyBox.Password);
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            statusText.Text = "Please enter an API key";
-            statusText.Foreground = System.Windows.Media.Brushes.Red;
-            return;
-        }
-
-        button.IsEnabled = false;
-        button.Content = "Testing API...";
-        statusText.Text = "Testing API key...";
-        statusText.Foreground = System.Windows.Media.Brushes.Gray;
-
-        try
-        {
-            if (TryGetProviderCooldown(provider, out var remaining))
-            {
-                statusText.Text = $"⚠ Rate limited. Try again in {(int)Math.Ceiling(remaining.TotalSeconds)}s";
-                statusText.Foreground = System.Windows.Media.Brushes.Goldenrod;
-                UpdateProviderRateLimitIndicator();
-                return;
-            }
-
-            var probe = await TestApiKeyAsync(provider, url, apiKey, _providerCooldownFallbackSeconds);
-            if (probe.RateLimited)
-            {
-                MarkProviderRateLimited(provider, probe.RetryAfterSeconds);
-            }
-
-            // Mark provider as tested
-            _testedProviders.Add(provider);
-
-            statusText.Text = probe.Ok ? $"✓ {probe.Message}" : $"✗ {probe.Message}";
-            statusText.Foreground = probe.RateLimited
-                ? System.Windows.Media.Brushes.Goldenrod
-                : (probe.Ok ? System.Windows.Media.Brushes.LimeGreen : System.Windows.Media.Brushes.Red);
-            UpdateProviderRateLimitIndicator();
-            UpdateProviderStatusIndicators();
-        }
-        catch (Exception ex)
-        {
-            statusText.Text = $"✗ Error: {ex.Message}";
-            statusText.Foreground = System.Windows.Media.Brushes.Red;
-        }
-        finally
-        {
-            button.IsEnabled = true;
-            button.Content = "Test Connection";
-        }
-    }
-
-    private sealed record ApiProbeResult(bool Ok, bool RateLimited, int? RetryAfterSeconds, string Message);
-
-    private async Task<ApiProbeResult> TestApiKeyAsync(string provider, string baseUrl, string apiKey, int fallbackCooldownSeconds)
-    {
-        var normalizedApiKey = NormalizeApiKey(apiKey);
-        if (string.IsNullOrWhiteSpace(normalizedApiKey))
-        {
-            return new(false, false, null, "Please enter an API key.");
-        }
-
-        if (string.IsNullOrWhiteSpace(baseUrl))
-        {
-            return new(false, false, null, "Please enter a provider URL.");
-        }
-
-        using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(12) };
-        client.DefaultRequestHeaders.Add("ngrok-skip-browser-warning", "true");
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", normalizedApiKey);
-
-        // Most configured providers in this UI are OpenAI-compatible endpoints.
-        var candidates = BuildModelProbeUrls(baseUrl, provider);
-        var attempted = new List<string>();
-        foreach (var endpoint in candidates)
-        {
-            try
-            {
-                attempted.Add(endpoint);
-                using var response = await client.GetAsync(endpoint);
-                if (response.IsSuccessStatusCode)
-                {
-                    return new(true, false, null, "API key validated.");
-                }
-
-                if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                {
-                    // Don't give up immediately - some providers restrict /models but allow /chat/completions.
-                    // Continue to try other candidates and fall back to chat probe.
-                    continue;
-                }
-
-                if ((int)response.StatusCode == 429)
-                {
-                    var retryAfter = GetRetryAfterSeconds(response) ?? fallbackCooldownSeconds;
-                    return new(true, true, retryAfter, $"API reachable but rate-limited. Retry in {retryAfter}s.");
-                }
-
-                if (response.StatusCode == HttpStatusCode.NotFound)
-                {
-                    continue;
-                }
-
-                var body = await response.Content.ReadAsStringAsync();
-                var statusCode = (int)response.StatusCode;
-                var snippet = string.IsNullOrWhiteSpace(body)
-                    ? $"HTTP {statusCode}"
-                    : $"HTTP {statusCode}: {body[..Math.Min(body.Length, 120)]}";
-                return new(false, false, null, $"API test failed. {snippet}");
-            }
-            catch (TaskCanceledException)
-            {
-                return new(false, false, null, "API test timed out.");
-            }
-            catch (Exception ex)
-            {
-                return new(false, false, null, $"Network/API error: {ex.Message}");
-            }
-        }
-
-        // Fallback probe: try an OpenAI-compatible chat completion request.
-        var chatProbe = await TryOpenAiCompatibleChatProbeAsync(client, baseUrl, provider, fallbackCooldownSeconds);
-        if (chatProbe.ok)
-        {
-            return new(chatProbe.ok, chatProbe.rateLimited, chatProbe.retryAfterSeconds, chatProbe.message);
-        }
-
-        var attempts = attempted.Count == 0 ? "(none)" : string.Join(" | ", attempted.Take(3));
-        return new(false, false, null, $"{chatProbe.message} Tried: {attempts}");
-    }
 
     private static List<string> BuildModelProbeUrls(string baseUrl, string provider)
     {
@@ -1361,16 +910,17 @@ public partial class SettingsWindow : Window
         return trimmed;
     }
 
-    private static async Task<(bool ok, bool rateLimited, int? retryAfterSeconds, string message)> TryOpenAiCompatibleChatProbeAsync(
+    private static async Task<(bool ok, string message)> TryOpenAiCompatibleChatProbeAsync(
         System.Net.Http.HttpClient client,
         string baseUrl,
         string provider,
+        string apiKey,
         int fallbackCooldownSeconds)
     {
         var baseCandidates = GetProbeBaseCandidates(baseUrl, provider);
         if (baseCandidates.Count == 0)
         {
-            return (false, false, null, $"Could not find a valid API probe endpoint for '{provider}'. Check provider URL format.");
+            return (false, $"Could not find a valid API probe endpoint for '{provider}'. Check provider URL format.");
         }
 
         var candidates = new List<string>();
@@ -1419,13 +969,16 @@ public partial class SettingsWindow : Window
         {
             try
             {
-                using var response = await client.PostAsync(
-                    endpoint,
-                    new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json"));
+                using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, endpoint)
+                {
+                    Content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json")
+                };
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                using var response = await client.SendAsync(request);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    return (true, false, null, "API key validated.");
+                    return (true, "API key validated.");
                 }
 
                 if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
@@ -1439,13 +992,12 @@ public partial class SettingsWindow : Window
                 // 400/422 usually means request/model issue after auth passed.
                 if ((int)response.StatusCode is 400 or 422)
                 {
-                    return (true, false, null, "API reachable (request format/model rejected, auth accepted).");
+                    return (true, "API reachable (request format/model rejected, auth accepted).");
                 }
 
                 if ((int)response.StatusCode == 429)
                 {
-                    var retryAfter = GetRetryAfterSeconds(response) ?? fallbackCooldownSeconds;
-                    return (true, true, retryAfter, $"API reachable but rate-limited. Retry in {retryAfter}s.");
+                    return (false, "API rate-limited. Please try again later.");
                 }
             }
             catch
@@ -1458,10 +1010,10 @@ public partial class SettingsWindow : Window
         if (lastStatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
             var errorDetail = string.IsNullOrWhiteSpace(lastErrorBody) ? "" : $" Response: {lastErrorBody.Trim()}";
-            return (false, false, null, $"API key rejected (401/403). Check key/project scope and ensure key is pasted without 'Bearer ' prefix.{errorDetail}");
+            return (false, $"API key rejected (401/403). Check key/project scope and ensure key is pasted without 'Bearer ' prefix.{errorDetail}");
         }
 
-        return (false, false, null, $"Could not find a valid API probe endpoint for '{provider}'. Check provider URL format.");
+        return (false, $"Could not find a valid API probe endpoint for '{provider}'. Check provider URL format.");
     }
 
     private static string NormalizeApiKey(string? apiKey)
@@ -1493,21 +1045,6 @@ public partial class SettingsWindow : Window
         return $"{normalized[..4]}{'*'.ToString().PadLeft(normalized.Length - 8, '*')}{normalized[^4..]}";
     }
 
-    private void LoadMultiProviderApiKeys()
-    {
-        if (TxtCerebrasApiKey != null) TxtCerebrasApiKey.Password = MaskApiKey(Result.CerebrasApiKey);
-        if (TxtGroqApiKey != null) TxtGroqApiKey.Password = MaskApiKey(Result.GroqApiKey);
-        if (TxtGeminiApiKey != null) TxtGeminiApiKey.Password = MaskApiKey(Result.GeminiApiKey);
-        if (TxtGitHubApiKey != null) TxtGitHubApiKey.Password = MaskApiKey(Result.GitHubApiKey);
-        if (TxtMistralApiKey != null) TxtMistralApiKey.Password = MaskApiKey(Result.MistralApiKey);
-        
-        // Uncheck providers with no API key
-        ValidateProviderApiKey("cerebras", Result.CerebrasApiKey, ChkCerebras);
-        ValidateProviderApiKey("groq", Result.GroqApiKey, ChkGroq);
-        ValidateProviderApiKey("gemini", Result.GeminiApiKey, ChkGemini);
-        ValidateProviderApiKey("github", Result.GitHubApiKey, ChkGitHub);
-        ValidateProviderApiKey("mistral", Result.MistralApiKey, ChkMistral);
-    }
 
     private void ValidateProviderApiKey(string provider, string apiKey, System.Windows.Controls.CheckBox? checkbox)
     {
@@ -1520,14 +1057,6 @@ public partial class SettingsWindow : Window
         // The checkbox state is preserved from settings
     }
 
-    private void UpdateProviderStatusIndicators()
-    {
-        UpdateProviderStatus("cerebras", StatusCerebras, Result.CerebrasApiKey, ChkCerebras);
-        UpdateProviderStatus("groq", StatusGroq, Result.GroqApiKey, ChkGroq);
-        UpdateProviderStatus("gemini", StatusGemini, Result.GeminiApiKey, ChkGemini);
-        UpdateProviderStatus("github", StatusGitHub, Result.GitHubApiKey, ChkGitHub);
-        UpdateProviderStatus("mistral", StatusMistral, Result.MistralApiKey, ChkMistral);
-    }
 
     private void UpdateProviderStatus(string provider, Ellipse? statusIndicator, string apiKey, System.Windows.Controls.CheckBox? checkbox = null)
     {
@@ -1578,18 +1107,8 @@ public partial class SettingsWindow : Window
             return;
         }
         
-        var isRateLimited = TryGetProviderCooldown(provider, out var remaining);
-        
-        if (isRateLimited)
-        {
-            statusIndicator.Fill = System.Windows.Media.Brushes.Red;
-            statusIndicator.ToolTip = $"Rate limited. Retry in {(int)Math.Ceiling(remaining.TotalSeconds)}s";
-        }
-        else
-        {
-            statusIndicator.Fill = System.Windows.Media.Brushes.LimeGreen;
-            statusIndicator.ToolTip = "Available";
-        }
+        statusIndicator.Fill = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x9B, 0x7B, 0xFF));
+        statusIndicator.ToolTip = "Available";
     }
 
     private static string GetUpdatedApiKey(string? inputValue, string existingValue)
@@ -1623,11 +1142,6 @@ public partial class SettingsWindow : Window
 
         foreach (var provider in providers)
         {
-            if (TryGetProviderCooldown(provider, out _))
-            {
-                continue;
-            }
-
             var apiKey = NormalizeApiKey(GetStoredApiKeyForProvider(provider));
             var baseUrl = GetProviderBaseUrl(provider);
             if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl))
@@ -1637,11 +1151,7 @@ public partial class SettingsWindow : Window
 
             try
             {
-                var probe = await TestApiKeyAsync(provider, baseUrl, apiKey, _providerCooldownFallbackSeconds);
-                if (probe.RateLimited)
-                {
-                    MarkProviderRateLimited(provider, probe.RetryAfterSeconds);
-                }
+                var probe = await TestApiKeyAsync(provider, baseUrl, apiKey, 60);
 
                 if (probe.Ok)
                 {
@@ -1658,7 +1168,6 @@ public partial class SettingsWindow : Window
             }
         }
 
-        UpdateProviderRateLimitIndicator();
         UpdateProviderStatusIndicators();
     }
 
@@ -1727,115 +1236,6 @@ public partial class SettingsWindow : Window
         }
 
         return NormalizeApiKey(rawInput);
-    }
-
-    private static int? GetRetryAfterSeconds(System.Net.Http.HttpResponseMessage response)
-    {
-        var header = response.Headers.RetryAfter;
-        if (header == null)
-        {
-            return null;
-        }
-
-        if (header.Delta.HasValue)
-        {
-            var secs = (int)Math.Ceiling(header.Delta.Value.TotalSeconds);
-            return secs > 0 ? secs : null;
-        }
-
-        if (header.Date.HasValue)
-        {
-            var delta = header.Date.Value - DateTimeOffset.UtcNow;
-            var secs = (int)Math.Ceiling(delta.TotalSeconds);
-            return secs > 0 ? secs : null;
-        }
-
-        return null;
-    }
-
-    private bool TryGetProviderCooldown(string provider, out TimeSpan remaining)
-    {
-        remaining = TimeSpan.Zero;
-        var key = (provider ?? string.Empty).Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return false;
-        }
-
-        if (!_providerRateLimitedUntil.TryGetValue(key, out var until))
-        {
-            return false;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        if (until <= now)
-        {
-            _providerRateLimitedUntil.Remove(key);
-            return false;
-        }
-
-        remaining = until - now;
-        return true;
-    }
-
-    private void MarkProviderRateLimited(string provider, int? retryAfterSeconds)
-    {
-        var key = (provider ?? string.Empty).Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return;
-        }
-
-        var cooldown = retryAfterSeconds.GetValueOrDefault(_providerCooldownFallbackSeconds);
-        if (cooldown <= 0)
-        {
-            cooldown = _providerCooldownFallbackSeconds;
-        }
-
-        _providerRateLimitedUntil[key] = DateTimeOffset.UtcNow.AddSeconds(cooldown);
-    }
-
-    private void UpdateProviderRateLimitIndicator()
-    {
-        if (TxtProviderRateLimitIndicator == null)
-        {
-            return;
-        }
-
-        var active = _providerRateLimitedUntil
-            .Where(kvp => kvp.Value > DateTimeOffset.UtcNow)
-            .OrderBy(kvp => kvp.Value)
-            .ToList();
-
-        if (active.Count == 0)
-        {
-            TxtProviderRateLimitIndicator.Visibility = Visibility.Collapsed;
-            TxtProviderRateLimitIndicator.Text = string.Empty;
-            if (TxtRateLimitStatus != null)
-            {
-                TxtRateLimitStatus.Text = "No active provider cooldowns.";
-                TxtRateLimitStatus.Foreground = FindResource("TextMutedBrush") as System.Windows.Media.Brush ?? System.Windows.Media.Brushes.Gray;
-            }
-            return;
-        }
-
-        var lines = active
-            .Take(3)
-            .Select(kvp =>
-            {
-                var secs = (int)Math.Ceiling((kvp.Value - DateTimeOffset.UtcNow).TotalSeconds);
-                var provider = kvp.Key;
-                return $"{provider}: {Math.Max(secs, 1)}s";
-            });
-
-        TxtProviderRateLimitIndicator.Text = $"Rate-limited providers: {string.Join(" | ", lines)}";
-        TxtProviderRateLimitIndicator.Foreground = System.Windows.Media.Brushes.Goldenrod;
-        TxtProviderRateLimitIndicator.Visibility = Visibility.Visible;
-        if (TxtRateLimitStatus != null)
-        {
-            TxtRateLimitStatus.Text = TxtProviderRateLimitIndicator.Text;
-            TxtRateLimitStatus.Foreground = System.Windows.Media.Brushes.Goldenrod;
-        }
     }
 
     private static string EnsureProviderUrl(string provider, string? currentUrl)
@@ -1951,50 +1351,6 @@ public partial class SettingsWindow : Window
         };
     }
 
-    private static void SetRingProgress(Path? ringPath, TextBlock? label, double ratio)
-    {
-        if (ringPath == null || label == null)
-        {
-            return;
-        }
-
-        ratio = Math.Clamp(ratio, 0.0, 1.0);
-        label.Text = $"{Math.Round(ratio * 100):0}%";
-
-        const double radius = 22.0;
-        var center = new System.Windows.Point(28, 28);
-        var start = new System.Windows.Point(center.X, center.Y - radius);
-
-        if (ratio <= 0.0)
-        {
-            ringPath.Data = Geometry.Empty;
-            return;
-        }
-
-        if (ratio >= 0.999)
-        {
-            ringPath.Data = new EllipseGeometry(center, radius, radius);
-            return;
-        }
-
-        var angle = 360.0 * ratio - 90.0;
-        var radians = angle * (Math.PI / 180.0);
-        var end = new System.Windows.Point(center.X + radius * Math.Cos(radians), center.Y + radius * Math.Sin(radians));
-        var isLargeArc = ratio > 0.5;
-
-        var figure = new PathFigure { StartPoint = start, IsClosed = false, IsFilled = false };
-        figure.Segments.Add(new ArcSegment
-        {
-            Point = end,
-            Size = new System.Windows.Size(radius, radius),
-            SweepDirection = SweepDirection.Clockwise,
-            IsLargeArc = isLargeArc
-        });
-        var geometry = new PathGeometry();
-        geometry.Figures.Add(figure);
-        ringPath.Data = geometry;
-    }
-
     private void RestartApplication()
     {
         try
@@ -2020,33 +1376,6 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void PopulateMicrophoneDevices(int selectedDeviceId)
-    {
-        if (CmbMicrophoneDevice == null)
-        {
-            return;
-        }
-
-        CmbMicrophoneDevice.Items.Clear();
-        CmbMicrophoneDevice.Items.Add(new ComboBoxItem { Content = "Default Microphone", Tag = -1 });
-
-        for (var i = 0; i < WaveIn.DeviceCount; i++)
-        {
-            var caps = WaveIn.GetCapabilities(i);
-            CmbMicrophoneDevice.Items.Add(new ComboBoxItem { Content = caps.ProductName, Tag = i });
-        }
-
-        for (var i = 0; i < CmbMicrophoneDevice.Items.Count; i++)
-        {
-            if (CmbMicrophoneDevice.Items[i] is ComboBoxItem item && item.Tag is int id && id == selectedDeviceId)
-            {
-                CmbMicrophoneDevice.SelectedIndex = i;
-                return;
-            }
-        }
-
-        CmbMicrophoneDevice.SelectedIndex = 0;
-    }
 
     private int GetSelectedMicrophoneDeviceId()
     {
@@ -2055,11 +1384,6 @@ public partial class SettingsWindow : Window
         return -1;
     }
 
-    private void TestMicrophone_Click(object sender, RoutedEventArgs e)
-    {
-        var selected = CmbMicrophoneDevice?.SelectedItem as ComboBoxItem;
-        MessageBox.Show($"Selected microphone: {selected?.Content}", "Microphone Test", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
 
     private void ClearVoiceChatHistory_Click(object sender, RoutedEventArgs e)
     {
@@ -2076,36 +1400,6 @@ public partial class SettingsWindow : Window
         MessageBox.Show("Voice chat history cleared.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private void OpenDiscordEnv_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var envPath = FindDiscordBridgeEnvPath();
-            if (envPath is null)
-            {
-                MessageBox.Show(this, "Could not find discord-voice-bridge folder.", "Open .env",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            var envDir = System.IO.Path.GetDirectoryName(envPath)!;
-            if (!System.IO.File.Exists(envPath))
-            {
-                var examplePath = System.IO.Path.Combine(envDir, ".env.example");
-                if (System.IO.File.Exists(examplePath))
-                    System.IO.File.Copy(examplePath, envPath);
-                else
-                    System.IO.File.WriteAllText(envPath, string.Empty);
-            }
-
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = envPath, UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, $"Failed to open .env:\n{ex.Message}", "Open .env",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
 
     private static string? FindDiscordBridgeEnvPath()
     {
@@ -2125,15 +1419,137 @@ public partial class SettingsWindow : Window
 
         return null;
     }
+    
+    private static void UpdateDiscordBridgeEnv(SttMode sttMode, string groqApiKey, string sttLanguageCode)
+    {
+        var bridgeWasRunning = IsBridgeServerRunning();
+
+        try
+        {
+            var envPath = FindDiscordBridgeEnvPath();
+            if (envPath == null || !System.IO.File.Exists(envPath))
+            {
+                DevLog.WriteLine("UpdateDiscordBridgeEnv: .env file not found");
+                return;
+            }
+            
+            var lines = System.IO.File.ReadAllLines(envPath).ToList();
+            var sttModeValue = sttMode == SttMode.CloudGroqWhisper ? "groq" : "assemblyai";
+            
+            // Update or add STT_MODE
+            var sttModeIndex = lines.FindIndex(l => l.StartsWith("STT_MODE="));
+            if (sttModeIndex >= 0)
+                lines[sttModeIndex] = $"STT_MODE={sttModeValue}";
+            else
+                lines.Insert(0, $"STT_MODE={sttModeValue}");
+            
+            // Update or add GROQ_API_KEY if using Groq
+            if (sttMode == SttMode.CloudGroqWhisper && !string.IsNullOrWhiteSpace(groqApiKey))
+            {
+                var groqKeyIndex = lines.FindIndex(l => l.StartsWith("GROQ_API_KEY="));
+                if (groqKeyIndex >= 0)
+                    lines[groqKeyIndex] = $"GROQ_API_KEY={groqApiKey}";
+                else
+                    lines.Add($"GROQ_API_KEY={groqApiKey}");
+            }
+
+            var languageCode = NormalizeSttLanguageCode(sttLanguageCode);
+            var sttLangIndex = lines.FindIndex(l => l.StartsWith("STT_LANGUAGE="));
+            if (sttLangIndex >= 0)
+                lines[sttLangIndex] = $"STT_LANGUAGE={languageCode}";
+            else
+                lines.Add($"STT_LANGUAGE={languageCode}");
+            
+            System.IO.File.WriteAllLines(envPath, lines);
+            DevLog.WriteLine($"UpdateDiscordBridgeEnv: Updated STT_MODE to {sttModeValue}, STT_LANGUAGE to {languageCode}");
+            RestartBridgeIfNeeded(bridgeWasRunning, envPath);
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine($"UpdateDiscordBridgeEnv: Failed to update .env: {ex.Message}");
+        }
+    }
+
+    private static bool IsBridgeServerRunning()
+    {
+        try
+        {
+            using var client = new TcpClient();
+            var connectTask = client.ConnectAsync("127.0.0.1", 3001);
+            return connectTask.Wait(300) && client.Connected;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void RestartBridgeIfNeeded(bool bridgeWasRunning, string envPath)
+    {
+        if (!bridgeWasRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            MainWindow.StopBridgeProcessesOnShutdown();
+            var bridgeDir = System.IO.Path.GetDirectoryName(envPath);
+            if (string.IsNullOrWhiteSpace(bridgeDir) || !System.IO.Directory.Exists(bridgeDir))
+            {
+                return;
+            }
+
+            var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/c npm start",
+                WorkingDirectory = bridgeDir,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            });
+
+            if (process is null)
+            {
+                DevLog.WriteLine("UpdateDiscordBridgeEnv: Failed to restart bridge process");
+                return;
+            }
+
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                    DevLog.WriteLine("[Bridge] " + e.Data);
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                    DevLog.WriteLine("[Bridge:ERR] " + e.Data);
+            };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            DevLog.WriteLine("UpdateDiscordBridgeEnv: Restarted bridge to apply new STT mode");
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine($"UpdateDiscordBridgeEnv: Bridge restart failed: {ex.Message}");
+        }
+    }
+
+    private static string NormalizeSttLanguageCode(string? languageCode)
+    {
+        var code = (languageCode ?? string.Empty).Trim().ToLowerInvariant();
+        return string.IsNullOrWhiteSpace(code) ? "auto" : code;
+    }
 
     private sealed class SettingsVm
     {
         public bool IsActivityLoggingEnabled { get; set; }
         public string SampleIntervalMinutesText { get; set; } = "5";
-        public string SummarizeIntervalMinutesText { get; set; } = "60";
-        public string RetentionHoursForRawText { get; set; } = "1";
         public int CaptureModeIndex { get; set; }
         public string ModelName { get; set; } = "qwen2.5:3b";
+        public string ReplyTonePreset { get; set; } = "natural";
         public bool AutoStartOllama { get; set; } = true;
         public bool StopOllamaOnExit { get; set; } = true;
         public bool StartupGreetingEnabled { get; set; } = true;
@@ -2153,19 +1569,17 @@ public partial class SettingsWindow : Window
         public List<AudioDeviceItem> AudioDevices { get; set; } = new();
         public bool VoicePlayBeforeTypewriter { get; set; }
         public string TessdataDirectory { get; set; } = string.Empty;
-        public string FiveMinuteSummariesText { get; set; } = string.Empty;
-        public string HourlySummariesText { get; set; } = string.Empty;
         public string RemoteInferenceUrl { get; set; } = string.Empty;
         public string RemoteInferenceApiKey { get; set; } = string.Empty;
         public string AiProvider { get; set; } = "custom";
         public bool UseMultipleProviders { get; set; }
         public string MultiAiProvidersCsv { get; set; } = string.Empty;
-        public bool AutoSwitchProviderOnRateLimit { get; set; } = true;
-        public string ProviderRateLimitCooldownSecondsText { get; set; } = "60";
         public int VoiceChatInputDeviceNumber { get; set; } = -1;
         public int VoiceChatOutputDeviceNumber { get; set; } = -1;
         public List<AudioDeviceItem> VoiceChatInputDevices { get; set; } = new();
         public List<AudioDeviceItem> VoiceChatOutputDevices { get; set; } = new();
+        public int SttModeIndex { get; set; }
+        public string SttLanguageCode { get; set; } = "auto";
         public int DiscordTranslationStrategyIndex { get; set; }
         public bool UseMicrophoneInput { get; set; }
         public bool MicrophonePushToTalk { get; set; }
@@ -2265,6 +1679,18 @@ public partial class SettingsWindow : Window
         }
 
         return value.TrimEnd('/');
+    }
+
+    private static string NormalizeReplyTonePreset(string? preset)
+    {
+        var value = (preset ?? string.Empty).Trim().ToLowerInvariant();
+        return value switch
+        {
+            "chill" => "chill",
+            "playful" => "playful",
+            "direct" => "direct",
+            _ => "natural"
+        };
     }
 
     private static string BuildRemoteTtsErrorDetails(string baseUrl, HttpStatusCode statusCode, string? reason, string? body, string step)

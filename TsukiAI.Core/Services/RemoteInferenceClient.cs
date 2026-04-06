@@ -5,6 +5,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Threading.Channels;
+using Polly;
+using Polly.Retry;
+using Polly.CircuitBreaker;
 using TsukiAI.Core.Models;
 
 namespace TsukiAI.Core.Services;
@@ -12,18 +16,70 @@ namespace TsukiAI.Core.Services;
 /// <summary>
 /// Remote inference client for vLLM OpenAI-compatible API.
 /// Supports both streaming and non-streaming inference with dual output (UI + TTS).
+/// Includes resilience policies: retry with exponential backoff and jitter.
 /// </summary>
 public sealed class RemoteInferenceClient : IInferenceClient
 {
     private readonly HttpClient _httpClient;
     private bool _disposed = false;
-    private System.Threading.Timer? _keepAliveTimer;
+    private CancellationTokenSource? _keepAliveCts;
+    private Task? _keepAliveTask;
+    private int _keepAliveInFlight;
     private readonly ISemanticMemoryService? _semanticMemory;
-    private readonly IConversationSummaryStore? _summaryStore;
     private readonly GenerationTuningSettings _tuning;
+    private readonly string _replyTonePreset;
     private static readonly PromptBuilder PromptBuilder = new();
     private const int RemoteHistoryWindowDefault = 6;
     private const int RemoteHistoryWindowDetailed = 8;
+    private bool _skipGenerateEndpoint = false; // Skip /generate and use /chat/completions directly
+    private readonly Channel<string>? _memoryWriteQueue;
+    private readonly CancellationTokenSource? _memoryWriteCts;
+    private readonly Task? _memoryWriteWorkerTask;
+    
+    // Resilience policy: retry with exponential backoff + jitter
+    private static readonly ResiliencePipeline<HttpResponseMessage> HttpRetryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+        .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
+        {
+            MaxRetryAttempts = 3,
+            Delay = TimeSpan.FromSeconds(1),
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true,
+            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                .HandleResult(r => 
+                    r.StatusCode == System.Net.HttpStatusCode.TooManyRequests ||
+                    r.StatusCode == System.Net.HttpStatusCode.RequestTimeout ||
+                    (int)r.StatusCode >= 500)
+                .Handle<HttpRequestException>()
+                .Handle<TaskCanceledException>(ex => !ex.CancellationToken.IsCancellationRequested),
+            OnRetry = args =>
+            {
+                var statusCode = args.Outcome.Result?.StatusCode.ToString() ?? "Exception";
+                DevLog.WriteLine($"RemoteInferenceClient[Retry]: attempt={args.AttemptNumber}, status={statusCode}, delay={args.RetryDelay.TotalSeconds:F1}s");
+                return ValueTask.CompletedTask;
+            }
+        })
+        .AddCircuitBreaker(new CircuitBreakerStrategyOptions<HttpResponseMessage>
+        {
+            FailureRatio = 1.0,
+            MinimumThroughput = 5,
+            SamplingDuration = TimeSpan.FromSeconds(30),
+            BreakDuration = TimeSpan.FromSeconds(30),
+            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                .HandleResult(r => (int)r.StatusCode >= 500 || r.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                .Handle<HttpRequestException>()
+                .Handle<TaskCanceledException>(ex => !ex.CancellationToken.IsCancellationRequested),
+            OnOpened = args =>
+            {
+                DevLog.WriteLine("RemoteInferenceClient[CircuitBreaker]: opened for {0}ms", args.BreakDuration.TotalMilliseconds);
+                return ValueTask.CompletedTask;
+            },
+            OnClosed = _ =>
+            {
+                DevLog.WriteLine("RemoteInferenceClient[CircuitBreaker]: closed");
+                return ValueTask.CompletedTask;
+            }
+        })
+        .Build();
     
     public string BaseUrl { get; private set; }
     public string ApiKey { get; private set; }
@@ -36,8 +92,8 @@ public sealed class RemoteInferenceClient : IInferenceClient
         string apiKey = "",
         string modelName = "Qwen/Qwen2.5-3B-Instruct",
         ISemanticMemoryService? semanticMemory = null,
-        IConversationSummaryStore? summaryStore = null,
-        GenerationTuningSettings? tuning = null)
+        GenerationTuningSettings? tuning = null,
+        string replyTonePreset = "natural")
     {
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
@@ -54,8 +110,19 @@ public sealed class RemoteInferenceClient : IInferenceClient
         ApiKey = apiKey ?? "";
         Model = NormalizeModelForBaseUrl(baseUrl, modelName);
         _semanticMemory = semanticMemory;
-        _summaryStore = summaryStore;
         _tuning = (tuning ?? GenerationTuningSettings.Default).Clamp();
+        _replyTonePreset = string.IsNullOrWhiteSpace(replyTonePreset) ? "natural" : replyTonePreset.Trim().ToLowerInvariant();
+        if (_semanticMemory is not null)
+        {
+            _memoryWriteQueue = Channel.CreateBounded<string>(new BoundedChannelOptions(256)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropOldest
+            });
+            _memoryWriteCts = new CancellationTokenSource();
+            _memoryWriteWorkerTask = Task.Run(MemoryWriteWorkerAsync);
+        }
         
         _httpClient = new HttpClient
         {
@@ -138,27 +205,63 @@ public sealed class RemoteInferenceClient : IInferenceClient
     /// </summary>
     private void StartKeepAlive()
     {
-        if (_keepAliveTimer != null) return;
-        
-        _keepAliveTimer = new System.Threading.Timer(async _ =>
-        {
-            try
-            {
-                var testRequest = new { prompt = "ping", system_prompt = "Reply with 'pong'" };
-                var json = JsonSerializer.Serialize(testRequest);
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                await _httpClient.PostAsync($"{BaseUrl}/generate", content, cts.Token);
-                DevLog.WriteLine("RemoteInferenceClient: Keep-alive ping sent");
-            }
-            catch (Exception ex)
-            {
-                DevLog.WriteLine($"RemoteInferenceClient: Keep-alive failed: {ex.Message}");
-            }
-        }, null, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(2));
-        
+        if (_keepAliveTask is not null) return;
+
+        _keepAliveCts = new CancellationTokenSource();
+        _keepAliveTask = Task.Run(() => KeepAliveLoopAsync(_keepAliveCts.Token));
+
         DevLog.WriteLine("RemoteInferenceClient: Keep-alive started (2 min interval)");
+    }
+
+    private async Task KeepAliveLoopAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(2));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                try
+                {
+                    await SendKeepAliveAsync();
+                }
+                catch (Exception ex)
+                {
+                    DevLog.WriteLine($"RemoteInferenceClient: Keep-alive loop error: {ex.Message}");
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // normal shutdown
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine($"RemoteInferenceClient: Keep-alive loop fatal error: {ex.Message}");
+        }
+    }
+
+    private async Task SendKeepAliveAsync()
+    {
+        if (Interlocked.Exchange(ref _keepAliveInFlight, 1) == 1)
+            return;
+
+        try
+        {
+            var testRequest = new { prompt = "ping", system_prompt = "Reply with 'pong'" };
+            var json = JsonSerializer.Serialize(testRequest);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await _httpClient.PostAsync($"{BaseUrl}/generate", content, cts.Token);
+            DevLog.WriteLine("RemoteInferenceClient: Keep-alive ping sent");
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine($"RemoteInferenceClient: Keep-alive failed: {ex.Message}");
+        }
+        finally
+        {
+            Volatile.Write(ref _keepAliveInFlight, 0);
+        }
     }
 
     /// <summary>
@@ -166,8 +269,21 @@ public sealed class RemoteInferenceClient : IInferenceClient
     /// </summary>
     private void StopKeepAlive()
     {
-        _keepAliveTimer?.Dispose();
-        _keepAliveTimer = null;
+        var cts = _keepAliveCts;
+        var task = _keepAliveTask;
+        _keepAliveCts = null;
+        _keepAliveTask = null;
+
+        if (cts is not null)
+        {
+            try { cts.Cancel(); } catch { }
+            cts.Dispose();
+        }
+
+        if (task is not null)
+        {
+            try { task.Wait(TimeSpan.FromSeconds(1)); } catch { }
+        }
     }
 
     /// <summary>
@@ -179,7 +295,8 @@ public sealed class RemoteInferenceClient : IInferenceClient
         string? preferredEmotion = null,
         IReadOnlyList<(string role, string content)>? history = null,
         CancellationToken ct = default,
-        string? systemInstructions = null)
+        string? systemInstructions = null,
+        string? correlationId = null)
     {
         try
         {
@@ -187,78 +304,47 @@ public sealed class RemoteInferenceClient : IInferenceClient
             
             var intent = PromptBuilder.DetectIntent(userText);
             var runtimeTuning = PromptTuningProfiles.ForIntent(intent, _tuning);
-            var includeFewShotExamples = intent is PromptIntent.Question or PromptIntent.EmotionalSupport;
-            var historyWindow = includeFewShotExamples ? RemoteHistoryWindowDetailed : RemoteHistoryWindowDefault;
+            const bool includeFewShotExamples = false; // Keep prompt lightweight at runtime.
+            var historyWindow = RemoteHistoryWindowDefault;
             var systemPrompt = BuildSystemPrompt(
                 personaName,
                 preferredEmotion,
                 systemInstructions,
+                _replyTonePreset,
                 intent,
                 includeFewShotExamples);
 
             // Hybrid memory context:
             // 1) Always include last 10 messages.
             // 2) Semantic search only when user likely references past context.
-            // 3) Build context in parallel.
+            // 3) Build context in parallel (only semantic search is async).
             var shouldSearchPast = ShouldSearchPastReference(userText);
             DevLog.WriteLine(
                 "RemoteInferenceClient[Memory]: trigger={0}, service={1}",
                 shouldSearchPast ? "on" : "off",
                 _semanticMemory is null ? "missing" : "ready");
 
+            // Direct execution - not CPU-bound, just LINQ
             var recentSw = System.Diagnostics.Stopwatch.StartNew();
-            var recentHistoryTask = Task.Run(() =>
-            {
-                var value = (history ?? []).TakeLast(historyWindow).ToList();
-                recentSw.Stop();
-                DevLog.WriteLine("RemoteInferenceClient[Memory]: retrieve_recent_ms={0}", recentSw.ElapsedMilliseconds);
-                return value;
-            }, ct);
+            var recentHistory = (history ?? []).TakeLast(historyWindow).ToList();
+            recentSw.Stop();
+            DevLog.WriteLine("RemoteInferenceClient[Memory]: retrieve_recent_ms={0}", recentSw.ElapsedMilliseconds);
 
+            // Semantic search is already async, no need for Task.Run wrapper
             var chromaSw = System.Diagnostics.Stopwatch.StartNew();
-            var semanticSearchTask = shouldSearchPast && _semanticMemory is not null
-                ? Task.Run(async () =>
-                {
-                    var hits = await _semanticMemory.SearchAsync(userText, 5, ct);
-                    chromaSw.Stop();
-                    DevLog.WriteLine("RemoteInferenceClient[Memory]: retrieve_chroma_ms={0}", chromaSw.ElapsedMilliseconds);
-                    return hits;
-                }, ct)
-                : Task.Run<IReadOnlyList<SemanticMemoryHit>>(() =>
-                {
-                    chromaSw.Stop();
-                    DevLog.WriteLine("RemoteInferenceClient[Memory]: retrieve_chroma_ms={0}", chromaSw.ElapsedMilliseconds);
-                    return [];
-                }, ct);
-
-            var sqliteSw = System.Diagnostics.Stopwatch.StartNew();
-            var summarySearchTask = shouldSearchPast && _summaryStore is not null
-                ? Task.Run(async () =>
-                {
-                    var hits = await _summaryStore.SearchSummariesAsync(userText, 3, ct);
-                    sqliteSw.Stop();
-                    DevLog.WriteLine("RemoteInferenceClient[Memory]: retrieve_sqlite_ms={0}", sqliteSw.ElapsedMilliseconds);
-                    return hits;
-                }, ct)
-                : Task.Run<IReadOnlyList<ConversationSummaryMemory>>(() =>
-                {
-                    sqliteSw.Stop();
-                    DevLog.WriteLine("RemoteInferenceClient[Memory]: retrieve_sqlite_ms={0}", sqliteSw.ElapsedMilliseconds);
-                    return [];
-                }, ct);
-
-            await Task.WhenAll(recentHistoryTask, semanticSearchTask, summarySearchTask);
-            var recentHistory = await recentHistoryTask;
-            var memoryHits = await semanticSearchTask;
-            var summaryHits = await summarySearchTask;
+            var memoryHits = shouldSearchPast && _semanticMemory is not null
+                ? await _semanticMemory.SearchAsync(userText, 5, ct)
+                : Array.Empty<SemanticMemoryHit>();
+            chromaSw.Stop();
+            DevLog.WriteLine("RemoteInferenceClient[Memory]: retrieve_chroma_ms={0}", chromaSw.ElapsedMilliseconds);
+            
             DevLog.WriteLine(
-                "RemoteInferenceClient[Memory]: recent={0}, semantic_hits={1}, summary_hits={2}",
+                "RemoteInferenceClient[Memory]: recent={0}, semantic_hits={1}",
                 recentHistory.Count,
-                memoryHits.Count,
-                summaryHits.Count);
+                memoryHits.Count);
 
-            var fullPrompt = BuildPromptWithHistory(userText, recentHistory, memoryHits, summaryHits, historyWindow);
-            if (memoryHits.Count > 0 || summaryHits.Count > 0)
+            var fullPrompt = BuildPromptWithHistory(userText, recentHistory, memoryHits, historyWindow);
+            if (memoryHits.Count > 0)
             {
                 DevLog.WriteLine("RemoteInferenceClient[Memory]: memory context added to prompt");
             }
@@ -279,14 +365,27 @@ public sealed class RemoteInferenceClient : IInferenceClient
             };
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var response = await PostGenerateWithFallbackAsync(request, fullPrompt, systemPrompt, runtimeTuning, ct);
+            var response = await HttpRetryPipeline.ExecuteAsync(
+                async ct => await PostGenerateWithFallbackAsync(request, fullPrompt, systemPrompt, runtimeTuning, ct, correlationId),
+                ct);
             
             DevLog.WriteLine($"RemoteInferenceClient: Response status: {response.StatusCode}");
+            
+            // Check for rate limit (429) - retry policy will have already attempted retries
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                DevLog.WriteLine("RemoteInferenceClient: Rate limit (429) detected");
+                throw new InferenceRateLimitException("Rate limit exceeded (429)");
+            }
+            
             response.EnsureSuccessStatusCode();
             
             var responseBody = await response.Content.ReadAsStringAsync(ct);
             sw.Stop();
-            DevLog.WriteLine($"RemoteInferenceClient: Response received in {sw.ElapsedMilliseconds}ms");
+            DevLog.WriteLine("RemoteInferenceClient: correlation_id={0}, operation=chat_with_emotion_complete, duration_ms={1}, status={2}",
+                correlationId ?? "none",
+                sw.ElapsedMilliseconds,
+                (int)response.StatusCode);
             
             using var doc = JsonDocument.Parse(responseBody);
             var englishText = ExtractAssistantText(doc.RootElement);
@@ -299,21 +398,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
             // Return English text only (DeepL will translate for TTS)
             var replyText = englishText.Trim();
 
-            if (_semanticMemory is not null && !string.IsNullOrWhiteSpace(userText) && !string.IsNullOrWhiteSpace(replyText))
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await _semanticMemory.AddMemoryAsync($"User: {userText}\nAssistant: {replyText}", "voicechat");
-                        DevLog.WriteLine("RemoteInferenceClient[Memory]: write-back saved");
-                    }
-                    catch (Exception memoryEx)
-                    {
-                        DevLog.WriteLine($"RemoteInferenceClient[Memory]: write-back failed: {memoryEx.Message}");
-                    }
-                });
-            }
+            EnqueueMemoryWrite(userText, replyText);
 
             return ResponsePostProcessor.CleanAndValidate(new AiReply(replyText, "neutral"), intent, runtimeTuning);
         }
@@ -351,7 +436,8 @@ public sealed class RemoteInferenceClient : IInferenceClient
         IReadOnlyList<(string role, string content)>? history = null,
         Action<string>? onPartialReply = null,
         CancellationToken ct = default,
-        string? systemInstructions = null)
+        string? systemInstructions = null,
+        string? correlationId = null)
     {
         try
         {
@@ -359,31 +445,27 @@ public sealed class RemoteInferenceClient : IInferenceClient
 
             var intent = PromptBuilder.DetectIntent(userText);
             var runtimeTuning = PromptTuningProfiles.ForIntent(intent, _tuning);
-            var includeFewShotExamples = intent is PromptIntent.Question or PromptIntent.EmotionalSupport;
-            var historyWindow = includeFewShotExamples ? RemoteHistoryWindowDetailed : RemoteHistoryWindowDefault;
+            const bool includeFewShotExamples = false; // Keep prompt lightweight at runtime.
+            var historyWindow = RemoteHistoryWindowDefault;
             var systemPrompt = BuildSystemPrompt(
                 personaName,
                 preferredEmotion,
                 systemInstructions,
+                _replyTonePreset,
                 intent,
                 includeFewShotExamples);
 
             var shouldSearchPast = ShouldSearchPastReference(userText);
-            var recentHistoryTask = Task.Run(() => (history ?? []).TakeLast(historyWindow).ToList(), ct);
+            
+            // Direct execution - not CPU-bound
+            var recentHistory = (history ?? []).TakeLast(historyWindow).ToList();
 
-            var semanticSearchTask = shouldSearchPast && _semanticMemory is not null
-                ? Task.Run(() => _semanticMemory.SearchAsync(userText, 5, ct), ct)
-                : Task.FromResult<IReadOnlyList<SemanticMemoryHit>>([]);
-
-            var summarySearchTask = shouldSearchPast && _summaryStore is not null
-                ? Task.Run(() => _summaryStore.SearchSummariesAsync(userText, 3, ct), ct)
-                : Task.FromResult<IReadOnlyList<ConversationSummaryMemory>>([]);
-
-            await Task.WhenAll(recentHistoryTask, semanticSearchTask, summarySearchTask);
-            var recentHistory = await recentHistoryTask;
-            var memoryHits = await semanticSearchTask;
-            var summaryHits = await summarySearchTask;
-            var fullPrompt = BuildPromptWithHistory(userText, recentHistory, memoryHits, summaryHits, historyWindow);
+            // Already async, no Task.Run wrapper needed
+            var memoryHits = shouldSearchPast && _semanticMemory is not null
+                ? await _semanticMemory.SearchAsync(userText, 5, ct)
+                : Array.Empty<SemanticMemoryHit>();
+                
+            var fullPrompt = BuildPromptWithHistory(userText, recentHistory, memoryHits, historyWindow);
 
             var request = new
             {
@@ -401,15 +483,22 @@ public sealed class RemoteInferenceClient : IInferenceClient
                 stream = true
             };
 
-            var streamResponse = await StartStreamingWithFallbackAsync(request, fullPrompt, systemPrompt, ct);
+            var streamResponse = await StartStreamingWithFallbackAsync(request, fullPrompt, systemPrompt, ct, correlationId);
             if (streamResponse is null)
             {
                 DevLog.WriteLine("RemoteInferenceClient: /chat_stream unavailable, using non-streaming fallback");
-                return await ChatWithEmotionAsync(userText, personaName, preferredEmotion, history, ct, systemInstructions);
+                return await ChatWithEmotionAsync(userText, personaName, preferredEmotion, history, ct, systemInstructions, correlationId);
             }
 
             using (streamResponse)
             {
+                // Check for rate limit (429) before throwing
+                if (streamResponse.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                {
+                    DevLog.WriteLine("RemoteInferenceClient: Rate limit (429) detected in streaming");
+                    throw new InferenceRateLimitException("Rate limit exceeded (429)");
+                }
+                
                 streamResponse.EnsureSuccessStatusCode();
                 using var stream = await streamResponse.Content.ReadAsStreamAsync(ct);
                 using var reader = new StreamReader(stream, Encoding.UTF8, bufferSize: 1024);
@@ -458,22 +547,10 @@ public sealed class RemoteInferenceClient : IInferenceClient
                 if (string.IsNullOrWhiteSpace(replyText))
                 {
                     DevLog.WriteLine("RemoteInferenceClient: Streaming produced no tokens, using non-streaming fallback");
-                    return await ChatWithEmotionAsync(userText, personaName, preferredEmotion, history, ct, systemInstructions);
+                    return await ChatWithEmotionAsync(userText, personaName, preferredEmotion, history, ct, systemInstructions, correlationId);
                 }
 
-                if (_semanticMemory is not null)
-                {
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await _semanticMemory.AddMemoryAsync($"User: {userText}\nAssistant: {replyText}", "voicechat");
-                        }
-                        catch
-                        {
-                        }
-                    });
-                }
+                EnqueueMemoryWrite(userText, replyText);
 
                 return ResponsePostProcessor.CleanAndValidate(new AiReply(replyText, "neutral"), intent, runtimeTuning);
             }
@@ -485,7 +562,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
         catch (Exception ex)
         {
             DevLog.WriteLine($"RemoteInferenceClient: Streaming failed ({ex.Message}), using non-streaming fallback");
-            return await ChatWithEmotionAsync(userText, personaName, preferredEmotion, history, ct, systemInstructions);
+            return await ChatWithEmotionAsync(userText, personaName, preferredEmotion, history, ct, systemInstructions, correlationId);
         }
     }
 
@@ -493,13 +570,16 @@ public sealed class RemoteInferenceClient : IInferenceClient
         object streamRequest,
         string fullPrompt,
         string systemPrompt,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? correlationId)
     {
         var json = JsonSerializer.Serialize(streamRequest);
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/chat_stream")
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            request.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
 
         var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         if (response.IsSuccessStatusCode)
@@ -519,6 +599,8 @@ public sealed class RemoteInferenceClient : IInferenceClient
             {
                 Content = new StringContent(JsonSerializer.Serialize(legacy), Encoding.UTF8, "application/json")
             };
+            if (!string.IsNullOrWhiteSpace(correlationId))
+                legacyRequest.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
 
             var legacyResponse = await _httpClient.SendAsync(legacyRequest, HttpCompletionOption.ResponseHeadersRead, ct);
             if (legacyResponse.IsSuccessStatusCode)
@@ -588,29 +670,6 @@ public sealed class RemoteInferenceClient : IInferenceClient
     }
 
     /// <summary>
-    /// Summarize conversation history using custom API.
-    /// </summary>
-    public async Task<string> SummarizeConversationAsync(
-        IReadOnlyList<(string role, string content)> history,
-        CancellationToken ct = default)
-    {
-        if (history == null || history.Count == 0)
-            return "";
-
-        try
-        {
-            ct.ThrowIfCancellationRequested();
-            DevLog.WriteLine("RemoteInferenceClient[Memory]: conversation summary using local memory/history only");
-            return BuildLocalConversationSummary(history);
-        }
-        catch (Exception ex)
-        {
-            DevLog.WriteLine($"RemoteInferenceClient: Summarization failed: {ex.Message}");
-            return "";
-        }
-    }
-
-    /// <summary>
     /// Summarize activity logs using custom API.
     /// </summary>
     public async Task<string> SummarizeActivityAsync(
@@ -675,66 +734,103 @@ public sealed class RemoteInferenceClient : IInferenceClient
         string fullPrompt,
         string systemPrompt,
         GenerationTuningSettings runtimeTuning,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? correlationId)
     {
+        // Skip /generate endpoint if we know it doesn't work (saves ~300ms per request)
+        if (_skipGenerateEndpoint)
+        {
+            return await PostChatCompletionsAsync(fullPrompt, systemPrompt, runtimeTuning, ct, correlationId);
+        }
+        
         var json = JsonSerializer.Serialize(enrichedRequest);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
         DevLog.WriteLine($"RemoteInferenceClient: Sending request to {BaseUrl}/generate");
         DevLog.WriteLine($"RemoteInferenceClient: Request payload: {json.Substring(0, Math.Min(200, json.Length))}...");
 
-        var response = await _httpClient.PostAsync($"{BaseUrl}/generate", content, ct);
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/generate") { Content = content };
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            request.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
+        var response = await _httpClient.SendAsync(request, ct);
         if ((int)response.StatusCode is 400 or 404 or 422)
         {
             DevLog.WriteLine("RemoteInferenceClient: /generate rejected, trying OpenAI-compatible chat/completions");
             response.Dispose();
+            
+            // Remember to skip /generate next time
+            _skipGenerateEndpoint = true;
+            
+            return await PostChatCompletionsAsync(fullPrompt, systemPrompt, runtimeTuning, ct, correlationId);
+        }
 
-            var openAiRequest = new
+        return response;
+    }
+    
+    private async Task<HttpResponseMessage> PostChatCompletionsAsync(
+        string fullPrompt,
+        string systemPrompt,
+        GenerationTuningSettings runtimeTuning,
+        CancellationToken ct,
+        string? correlationId)
+    {
+        var openAiRequest = new
+        {
+            model = Model,
+            messages = new object[]
             {
-                model = Model,
-                messages = new object[]
-                {
-                    new { role = "system", content = systemPrompt },
-                    new { role = "user", content = fullPrompt }
-                },
-                max_tokens = runtimeTuning.MaxTokens,
-                temperature = runtimeTuning.Temperature,
-                top_p = runtimeTuning.TopP,
-                presence_penalty = runtimeTuning.PresencePenalty,
-                frequency_penalty = runtimeTuning.FrequencyPenalty,
-                stream = false
-            };
-            var openAiJson = JsonSerializer.Serialize(openAiRequest);
-            var openAiContent = new StringContent(openAiJson, Encoding.UTF8, "application/json");
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = fullPrompt }
+            },
+            max_tokens = runtimeTuning.MaxTokens,
+            temperature = runtimeTuning.Temperature,
+            top_p = runtimeTuning.TopP,
+            presence_penalty = runtimeTuning.PresencePenalty,
+            frequency_penalty = runtimeTuning.FrequencyPenalty,
+            stream = false
+        };
+        var openAiJson = JsonSerializer.Serialize(openAiRequest);
+        var openAiContent = new StringContent(openAiJson, Encoding.UTF8, "application/json");
 
-            var chatCompletionsUrl = $"{BaseUrl}/chat/completions";
-            response = await _httpClient.PostAsync(chatCompletionsUrl, openAiContent, ct);
-            if (!response.IsSuccessStatusCode && (int)response.StatusCode is 400 or 404 or 405)
+        var chatCompletionsUrl = $"{BaseUrl}/chat/completions";
+        using var chatRequest = new HttpRequestMessage(HttpMethod.Post, chatCompletionsUrl) { Content = openAiContent };
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            chatRequest.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
+        var response = await _httpClient.SendAsync(chatRequest, ct);
+        if (!response.IsSuccessStatusCode && (int)response.StatusCode is 400 or 404 or 405)
+        {
+            response.Dispose();
+            // Some providers expect /v1/chat/completions even when base URL does not end with /v1.
+            if (!BaseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
             {
-                response.Dispose();
-                // Some providers expect /v1/chat/completions even when base URL does not end with /v1.
-                if (!BaseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+                var v1Url = $"{BaseUrl}/v1/chat/completions";
+                DevLog.WriteLine($"RemoteInferenceClient: Trying {v1Url}");
+                using var v1Req = new HttpRequestMessage(HttpMethod.Post, v1Url)
                 {
-                    var v1Url = $"{BaseUrl}/v1/chat/completions";
-                    DevLog.WriteLine($"RemoteInferenceClient: Trying {v1Url}");
-                    response = await _httpClient.PostAsync(v1Url, new StringContent(openAiJson, Encoding.UTF8, "application/json"), ct);
-                }
-            }
-
-            if (!response.IsSuccessStatusCode && (int)response.StatusCode is 400 or 404 or 422)
-            {
-                DevLog.WriteLine("RemoteInferenceClient: Falling back to legacy payload format");
-                response.Dispose();
-
-                var legacyRequest = new
-                {
-                    prompt = fullPrompt,
-                    system_prompt = systemPrompt
+                    Content = new StringContent(openAiJson, Encoding.UTF8, "application/json")
                 };
-
-                var legacyJson = JsonSerializer.Serialize(legacyRequest);
-                var legacyContent = new StringContent(legacyJson, Encoding.UTF8, "application/json");
-                response = await _httpClient.PostAsync($"{BaseUrl}/generate", legacyContent, ct);
+                if (!string.IsNullOrWhiteSpace(correlationId))
+                    v1Req.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
+                response = await _httpClient.SendAsync(v1Req, ct);
             }
+        }
+
+        if (!response.IsSuccessStatusCode && (int)response.StatusCode is 400 or 404 or 422)
+        {
+            DevLog.WriteLine("RemoteInferenceClient: Falling back to legacy payload format");
+            response.Dispose();
+
+            var legacyRequest = new
+            {
+                prompt = fullPrompt,
+                system_prompt = systemPrompt
+            };
+
+            var legacyJson = JsonSerializer.Serialize(legacyRequest);
+            var legacyContent = new StringContent(legacyJson, Encoding.UTF8, "application/json");
+            using var legacyReq = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/generate") { Content = legacyContent };
+            if (!string.IsNullOrWhiteSpace(correlationId))
+                legacyReq.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
+            response = await _httpClient.SendAsync(legacyReq, ct);
         }
 
         return response;
@@ -775,6 +871,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
         string personaName,
         string? preferredEmotion,
         string? customInstructions,
+        string tonePreset,
         PromptIntent intent,
         bool includeFewShotExamples = true)
     {
@@ -786,17 +883,18 @@ public sealed class RemoteInferenceClient : IInferenceClient
             requireJson: false,
             includeActivitySafetyRules: false,
             oneToTwoSentences: true,
-            includeFewShotExamples: includeFewShotExamples);
+            includeFewShotExamples: includeFewShotExamples,
+            tonePreset: tonePreset);
     }
 
     private string BuildPromptWithHistory(
         string userText,
         IReadOnlyList<(string role, string content)>? history,
         IReadOnlyList<SemanticMemoryHit>? memories = null,
-        IReadOnlyList<ConversationSummaryMemory>? summaries = null,
         int maxHistoryMessages = RemoteHistoryWindowDefault)
     {
-        var prompt = new StringBuilder();
+        // Pre-allocate StringBuilder for better performance
+        var prompt = new StringBuilder(capacity: 2048);
 
         // Always include recent message window.
         if (history != null && history.Count > 0)
@@ -819,16 +917,6 @@ public sealed class RemoteInferenceClient : IInferenceClient
             prompt.AppendLine();
         }
 
-        if (summaries != null && summaries.Count > 0)
-        {
-            prompt.AppendLine("Past conversation summaries:");
-            foreach (var s in summaries.Take(3))
-            {
-                prompt.AppendLine($"- {s.CreatedAtUtc:yyyy-MM-dd}: {s.Summary}");
-            }
-            prompt.AppendLine();
-        }
-
         // Current user message
         prompt.Append($"user: {userText}");
         
@@ -841,44 +929,16 @@ public sealed class RemoteInferenceClient : IInferenceClient
             return false;
 
         var text = userText.Trim().ToLowerInvariant();
-        if (text.Length < 8)
+        
+        // Increased threshold - only search for explicit references (saves 100-300ms per request)
+        if (text.Length < 15)
             return false;
 
+        // More restrictive pattern - only explicit past references
         return Regex.IsMatch(
             text,
-            @"\b(remember|earlier|before|previous|last time|we talked|you said|as i said|again|continue|same as|mentioned)\b",
+            @"\b(remember|earlier|before|previous|last time|you said|as i said)\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    }
-
-    private static string BuildLocalConversationSummary(IReadOnlyList<(string role, string content)> history)
-    {
-        var userMessages = history.Where(h => string.Equals(h.role, "user", StringComparison.OrdinalIgnoreCase))
-            .Select(h => h.content.Trim())
-            .Where(x => x.Length > 0)
-            .TakeLast(3)
-            .ToList();
-
-        var assistantMessages = history.Where(h => string.Equals(h.role, "assistant", StringComparison.OrdinalIgnoreCase))
-            .Select(h => h.content.Trim())
-            .Where(x => x.Length > 0)
-            .TakeLast(2)
-            .ToList();
-
-        var parts = new List<string>();
-        if (userMessages.Count > 0)
-            parts.Add("Recent user topics: " + string.Join(" | ", userMessages.Select(TrimForSummary)));
-        if (assistantMessages.Count > 0)
-            parts.Add("Recent assistant replies: " + string.Join(" | ", assistantMessages.Select(TrimForSummary)));
-
-        return parts.Count == 0
-            ? "No conversation content to summarize."
-            : string.Join("\n", parts);
-    }
-
-    private static string TrimForSummary(string text)
-    {
-        const int max = 90;
-        return text.Length <= max ? text : text[..max] + "...";
     }
 
     private static string NormalizeModelForBaseUrl(string? baseUrl, string? modelName)
@@ -908,10 +968,66 @@ public sealed class RemoteInferenceClient : IInferenceClient
     // REMOVED: SegmentConcatenatedWords - was breaking text by inserting spaces inside words
     // REMOVED: ParseAiReply - no longer needed with structured JSON output
 
+    private void EnqueueMemoryWrite(string userText, string replyText)
+    {
+        if (_semanticMemory is null || _memoryWriteQueue is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(userText) || string.IsNullOrWhiteSpace(replyText))
+            return;
+
+        var payload = $"User: {userText}\nAssistant: {replyText}";
+        if (!_memoryWriteQueue.Writer.TryWrite(payload))
+        {
+            DevLog.WriteLine("RemoteInferenceClient[Memory]: write queue full, dropping oldest");
+        }
+    }
+
+    private async Task MemoryWriteWorkerAsync()
+    {
+        if (_semanticMemory is null || _memoryWriteQueue is null || _memoryWriteCts is null)
+            return;
+
+        try
+        {
+            while (await _memoryWriteQueue.Reader.WaitToReadAsync(_memoryWriteCts.Token))
+            {
+                while (_memoryWriteQueue.Reader.TryRead(out var payload))
+                {
+                    try
+                    {
+                        await _semanticMemory.AddMemoryAsync(payload, "voicechat", _memoryWriteCts.Token);
+                    }
+                    catch (OperationCanceledException) when (_memoryWriteCts.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        DevLog.WriteLine($"RemoteInferenceClient[Memory]: write-back failed: {ex.Message}");
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException) when (_memoryWriteCts.IsCancellationRequested)
+        {
+            // normal shutdown
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         StopKeepAlive();
+        if (_memoryWriteCts is not null)
+        {
+            try { _memoryWriteCts.Cancel(); } catch { }
+        }
+        if (_memoryWriteWorkerTask is not null)
+        {
+            try { _memoryWriteWorkerTask.Wait(TimeSpan.FromSeconds(1)); } catch { }
+        }
+        _memoryWriteCts?.Dispose();
         _httpClient?.Dispose();
         _disposed = true;
     }

@@ -1,6 +1,6 @@
 namespace TsukiAI.VoiceChat.Services;
 
-public sealed class WhisperService
+public sealed class WhisperService : IWhisperService
 {
     private readonly AudioProcessingService _audioProcessingService;
 

@@ -4,9 +4,9 @@
              ShutdownMode="OnMainWindowClose"
              Startup="Application_Startup">
     <Application.Resources>
-        <SolidColorBrush x:Key="ScrollTrackBrush" Color="#222734"/>
-        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#5B657A"/>
-        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#7C6AEF"/>
+        <SolidColorBrush x:Key="ScrollTrackBrush" Color="#21192F"/>
+        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#6B5C8E"/>
+        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#9B7BFF"/>
 
         <Style x:Key="ThemedScrollBarThumb" TargetType="{x:Type Thumb}">
             <Setter Property="OverridesDefaultStyle" Value="True"/>

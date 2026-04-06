@@ -15,14 +15,15 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
     private const string ListeningStatusText = "Voice pipeline running. Tsuki is listening.";
 
     private readonly VoiceConversationPipeline _pipeline;
-    private readonly ConversationSummaryBackgroundService _summaryBackgroundService;
     private readonly RelayCommand _startCommand;
     private readonly RelayCommand _stopCommand;
     private readonly DispatcherTimer _sessionTimer;
     private readonly DispatcherTimer _clockTimer;
     private readonly DispatcherTimer _typingAnimationTimer;
     private readonly DispatcherTimer _assistantLineTypingTimer;
+    private readonly DispatcherTimer _speechIndicatorTimer;
     private readonly Queue<PendingAssistantLine> _pendingAssistantLines = new();
+    private readonly Queue<PendingSpeechItem> _pendingSpeechItems = new();
     private readonly ObservableCollection<string> _activityFeed = new();
     private string _statusText = "Ready to start voice pipeline.";
     private bool _isRunning;
@@ -37,13 +38,15 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
     private string _activityFeedText = string.Empty;
     private DateTimeOffset? _sessionStartedAt;
     private bool _hasRealConversationActivity;
+    private PendingSpeechItem? _activeSpeechItem;
+    private DateTimeOffset _activeSpeechEndsAt;
+    private string _speechIndicatorText = string.Empty;
+    private bool _isSpeechIndicatorVisible;
 
     public VoiceChatViewModel(
-        VoiceConversationPipeline pipeline,
-        ConversationSummaryBackgroundService summaryBackgroundService)
+        VoiceConversationPipeline pipeline)
     {
         _pipeline = pipeline;
-        _summaryBackgroundService = summaryBackgroundService;
 
         _startCommand = new RelayCommand(Start, () => !IsRunning);
         _stopCommand = new RelayCommand(Stop, () => IsRunning);
@@ -76,6 +79,12 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
             Interval = TimeSpan.FromMilliseconds(14)
         };
         _assistantLineTypingTimer.Tick += (_, _) => OnAssistantLineTypingTick();
+
+        _speechIndicatorTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(200)
+        };
+        _speechIndicatorTimer.Tick += (_, _) => OnSpeechIndicatorTick();
 
         AppendActivity("Voice chat is ready. Press Start to begin listening.");
         _pipeline.TurnCompleted += OnTurnCompleted;
@@ -149,6 +158,28 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
         }
     }
 
+    public bool IsSpeechIndicatorVisible
+    {
+        get => _isSpeechIndicatorVisible;
+        private set
+        {
+            if (_isSpeechIndicatorVisible == value) return;
+            _isSpeechIndicatorVisible = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string SpeechIndicatorText
+    {
+        get => _speechIndicatorText;
+        private set
+        {
+            if (_speechIndicatorText == value) return;
+            _speechIndicatorText = value;
+            OnPropertyChanged();
+        }
+    }
+
     private void Start()
     {
         if (IsRunning) return;
@@ -177,17 +208,21 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
         _typingDotCount = 0;
         _typingAnimationTimer.Stop();
         _assistantLineTypingTimer.Stop();
+        _speechIndicatorTimer.Stop();
         _pendingAssistantLines.Clear();
+        _pendingSpeechItems.Clear();
         _isAssistantLineAnimating = false;
         _activeAssistantLinePrefix = null;
         _activeAssistantLineText = string.Empty;
         _activeAssistantLineIndex = 0;
+        _activeSpeechItem = null;
+        IsSpeechIndicatorVisible = false;
+        SpeechIndicatorText = string.Empty;
 
         IsRunning = false;
         StatusText = $"Voice pipeline stopped. Last session duration: {SessionDurationText}.";
         AppendActivity($"[{DateTime.Now:HH:mm:ss}] Session stopped.");
         _sessionStartedAt = null;
-        _ = _summaryBackgroundService.TriggerVoiceSummaryIfNeededAsync("voice_session_stop");
     }
 
     private void UpdateSessionDuration()
@@ -224,14 +259,24 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
                 _typingDotCount = 0;
                 _typingAnimationTimer.Start();
                 UpdateTypingStatusText();
+                UpdateSpeechIndicatorText();
             }
             else
             {
                 _typingDotCount = 0;
                 _typingAnimationTimer.Stop();
-                if (IsRunning)
+                if (_activeSpeechItem is null)
                 {
-                    StatusText = ListeningStatusText;
+                    IsSpeechIndicatorVisible = false;
+                    SpeechIndicatorText = string.Empty;
+                    if (IsRunning)
+                    {
+                        StatusText = ListeningStatusText;
+                    }
+                }
+                else
+                {
+                    UpdateSpeechIndicatorText();
                 }
             }
         }
@@ -255,6 +300,7 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
 
         _typingDotCount = (_typingDotCount % 3) + 1;
         StatusText = $"Voice pipeline running. Tsuki is typing{new string('.', _typingDotCount)}";
+        UpdateSpeechIndicatorText();
     }
 
     private void EnqueueAssistantLine(string now, int ttsSec, string responseText)
@@ -343,10 +389,11 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
             }
 
             var now = DateTime.Now.ToString("HH:mm:ss");
-            var sttLikeSec = Math.Max(1, (int)Math.Round(evt.LlmMs / 1000.0));
-            var ttsSec = Math.Max(1, (int)Math.Round(evt.TotalMs / 1000.0));
-            AppendActivity($"[{now}] Rain [STT, {sttLikeSec}s]: {evt.InputText}");
+            var totalSec = Math.Max(1, (int)Math.Round(evt.TotalMs / 1000.0));
+            var ttsSec = Math.Max(1, (int)Math.Round(evt.TtsMs / 1000.0));
+            AppendActivity($"[{now}] Rain [Total, {totalSec}s]: {evt.InputText}");
             EnqueueAssistantLine(now, ttsSec, evt.ResponseText);
+            EnqueueSpeechItem(new PendingSpeechItem("Tsuki reply", ttsSec));
         }
 
         var dispatcher = System.Windows.Application.Current?.Dispatcher;
@@ -357,6 +404,118 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
         }
 
         _ = dispatcher.BeginInvoke(UpdateUi, DispatcherPriority.Background);
+    }
+
+    public void NotifyManualTtsQueued(string text)
+    {
+        void UpdateUi()
+        {
+            var estimatedSeconds = EstimateSpeechSeconds(text);
+            EnqueueSpeechItem(new PendingSpeechItem("Manual TTS", estimatedSeconds));
+        }
+
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+        {
+            UpdateUi();
+            return;
+        }
+
+        _ = dispatcher.BeginInvoke(UpdateUi, DispatcherPriority.Background);
+    }
+
+    private void EnqueueSpeechItem(PendingSpeechItem item)
+    {
+        _pendingSpeechItems.Enqueue(item);
+        if (_activeSpeechItem is null)
+        {
+            StartNextSpeechItem();
+            return;
+        }
+
+        UpdateSpeechIndicatorText();
+    }
+
+    private void StartNextSpeechItem()
+    {
+        if (_pendingSpeechItems.Count == 0)
+        {
+            _activeSpeechItem = null;
+            _speechIndicatorTimer.Stop();
+            if (_assistantTyping)
+            {
+                UpdateSpeechIndicatorText();
+                return;
+            }
+
+            IsSpeechIndicatorVisible = false;
+            SpeechIndicatorText = string.Empty;
+            if (IsRunning)
+            {
+                StatusText = ListeningStatusText;
+            }
+            return;
+        }
+
+        _activeSpeechItem = _pendingSpeechItems.Dequeue();
+        _activeSpeechEndsAt = DateTimeOffset.Now.AddSeconds(Math.Max(1, _activeSpeechItem.DurationSeconds));
+        _speechIndicatorTimer.Start();
+        UpdateSpeechIndicatorText();
+    }
+
+    private void OnSpeechIndicatorTick()
+    {
+        if (_activeSpeechItem is null)
+        {
+            _speechIndicatorTimer.Stop();
+            return;
+        }
+
+        if (DateTimeOffset.Now >= _activeSpeechEndsAt)
+        {
+            StartNextSpeechItem();
+            return;
+        }
+
+        UpdateSpeechIndicatorText();
+    }
+
+    private void UpdateSpeechIndicatorText()
+    {
+        if (_assistantTyping)
+        {
+            var queued = _pendingSpeechItems.Count + (_activeSpeechItem is null ? 0 : 1);
+            SpeechIndicatorText = queued > 0
+                ? $"Tsuki is preparing speech. {queued} item(s) queued."
+                : "Tsuki is preparing speech...";
+            IsSpeechIndicatorVisible = true;
+            return;
+        }
+
+        if (_activeSpeechItem is null)
+        {
+            IsSpeechIndicatorVisible = false;
+            SpeechIndicatorText = string.Empty;
+            return;
+        }
+
+        var remaining = Math.Max(1, (int)Math.Ceiling((_activeSpeechEndsAt - DateTimeOffset.Now).TotalSeconds));
+        var queuedCount = _pendingSpeechItems.Count;
+        SpeechIndicatorText = queuedCount > 0
+            ? $"{_activeSpeechItem.Label} speaking... {remaining}s left, {queuedCount} queued next."
+            : $"{_activeSpeechItem.Label} speaking... {remaining}s left.";
+        IsSpeechIndicatorVisible = true;
+    }
+
+    private static int EstimateSpeechSeconds(string text)
+    {
+        var normalized = (text ?? string.Empty).Trim();
+        if (normalized.Length == 0)
+        {
+            return 1;
+        }
+
+        return Math.Max(1, (int)Math.Ceiling(normalized.Length / 12.0));
     }
 
     private static System.Windows.Media.Brush CreateFrozenBrush(byte r, byte g, byte b)
@@ -373,6 +532,7 @@ public sealed class VoiceChatViewModel : INotifyPropertyChanged
     }
 
     private sealed record PendingAssistantLine(string Now, int TtsSec, string ResponseText);
+    private sealed record PendingSpeechItem(string Label, int DurationSeconds);
 
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));

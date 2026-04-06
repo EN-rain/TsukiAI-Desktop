@@ -1,4 +1,6 @@
 using System.Linq;
+using System.IO;
+using System.Text.RegularExpressions;
 using TsukiAI.Core.Models;
 
 namespace TsukiAI.Core.Services;
@@ -6,6 +8,7 @@ namespace TsukiAI.Core.Services;
 public sealed class PromptBuilder
 {
     private const string JsonReplySchema = """{"reply":"string","emotion":"one of: happy,sad,angry,surprised,playful,thinking,neutral"}""";
+    private static readonly Lazy<string> ModelfileHint = new(LoadModelfileHint);
 
     public string BuildCompanionChatSystemPrompt(
         string personaName,
@@ -15,15 +18,20 @@ public sealed class PromptBuilder
         bool requireJson = false,
         bool includeActivitySafetyRules = false,
         bool oneToTwoSentences = true,
-        bool includeFewShotExamples = true)
+        bool includeFewShotExamples = true,
+        string tonePreset = "natural")
     {
-        if (!string.IsNullOrWhiteSpace(customInstructions))
-            return customInstructions.Trim();
-
         personaName = string.IsNullOrWhiteSpace(personaName) ? "Tsuki" : personaName.Trim();
         var emotionLine = string.IsNullOrWhiteSpace(preferredEmotion)
             ? ""
             : $"\nYour baseline emotion is \"{preferredEmotion.Trim()}\" unless the user requests a different mood.";
+        var customLine = string.IsNullOrWhiteSpace(customInstructions)
+            ? string.Empty
+            : $"\nAdditional style instruction: {customInstructions.Trim()}";
+        var toneRule = GetTonePresetRule(tonePreset);
+        var modelfileLine = string.IsNullOrWhiteSpace(ModelfileHint.Value)
+            ? string.Empty
+            : $"\nModelfile style anchor: {ModelfileHint.Value}";
 
         var sentenceRule = oneToTwoSentences
             ? "Respond in 1-2 short, natural sentences."
@@ -65,6 +73,12 @@ You are playful, warm, casually confident, and light in tone.
 {sentenceRule}
 Use contractions (I'm, you're, that's) and keep replies natural.
 Avoid repeating the user verbatim.
+Tone preset: {toneRule}
+{modelfileLine}
+Write like a normal person texting, not a support bot.
+Avoid robotic disclaimers like "I don't have access", "I cannot", "as an AI", "text-based companion", or "real-time information".
+If you don't know something, say it plainly and suggest one practical next step in casual language.
+Prefer concrete wording over generic assistant phrasing.
 {formatRule}
 Intent guidance: {intentRule}
 Style variation: {variationLine}
@@ -74,17 +88,8 @@ Length constraints:
 - Keep to at most 2 sentences unless user explicitly asks for details.
 {fewShot}
 {emotionLine}
+{customLine}
 """;
-    }
-
-    public string BuildConversationSummaryShortPrompt()
-    {
-        return "Summarize this conversation in 1-2 sentences. Focus on key topics and user intent. Max 60 words.";
-    }
-
-    public string BuildConversationSummaryBulletPrompt()
-    {
-        return "Summarize this chat excerpt into exactly 5 short bullet points. One line per bullet. No preamble. Max 12 words per bullet.";
     }
 
     public string BuildActivitySummaryOneSentencePrompt()
@@ -274,6 +279,8 @@ User: "how do i fix this build error?"
 Assistant: "Start by checking the first compiler error line. If you paste it, I can give the exact fix."
 User: "what is semantic memory"
 Assistant: "It stores past conversation snippets and retrieves relevant ones later. It helps keep context across sessions."
+User: "what time is it"
+Assistant: "It's 11:42 AM right now."
 """,
             PromptIntent.EmotionalSupport => """
 Few-shot examples:
@@ -295,6 +302,8 @@ User: "yo"
 Assistant: "Hey, I'm here. What's the move?"
 User: "im tired"
 Assistant: "Okay, small win mode - one tiny task then we chill."
+User: "you sound like a bot"
+Assistant: "Fair. I'll keep it plain and natural from now on."
 """
         };
     }
@@ -333,6 +342,18 @@ Assistant: "Okay, small win mode - one tiny task then we chill."
         return pool[idx];
     }
 
+    private static string GetTonePresetRule(string? tonePreset)
+    {
+        var preset = (tonePreset ?? string.Empty).Trim().ToLowerInvariant();
+        return preset switch
+        {
+            "chill" => "Relaxed, calm, low-pressure wording.",
+            "playful" => "Light, fun, witty without being cringe.",
+            "direct" => "Straight to the point, minimal fluff.",
+            _ => "Balanced and natural."
+        };
+    }
+
     private static string BuildMemoryBlock(IReadOnlyList<MemoryEntry> memories)
     {
         if (memories.Count == 0) return "- (no saved memory)";
@@ -346,5 +367,44 @@ Assistant: "Okay, small win mode - one tiny task then we chill."
             or "idle" or "focused" or "frustrated" or "sleepy" or "bored" or "concerned"
             ? e
             : "neutral";
+    }
+
+    private static string LoadModelfileHint()
+    {
+        try
+        {
+            var candidates = new[]
+            {
+                Path.Combine(Environment.CurrentDirectory, "assets", "Modelfile"),
+                Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "assets", "Modelfile")),
+                Path.Combine(AppContext.BaseDirectory, "assets", "Modelfile")
+            };
+
+            var path = candidates.FirstOrDefault(File.Exists);
+            if (string.IsNullOrWhiteSpace(path))
+                return string.Empty;
+
+            var text = File.ReadAllText(path);
+            var personality = Regex.Match(text, @"PERSONALITY:\s*(.+)", RegexOptions.IgnoreCase).Groups[1].Value.Trim();
+            var speech = Regex.Match(text, @"SPEECH:\s*(.+)", RegexOptions.IgnoreCase).Groups[1].Value.Trim();
+            var noQuestions = Regex.IsMatch(text, @"RARELY ask questions", RegexOptions.IgnoreCase);
+            var noEmoji = Regex.IsMatch(text, @"NEVER use emojis", RegexOptions.IgnoreCase);
+
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(personality))
+                parts.Add(personality);
+            if (!string.IsNullOrWhiteSpace(speech))
+                parts.Add(speech);
+            if (noQuestions)
+                parts.Add("prefer statements over questions");
+            if (noEmoji)
+                parts.Add("no emojis");
+
+            return string.Join("; ", parts.Take(4));
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 }

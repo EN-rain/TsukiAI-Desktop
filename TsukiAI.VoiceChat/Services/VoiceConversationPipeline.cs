@@ -1,7 +1,10 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
+using Polly;
+using Polly.Retry;
 using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
 
@@ -23,13 +26,37 @@ public sealed record VoiceTurnEvent(
     int TtsMs,
     int TotalMs);
 
-public sealed class VoiceConversationPipeline : IDisposable
+public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDisposable
 {
+    private static readonly ResiliencePipeline<HttpResponseMessage> CloudTtsRetryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+        .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
+        {
+            MaxRetryAttempts = 2,
+            Delay = TimeSpan.FromMilliseconds(500),
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true,
+            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                .HandleResult(r => r.StatusCode == System.Net.HttpStatusCode.TooManyRequests ||
+                                   r.StatusCode == System.Net.HttpStatusCode.RequestTimeout ||
+                                   (int)r.StatusCode >= 500)
+                .Handle<HttpRequestException>()
+                .Handle<TaskCanceledException>(ex => !ex.CancellationToken.IsCancellationRequested),
+            OnRetry = args =>
+            {
+                var statusCode = args.Outcome.Result?.StatusCode.ToString() ?? "Exception";
+                DevLog.WriteLine("[VoiceFlow][CloudTTS][Retry]: attempt={0}, status={1}, delay_ms={2:F0}",
+                    args.AttemptNumber, statusCode, args.RetryDelay.TotalMilliseconds);
+                return ValueTask.CompletedTask;
+            }
+        })
+        .Build();
+
     private readonly IInferenceClient _inferenceClient;
     private readonly VoicevoxClient _voicevoxClient;
     private readonly TranslationService _translationService;
     private readonly AudioProcessingService _audioProcessingService;
     private readonly AppSettings _settings;
+    private readonly LatencyTracker _latencyTracker;
     private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(45) };
     private readonly Channel<(string UserText, string AssistantText)> _historyQueue =
         Channel.CreateBounded<(string UserText, string AssistantText)>(new BoundedChannelOptions(128)
@@ -49,6 +76,8 @@ public sealed class VoiceConversationPipeline : IDisposable
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _inflightByUser = new();
     private readonly TimeSpan _dedupeWindow = TimeSpan.FromSeconds(2);
     private int _activeTurnCount;
+    private int _queueDepth;
+    private readonly System.Threading.Timer _queueDepthLogTimer;
     public event Action<VoiceTurnEvent>? TurnCompleted;
     public event Action<bool>? AssistantTypingChanged;
 
@@ -66,7 +95,16 @@ public sealed class VoiceConversationPipeline : IDisposable
         _translationService = translationService;
         _audioProcessingService = audioProcessingService;
         _settings = settings;
+        _latencyTracker = new LatencyTracker();
         _historyWorkerTask = Task.Run(HistoryWorkerAsync);
+        _queueDepthLogTimer = new System.Threading.Timer(_ =>
+        {
+            var depth = Volatile.Read(ref _queueDepth);
+            if (depth > 0)
+            {
+                DevLog.WriteLine("[VoiceFlow] component=queue_depth count={0} timestamp={1:O}", depth, DateTimeOffset.UtcNow);
+            }
+        }, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
     }
 
     public void Start()
@@ -86,8 +124,10 @@ public sealed class VoiceConversationPipeline : IDisposable
         FlushHistoryNow();
     }
 
-    public async Task<VoiceProcessResult> ProcessTextAsync(string userId, string text, CancellationToken ct = default)
+    public async Task<VoiceProcessResult> ProcessTextAsync(string userId, string text, string? correlationId = null, CancellationToken ct = default)
     {
+        correlationId ??= Guid.NewGuid().ToString("N");
+        Interlocked.Increment(ref _queueDepth);
         var totalSw = Stopwatch.StartNew();
         var typingStateRaised = false;
         text = (text ?? string.Empty).Trim();
@@ -126,25 +166,62 @@ public sealed class VoiceConversationPipeline : IDisposable
             DevLog.WriteLine("[VoiceFlow] retrieve_recent_ms={0}", retrieveSw.ElapsedMilliseconds);
 
             var llmSw = Stopwatch.StartNew();
-            var reply = await _inferenceClient.ChatWithEmotionAsync(
-                text,
-                personaName: "Tsuki",
-                preferredEmotion: null,
-                history: history,
-                ct: currentCts.Token);
+            string responseText;
+            if (TryBuildDateTimeResponse(text, out var localDateTimeResponse))
+            {
+                responseText = localDateTimeResponse;
+                DevLog.WriteLine("[VoiceFlow] local_datetime_response=1");
+            }
+            else
+            {
+                AiReply reply;
+                try
+                {
+                    reply = await _inferenceClient.ChatWithEmotionAsync(
+                        text,
+                        personaName: "Tsuki",
+                        preferredEmotion: null,
+                        history: history,
+                        ct: currentCts.Token,
+                        correlationId: correlationId);
+                }
+                catch (InferenceRateLimitException rateLimitEx)
+                {
+                    DevLog.WriteLine("[VoiceFlow] rate_limit_hit={0}", rateLimitEx.Message);
+                    
+                    // Try to switch provider if multi-provider mode is enabled
+                    if (_settings.UseMultipleAiProviders && !string.IsNullOrWhiteSpace(_settings.MultiAiProvidersCsv))
+                    {
+                        var providerSwitcher = new ProviderSwitchingService();
+                        var nextProvider = providerSwitcher.SwitchToNextProvider(_settings.MultiAiProvidersCsv);
+                        
+                        if (nextProvider != null)
+                        {
+                            DevLog.WriteLine($"[VoiceFlow] switched_to_provider={nextProvider}");
+                            DevLog.WriteLine("[VoiceFlow] restart_required=true (provider switch requires app restart)");
+                        }
+                    }
+                    
+                    // Return error response
+                    return new VoiceProcessResult(false, text, "Rate limit reached, please try again in a moment.", Array.Empty<byte>(), rateLimitEx.Message);
+                }
+                responseText = SanitizeForVoice(reply.Reply);
+            }
             llmSw.Stop();
+            _latencyTracker.RecordLatency("llm", llmSw.Elapsed);
             DevLog.WriteLine("[VoiceFlow] llm_ms={0}", llmSw.ElapsedMilliseconds);
 
-            var responseText = SanitizeForVoice(reply.Reply);
             if (string.IsNullOrWhiteSpace(responseText))
                 responseText = "Sorry, I could not process that.";
 
-            var ttsText = responseText;
+            var ttsText = StripParenthesesForTts(responseText);
+            if (string.IsNullOrWhiteSpace(ttsText))
+                ttsText = responseText;
             if (_settings.VoiceTranslateToJapanese)
             {
                 if (_translationService.IsEnabled)
                 {
-                    ttsText = await _translationService.TranslateToJapaneseAsync(responseText, currentCts.Token);
+                    ttsText = await _translationService.TranslateToJapaneseAsync(responseText, currentCts.Token, correlationId);
                 }
                 else
                 {
@@ -153,15 +230,18 @@ public sealed class VoiceConversationPipeline : IDisposable
             }
 
             var ttsSw = Stopwatch.StartNew();
-            var wav = await SynthesizeWavAsync(ttsText, currentCts.Token);
+            var wav = await SynthesizeWavAsync(ttsText, currentCts.Token, correlationId);
             var pcm = _audioProcessingService.ConvertVoiceVoxWavToDiscordPcm(wav);
             ttsSw.Stop();
+            _latencyTracker.RecordLatency("tts", ttsSw.Elapsed);
             DevLog.WriteLine("[VoiceFlow] tts_ms={0}", ttsSw.ElapsedMilliseconds);
 
             EnqueueConversationTurn(text, responseText);
 
             totalSw.Stop();
+            _latencyTracker.RecordLatency("total", totalSw.Elapsed);
             DevLog.WriteLine("[VoiceFlow] total_ms={0}", totalSw.ElapsedMilliseconds);
+            LogLatencyPercentiles(correlationId);
             TurnCompleted?.Invoke(new VoiceTurnEvent(
                 text,
                 responseText,
@@ -177,7 +257,7 @@ public sealed class VoiceConversationPipeline : IDisposable
         }
         catch (Exception ex)
         {
-            DevLog.WriteLine("[VoiceFlow] error={0}", ex.Message);
+            DevLog.WriteLine("[VoiceFlow] correlation_id={0}, component=pipeline, operation=process_text, status=error, error={1}", correlationId, ex);
             return new VoiceProcessResult(false, text, "I hit an issue processing that.", Array.Empty<byte>(), ex.Message);
         }
         finally
@@ -187,7 +267,26 @@ public sealed class VoiceConversationPipeline : IDisposable
                 SetAssistantTyping(false);
             }
             _inflightByUser.TryRemove(userId, out _);
+            Interlocked.Decrement(ref _queueDepth);
         }
+    }
+
+    public async Task<byte[]> SynthesizeTextToPcmAsync(string text, string? correlationId = null, CancellationToken ct = default)
+    {
+        correlationId ??= Guid.NewGuid().ToString("N");
+        var ttsText = StripParenthesesForTts(text);
+        if (string.IsNullOrWhiteSpace(ttsText))
+        {
+            return Array.Empty<byte>();
+        }
+
+        var wav = await SynthesizeWavAsync(ttsText, ct, correlationId);
+        if (wav.Length == 0)
+        {
+            return Array.Empty<byte>();
+        }
+
+        return _audioProcessingService.ConvertVoiceVoxWavToDiscordPcm(wav);
     }
 
     private void SetAssistantTyping(bool isTyping)
@@ -255,23 +354,80 @@ public sealed class VoiceConversationPipeline : IDisposable
         }
     }
 
-    private async Task<byte[]> SynthesizeWavAsync(string text, CancellationToken ct)
+    public void RecordSttLatency(TimeSpan duration, string? correlationId = null)
+    {
+        _latencyTracker.RecordLatency("stt", duration);
+        var p = _latencyTracker.GetPercentiles("stt");
+        if (p is null)
+            return;
+
+        DevLog.WriteLine("[VoiceFlow] correlation_id={0}, component=latency, operation=stt_percentiles, p50_ms={1:F1}, p95_ms={2:F1}, p99_ms={3:F1}, sample_count={4}, status=ok",
+            correlationId ?? "none", p.P50, p.P95, p.P99, p.SampleCount);
+    }
+
+    private void LogLatencyPercentiles(string correlationId)
+    {
+        foreach (var operation in new[] { "stt", "llm", "tts", "total" })
+        {
+            var p = _latencyTracker.GetPercentiles(operation);
+            if (p is null)
+                continue;
+
+            DevLog.WriteLine("[VoiceFlow] correlation_id={0}, component=latency, operation={1}_percentiles, p50_ms={2:F1}, p95_ms={3:F1}, p99_ms={4:F1}, sample_count={5}, status=ok",
+                correlationId, operation, p.P50, p.P95, p.P99, p.SampleCount);
+        }
+    }
+
+    private async Task<byte[]> SynthesizeWavAsync(string text, CancellationToken ct, string? correlationId)
     {
         if (_settings.TtsMode == TtsMode.CloudRemote && !string.IsNullOrWhiteSpace(_settings.CloudTtsUrl))
         {
-            var baseUrl = _settings.CloudTtsUrl.TrimEnd('/');
-            var queryUrl = $"{baseUrl}/audio_query?text={Uri.EscapeDataString(text)}&speaker={_settings.VoicevoxSpeakerStyleId}";
-            using var queryResp = await _httpClient.PostAsync(queryUrl, null, ct);
-            queryResp.EnsureSuccessStatusCode();
-            var queryJson = await queryResp.Content.ReadAsStringAsync(ct);
+            try
+            {
+                var baseUrl = _settings.CloudTtsUrl.TrimEnd('/');
+                var queryUrl = $"{baseUrl}/audio_query?text={Uri.EscapeDataString(text)}&speaker={_settings.VoicevoxSpeakerStyleId}";
+                using var queryResp = await CloudTtsRetryPipeline.ExecuteAsync(
+                    async innerCt =>
+                    {
+                        using var req = new HttpRequestMessage(HttpMethod.Post, queryUrl);
+                        if (!string.IsNullOrWhiteSpace(correlationId))
+                            req.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
+                        return await _httpClient.SendAsync(req, innerCt);
+                    },
+                    ct);
+                queryResp.EnsureSuccessStatusCode();
+                var queryJson = await queryResp.Content.ReadAsStringAsync(ct);
 
-            using var content = new StringContent(queryJson, System.Text.Encoding.UTF8, "application/json");
-            using var synthResp = await _httpClient.PostAsync($"{baseUrl}/synthesis?speaker={_settings.VoicevoxSpeakerStyleId}", content, ct);
-            synthResp.EnsureSuccessStatusCode();
-            return await synthResp.Content.ReadAsByteArrayAsync(ct);
+                using var synthResp = await CloudTtsRetryPipeline.ExecuteAsync(
+                    async innerCt =>
+                    {
+                        using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/synthesis?speaker={_settings.VoicevoxSpeakerStyleId}")
+                        {
+                            Content = new StringContent(queryJson, System.Text.Encoding.UTF8, "application/json")
+                        };
+                        if (!string.IsNullOrWhiteSpace(correlationId))
+                            req.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
+                        return await _httpClient.SendAsync(req, innerCt);
+                    },
+                    ct);
+                synthResp.EnsureSuccessStatusCode();
+                return await synthResp.Content.ReadAsByteArrayAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                DevLog.WriteLine("[VoiceFlow][CloudTTS] failed ({0}), falling back to local VoiceVox", ex.GetBaseException().Message);
+            }
         }
 
-        return await _voicevoxClient.SynthesizeWavAsync(text, _settings.VoicevoxSpeakerStyleId, ct);
+        try
+        {
+            return await _voicevoxClient.SynthesizeWavAsync(text, _settings.VoicevoxSpeakerStyleId, ct, correlationId);
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine("[VoiceFlow][LocalTTS] failed ({0}), returning text-only response", ex.GetBaseException().Message);
+            return Array.Empty<byte>();
+        }
     }
 
     private static string SanitizeForVoice(string text)
@@ -284,6 +440,76 @@ public sealed class VoiceConversationPipeline : IDisposable
         cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "\\s+", " ").Trim();
         const int maxChars = 280;
         return cleaned.Length <= maxChars ? cleaned : cleaned[..maxChars] + "...";
+    }
+
+    private static string StripParenthesesForTts(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var cleaned = text;
+        // Remove round-parenthetical segments so metadata like "(GMT +8)" is not spoken.
+        while (true)
+        {
+            var next = Regex.Replace(cleaned, @"\([^()]*\)|（[^（）]*）", string.Empty);
+            if (next == cleaned)
+                break;
+            cleaned = next;
+        }
+
+        cleaned = Regex.Replace(cleaned, @"\s{2,}", " ").Trim();
+        return cleaned;
+    }
+
+    private static bool TryBuildDateTimeResponse(string userText, out string response)
+    {
+        response = string.Empty;
+        var text = (userText ?? string.Empty).Trim();
+        if (text.Length == 0)
+            return false;
+
+        var asksTime = Regex.IsMatch(
+            text,
+            @"\b(what(?:'s| is)?\s+the\s+time|what\s+time(?:\s+is\s+it)?|current\s+time|time\s+now|clock)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var asksDate = Regex.IsMatch(
+            text,
+            @"\b(what(?:'s| is)?\s+the\s+date|today(?:'s)?\s+date|current\s+date|what\s+day(?:\s+is\s+it)?|date\s+today)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        if (!asksTime && !asksDate)
+            return false;
+
+        var now = DateTime.Now;
+        var offset = TimeZoneInfo.Local.GetUtcOffset(now);
+        var gmtText = FormatGmtOffset(offset);
+
+        if (asksTime && asksDate)
+        {
+            response = $"It is {now:h:mm tt} on {now:dddd, MMMM d, yyyy} ({gmtText}).";
+            return true;
+        }
+
+        if (asksTime)
+        {
+            response = $"The current time is {now:h:mm tt} ({gmtText}).";
+            return true;
+        }
+
+        response = $"Today is {now:dddd, MMMM d, yyyy}.";
+        return true;
+    }
+
+    private static string FormatGmtOffset(TimeSpan offset)
+    {
+        var sign = offset >= TimeSpan.Zero ? "+" : "-";
+        var abs = offset.Duration();
+        if (abs.Minutes == 0)
+        {
+            return $"GMT {sign}{abs.Hours}";
+        }
+
+        return $"GMT {sign}{abs.Hours}:{abs.Minutes:00}";
     }
 
     private async Task HistoryWorkerAsync()
@@ -328,7 +554,7 @@ public sealed class VoiceConversationPipeline : IDisposable
             if (_historyLoaded) return;
             try
             {
-                var history = ConversationHistoryService.LoadVoiceChatHistory();
+                var history = ConversationHistoryService.LoadVoiceChatHistoryAsync().GetAwaiter().GetResult();
                 _historyMessages = history?.Messages?.ToList() ?? new List<ConversationHistoryService.ConversationMessage>();
             }
             catch (Exception ex)
@@ -380,7 +606,7 @@ public sealed class VoiceConversationPipeline : IDisposable
             }
 
             var displayText = string.Join("\n", snapshot.TakeLast(40).Select(m => $"{m.Role}: {m.Content}"));
-            ConversationHistoryService.SaveVoiceChatHistoryWithSpeakers(snapshot, displayText);
+            ConversationHistoryService.SaveVoiceChatHistoryWithSpeakersAsync(snapshot, displayText).GetAwaiter().GetResult();
         }
         catch (Exception ex)
         {
@@ -393,9 +619,19 @@ public sealed class VoiceConversationPipeline : IDisposable
         if (_isDisposed) return;
         _isDisposed = true;
         try { _historyWorkerCts.Cancel(); } catch { }
-        try { _historyWorkerTask.Wait(TimeSpan.FromSeconds(2)); } catch { }
+
+        try
+        {
+            _historyWorkerTask.Wait(TimeSpan.FromSeconds(2));
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine("[VoiceFlow] history_worker_wait_failed={0}", ex.Message);
+        }
+        
         FlushHistoryNow();
         _historyWorkerCts.Dispose();
+        _queueDepthLogTimer.Dispose();
         _httpClient.Dispose();
     }
 }

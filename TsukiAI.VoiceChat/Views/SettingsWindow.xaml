@@ -29,20 +29,20 @@
         <local:StringContainsConverter x:Key="StringContainsConverter"/>
         
         <!-- Force dropdown/popup surfaces dark -->
-        <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#111318"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#110E18"/>
         <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#E8EAED"/>
-        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#2A2F3A"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#2F2740"/>
         <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#FFFFFFFF"/>
 
         <!-- ── Palette ── -->
-        <Color x:Key="BgDeep">#111318</Color>
-        <Color x:Key="BgCard">#181B22</Color>
-        <Color x:Key="BgInput">#1E222B</Color>
-        <Color x:Key="Border">#2A2F3A</Color>
+        <Color x:Key="BgDeep">#110E18</Color>
+        <Color x:Key="BgCard">#171320</Color>
+        <Color x:Key="BgInput">#21192F</Color>
+        <Color x:Key="Border">#3A3150</Color>
         <Color x:Key="TextPrimary">#E8EAED</Color>
-        <Color x:Key="TextSecondary">#9AA0AC</Color>
-        <Color x:Key="TextMuted">#636A78</Color>
-        <Color x:Key="Accent">#7C6AEF</Color>
+        <Color x:Key="TextSecondary">#B8AFCB</Color>
+        <Color x:Key="TextMuted">#847A99</Color>
+        <Color x:Key="Accent">#9B7BFF</Color>
 
         <SolidColorBrush x:Key="BgDeepBrush" Color="{StaticResource BgDeep}"/>
         <SolidColorBrush x:Key="BgCardBrush" Color="{StaticResource BgCard}"/>
@@ -52,15 +52,15 @@
         <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondary}"/>
         <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMuted}"/>
         <SolidColorBrush x:Key="AccentBrushRes" Color="{StaticResource Accent}"/>
-        <SolidColorBrush x:Key="TabActiveBackgroundBrush" Color="#252B3A"/>
+        <SolidColorBrush x:Key="TabActiveBackgroundBrush" Color="#2B2140"/>
         <SolidColorBrush x:Key="TabInactiveBackgroundBrush" Color="Transparent"/>
-        <SolidColorBrush x:Key="TabInactiveBorderBrush" Color="#2A2F3A"/>
-        <SolidColorBrush x:Key="TabHoverBackgroundBrush" Color="#1A2030"/>
+        <SolidColorBrush x:Key="TabInactiveBorderBrush" Color="#3A3150"/>
+        <SolidColorBrush x:Key="TabHoverBackgroundBrush" Color="#221A33"/>
 
         <!-- Scrollbar styling -->
-        <SolidColorBrush x:Key="ScrollTrackBrush" Color="#1E222B"/>
-        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#3D4451"/>
-        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#7C6AEF"/>
+        <SolidColorBrush x:Key="ScrollTrackBrush" Color="#21192F"/>
+        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#5B4E79"/>
+        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#9B7BFF"/>
 
         <Style x:Key="ThemedScrollBarThumb" TargetType="{x:Type Thumb}">
             <Setter Property="OverridesDefaultStyle" Value="True"/>
@@ -158,7 +158,7 @@
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
-            <Setter Property="SelectionBrush" Value="#447C6AEF"/>
+            <Setter Property="SelectionBrush" Value="#449B7BFF"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
             <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
             <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
@@ -509,7 +509,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#2A2F3A"/>
+                                <Setter Property="Background" Value="#2F2740"/>
                                 <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
@@ -664,7 +664,7 @@
 
                 <!-- Title Bar -->
                 <Border Grid.Row="0"
-                        Background="#1E222B"
+                        Background="#21192F"
                         BorderBrush="{StaticResource BorderBrush}"
                         BorderThickness="0,0,0,1"
                         Padding="12,0"
@@ -718,10 +718,6 @@
                             <Button x:Name="TabAdvanced" Content="Advanced" Click="Tab_Click" Tag="2"
                                     Style="{StaticResource SettingsTabButton}"
                                     Foreground="{StaticResource TextSecondaryBrush}"
-                                    Margin="0,0,24,0"/>
-                            <Button x:Name="TabRateLimit" Content="Rate Limit" Click="Tab_Click" Tag="3"
-                                    Style="{StaticResource SettingsTabButton}"
-                                    Foreground="{StaticResource TextSecondaryBrush}"
                                     Margin="0"/>
                         </StackPanel>
                     </Grid>
@@ -771,10 +767,6 @@
                                         <ComboBoxItem Content="Use one only" Tag="one"/>
                                         <ComboBoxItem Content="Use multiple" Tag="multiple"/>
                                     </ComboBox>
-                                    <TextBlock x:Name="TxtProviderRateLimitIndicator"
-                                               Style="{StaticResource FieldHint}"
-                                               Margin="0,0,0,8"
-                                               Visibility="Collapsed"/>
 
                                     <StackPanel x:Name="SingleProviderPanel">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="AI Provider"/>
@@ -807,7 +799,7 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <Ellipse x:Name="StatusCerebras" Grid.Column="0" Width="8" Height="8" Fill="LimeGreen" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <Ellipse x:Name="StatusCerebras" Grid.Column="0" Width="8" Height="8" Fill="{StaticResource AccentBrushRes}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                                             <CheckBox x:Name="ChkCerebras" Grid.Column="1" Style="{StaticResource SettingsCheckBox}" Content="Cerebras" Checked="ProviderCheckBox_Changed" Unchecked="ProviderCheckBox_Changed"/>
                                             <TextBlock Grid.Column="2" Text="(priority #2, very fast)" Foreground="#888" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
                                             <Button Grid.Column="3" Content="Edit API" Click="EditProviderApi_Click" Tag="cerebras" Style="{StaticResource EditApiButton}"/>
@@ -819,7 +811,7 @@
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
-                                                <PasswordBox x:Name="TxtCerebrasApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2A2F3A" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
+                                                <PasswordBox x:Name="TxtCerebrasApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2F2740" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
                                                 <Button x:Name="BtnTestCerebras" Grid.Column="1" Content="Test Connection" Click="TestProviderConnection_Click" Tag="cerebras" Style="{StaticResource ProviderTestButton}"/>
                                             </Grid>
                                             <TextBlock x:Name="TxtCerebrasStatus" Margin="0,4,0,0" Foreground="Gray" FontSize="11"/>
@@ -833,7 +825,7 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <Ellipse x:Name="StatusGroq" Grid.Column="0" Width="8" Height="8" Fill="LimeGreen" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <Ellipse x:Name="StatusGroq" Grid.Column="0" Width="8" Height="8" Fill="{StaticResource AccentBrushRes}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                                             <CheckBox x:Name="ChkGroq" Grid.Column="1" Style="{StaticResource SettingsCheckBox}" Content="GroqCloud" Checked="ProviderCheckBox_Changed" Unchecked="ProviderCheckBox_Changed"/>
                                             <TextBlock Grid.Column="2" Text="(priority #1, fastest)" Foreground="#888" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
                                             <Button Grid.Column="3" Content="Edit API" Click="EditProviderApi_Click" Tag="groq" Style="{StaticResource EditApiButton}"/>
@@ -845,7 +837,7 @@
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
-                                                <PasswordBox x:Name="TxtGroqApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2A2F3A" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
+                                                <PasswordBox x:Name="TxtGroqApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2F2740" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
                                                 <Button x:Name="BtnTestGroq" Grid.Column="1" Content="Test Connection" Click="TestProviderConnection_Click" Tag="groq" Style="{StaticResource ProviderTestButton}"/>
                                             </Grid>
                                             <TextBlock x:Name="TxtGroqStatus" Margin="0,4,0,0" Foreground="Gray" FontSize="11"/>
@@ -859,7 +851,7 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <Ellipse x:Name="StatusGemini" Grid.Column="0" Width="8" Height="8" Fill="LimeGreen" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <Ellipse x:Name="StatusGemini" Grid.Column="0" Width="8" Height="8" Fill="{StaticResource AccentBrushRes}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                                             <CheckBox x:Name="ChkGemini" Grid.Column="1" Style="{StaticResource SettingsCheckBox}" Content="Google Gemini" Checked="ProviderCheckBox_Changed" Unchecked="ProviderCheckBox_Changed"/>
                                             <TextBlock Grid.Column="2" Text="(priority #3, stable)" Foreground="#888" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
                                             <Button Grid.Column="3" Content="Edit API" Click="EditProviderApi_Click" Tag="gemini" Style="{StaticResource EditApiButton}"/>
@@ -871,7 +863,7 @@
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
-                                                <PasswordBox x:Name="TxtGeminiApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2A2F3A" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
+                                                <PasswordBox x:Name="TxtGeminiApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2F2740" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
                                                 <Button x:Name="BtnTestGemini" Grid.Column="1" Content="Test Connection" Click="TestProviderConnection_Click" Tag="gemini" Style="{StaticResource ProviderTestButton}"/>
                                             </Grid>
                                             <TextBlock x:Name="TxtGeminiStatus" Margin="0,4,0,0" Foreground="Gray" FontSize="11"/>
@@ -886,7 +878,7 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <Ellipse x:Name="StatusGitHub" Grid.Column="0" Width="8" Height="8" Fill="LimeGreen" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <Ellipse x:Name="StatusGitHub" Grid.Column="0" Width="8" Height="8" Fill="{StaticResource AccentBrushRes}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                                             <CheckBox x:Name="ChkGitHub" Grid.Column="1" Style="{StaticResource SettingsCheckBox}" Content="GitHub Models" Checked="ProviderCheckBox_Changed" Unchecked="ProviderCheckBox_Changed"/>
                                             <TextBlock Grid.Column="2" Text="(priority #5, slowest)" Foreground="#888" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
                                             <Button Grid.Column="3" Content="Edit API" Click="EditProviderApi_Click" Tag="github" Style="{StaticResource EditApiButton}"/>
@@ -898,7 +890,7 @@
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
-                                                <PasswordBox x:Name="TxtGitHubApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2A2F3A" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
+                                                <PasswordBox x:Name="TxtGitHubApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2F2740" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
                                                 <Button x:Name="BtnTestGitHub" Grid.Column="1" Content="Test Connection" Click="TestProviderConnection_Click" Tag="github" Style="{StaticResource ProviderTestButton}"/>
                                             </Grid>
                                             <TextBlock x:Name="TxtGitHubStatus" Margin="0,4,0,0" Foreground="Gray" FontSize="11"/>
@@ -912,7 +904,7 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <Ellipse x:Name="StatusMistral" Grid.Column="0" Width="8" Height="8" Fill="LimeGreen" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <Ellipse x:Name="StatusMistral" Grid.Column="0" Width="8" Height="8" Fill="{StaticResource AccentBrushRes}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                                             <CheckBox x:Name="ChkMistral" Grid.Column="1" Style="{StaticResource SettingsCheckBox}" Content="Mistral API" Checked="ProviderCheckBox_Changed" Unchecked="ProviderCheckBox_Changed"/>
                                             <TextBlock Grid.Column="2" Text="(priority #4, moderate)" Foreground="#888" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
                                             <Button Grid.Column="3" Content="Edit API" Click="EditProviderApi_Click" Tag="mistral" Style="{StaticResource EditApiButton}"/>
@@ -924,21 +916,12 @@
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
-                                                <PasswordBox x:Name="TxtMistralApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2A2F3A" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
+                                                <PasswordBox x:Name="TxtMistralApiKey" Grid.Column="0" Height="32" Padding="8,6" Background="#2F2740" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
                                                 <Button x:Name="BtnTestMistral" Grid.Column="1" Content="Test Connection" Click="TestProviderConnection_Click" Tag="mistral" Style="{StaticResource ProviderTestButton}"/>
                                             </Grid>
                                             <TextBlock x:Name="TxtMistralStatus" Margin="0,4,0,0" Foreground="Gray" FontSize="11"/>
                                         </StackPanel>
                                         
-                                        <CheckBox x:Name="ChkAutoSwitchOnRateLimit" Style="{StaticResource SettingsCheckBox}" Content="Auto-switch provider when rate limit is hit" IsChecked="True" Margin="0,4,0,0"/>
-
-                                        <StackPanel Visibility="Collapsed">
-                                            <Path x:Name="RingCerebras"/><TextBlock x:Name="RingCerebrasLabel"/>
-                                            <Path x:Name="RingGroq"/><TextBlock x:Name="RingGroqLabel"/>
-                                            <Path x:Name="RingGemini"/><TextBlock x:Name="RingGeminiLabel"/>
-                                            <Path x:Name="RingGitHub"/><TextBlock x:Name="RingGitHubLabel"/>
-                                            <Path x:Name="RingMistral"/><TextBlock x:Name="RingMistralLabel"/>
-                                        </StackPanel>
                                     </StackPanel>
                                 </StackPanel>
 
@@ -998,6 +981,19 @@
                         <TextBlock Style="{StaticResource FieldHint}" Text="e.g. qwen2.5:3b"/>
                         <TextBox Style="{StaticResource SettingsTextBox}"
                                  Text="{Binding ModelName, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Reply Tone"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="How Tsuki should sound in replies"/>
+                        <ComboBox Style="{StaticResource SettingsComboBox}"
+                                  SelectedValuePath="Tag"
+                                  SelectedValue="{Binding ReplyTonePreset, Mode=TwoWay}">
+                            <ComboBoxItem Content="Natural" Tag="natural"/>
+                            <ComboBoxItem Content="Chill" Tag="chill"/>
+                            <ComboBoxItem Content="Playful" Tag="playful"/>
+                            <ComboBoxItem Content="Direct" Tag="direct"/>
+                        </ComboBox>
                     </StackPanel>
 
                     <StackPanel Margin="0,0,0,12">
@@ -1165,6 +1161,41 @@
                                             Click="OpenDiscordEnv_Click"/>
 
                                     <StackPanel Margin="0,8,0,0">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Speech-to-Text Provider"/>
+                                        <ComboBox x:Name="CmbSttMode"
+                                                  Style="{StaticResource SettingsComboBox}"
+                                                  SelectedIndex="{Binding SttModeIndex, Mode=TwoWay}">
+                                            <ComboBoxItem Content="AssemblyAI (Accurate, Slower)"/>
+                                            <ComboBoxItem Content="Groq Whisper (Fast, Free)" ToolTip="Uses same Groq API key as LLM"/>
+                                        </ComboBox>
+                                        <TextBlock Style="{StaticResource FieldHint}"
+                                                   Text="Groq Whisper is faster and uses your existing Groq API key"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,0,0"/>
+                                    </StackPanel>
+
+                                    <StackPanel Margin="0,12,0,0">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="STT Language"/>
+                                        <ComboBox x:Name="CmbSttLanguage"
+                                                  Style="{StaticResource SettingsComboBox}"
+                                                  SelectedValuePath="Tag"
+                                                  SelectedValue="{Binding SttLanguageCode, Mode=TwoWay}">
+                                            <ComboBoxItem Content="Auto-detect" Tag="auto"/>
+                                            <ComboBoxItem Content="English" Tag="en"/>
+                                            <ComboBoxItem Content="Japanese" Tag="ja"/>
+                                            <ComboBoxItem Content="Chinese" Tag="zh"/>
+                                            <ComboBoxItem Content="Korean" Tag="ko"/>
+                                            <ComboBoxItem Content="Spanish" Tag="es"/>
+                                            <ComboBoxItem Content="French" Tag="fr"/>
+                                            <ComboBoxItem Content="German" Tag="de"/>
+                                        </ComboBox>
+                                        <TextBlock Style="{StaticResource FieldHint}"
+                                                   Text="Used by cloud STT. Auto-detect is safest for mixed languages."
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,0,0"/>
+                                    </StackPanel>
+
+                                    <StackPanel Margin="0,12,0,0">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="Translation Strategy"/>
                                         <ComboBox x:Name="CmbDiscordTranslationStrategy"
                                                   Style="{StaticResource SettingsComboBox}"
@@ -1291,28 +1322,6 @@
                             </Border>
                         </StackPanel>
 
-                        <!-- Rate Limit Content -->
-                        <StackPanel x:Name="RateLimitContent" Visibility="Collapsed">
-                            <Border Style="{StaticResource CardBorder}">
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource SectionHeader}" Text="Provider Rate Limiting"/>
-                                    <StackPanel Margin="0,0,0,12">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Fallback cooldown (seconds)"/>
-                                        <TextBlock Style="{StaticResource FieldHint}" Text="Used when provider returns 429 without Retry-After header."/>
-                                        <TextBox Style="{StaticResource SettingsTextBox}"
-                                                 Text="{Binding ProviderRateLimitCooldownSecondsText, UpdateSourceTrigger=PropertyChanged}"/>
-                                    </StackPanel>
-
-                                    <StackPanel Margin="0,0,0,8">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Current rate-limit status"/>
-                                        <TextBlock x:Name="TxtRateLimitStatus"
-                                                   Style="{StaticResource FieldHint}"
-                                                   Text="No active provider cooldowns."/>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-                        
         </StackPanel>
         </ScrollViewer>
 

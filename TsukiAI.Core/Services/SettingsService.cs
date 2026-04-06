@@ -14,8 +14,9 @@ public static class SettingsService
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "TsukiAI"
         );
-        await Task.Run(() => Directory.CreateDirectory(baseDir));
-        return baseDir;
+        // Directory.CreateDirectory is fast and synchronous - no need for Task.Run
+        Directory.CreateDirectory(baseDir);
+        return await Task.FromResult(baseDir);
     }
     
     public static string GetBaseDir()
@@ -56,12 +57,14 @@ public static class SettingsService
                 ModelLoadTimeoutSeconds = loadedSettings.ModelLoadTimeoutSeconds == 0 ? 120 : loadedSettings.ModelLoadTimeoutSeconds,
                 HealthCheckTimeoutSeconds = loadedSettings.HealthCheckTimeoutSeconds == 0 ? 10 : loadedSettings.HealthCheckTimeoutSeconds,
                 MaxInferenceRetries = loadedSettings.MaxInferenceRetries == 0 ? 3 : loadedSettings.MaxInferenceRetries,
-                ProviderRateLimitCooldownSeconds = loadedSettings.ProviderRateLimitCooldownSeconds == 0 ? 60 : loadedSettings.ProviderRateLimitCooldownSeconds,
                 GenerationMaxTokens = loadedSettings.GenerationMaxTokens == 0 ? 80 : loadedSettings.GenerationMaxTokens,
                 GenerationTopK = loadedSettings.GenerationTopK == 0 ? 40 : loadedSettings.GenerationTopK,
                 GenerationMaxReplyChars = loadedSettings.GenerationMaxReplyChars == 0 ? 360 : loadedSettings.GenerationMaxReplyChars,
                 // Migrate old "All Users" (0) default to new "Auto Focus" (ulong.MaxValue) default
-                DiscordFocusedUserId = loadedSettings.DiscordFocusedUserId == 0 ? ulong.MaxValue : loadedSettings.DiscordFocusedUserId
+                DiscordFocusedUserId = loadedSettings.DiscordFocusedUserId == 0 ? ulong.MaxValue : loadedSettings.DiscordFocusedUserId,
+                VrChatOscHost = string.IsNullOrWhiteSpace(loadedSettings.VrChatOscHost) ? "127.0.0.1" : loadedSettings.VrChatOscHost,
+                VrChatOscInputPort = loadedSettings.VrChatOscInputPort == 0 ? 9000 : loadedSettings.VrChatOscInputPort,
+                VrChatOscOutputPort = loadedSettings.VrChatOscOutputPort == 0 ? 9001 : loadedSettings.VrChatOscOutputPort
             };
             
             // Migrate old single API key to provider-specific keys
@@ -96,12 +99,14 @@ public static class SettingsService
                 ModelLoadTimeoutSeconds = loadedSettings.ModelLoadTimeoutSeconds == 0 ? 120 : loadedSettings.ModelLoadTimeoutSeconds,
                 HealthCheckTimeoutSeconds = loadedSettings.HealthCheckTimeoutSeconds == 0 ? 10 : loadedSettings.HealthCheckTimeoutSeconds,
                 MaxInferenceRetries = loadedSettings.MaxInferenceRetries == 0 ? 3 : loadedSettings.MaxInferenceRetries,
-                ProviderRateLimitCooldownSeconds = loadedSettings.ProviderRateLimitCooldownSeconds == 0 ? 60 : loadedSettings.ProviderRateLimitCooldownSeconds,
                 GenerationMaxTokens = loadedSettings.GenerationMaxTokens == 0 ? 80 : loadedSettings.GenerationMaxTokens,
                 GenerationTopK = loadedSettings.GenerationTopK == 0 ? 40 : loadedSettings.GenerationTopK,
                 GenerationMaxReplyChars = loadedSettings.GenerationMaxReplyChars == 0 ? 360 : loadedSettings.GenerationMaxReplyChars,
                 // Migrate old "All Users" (0) default to new "Auto Focus" (ulong.MaxValue) default
-                DiscordFocusedUserId = loadedSettings.DiscordFocusedUserId == 0 ? ulong.MaxValue : loadedSettings.DiscordFocusedUserId
+                DiscordFocusedUserId = loadedSettings.DiscordFocusedUserId == 0 ? ulong.MaxValue : loadedSettings.DiscordFocusedUserId,
+                VrChatOscHost = string.IsNullOrWhiteSpace(loadedSettings.VrChatOscHost) ? "127.0.0.1" : loadedSettings.VrChatOscHost,
+                VrChatOscInputPort = loadedSettings.VrChatOscInputPort == 0 ? 9000 : loadedSettings.VrChatOscInputPort,
+                VrChatOscOutputPort = loadedSettings.VrChatOscOutputPort == 0 ? 9001 : loadedSettings.VrChatOscOutputPort
             };
         }
         catch

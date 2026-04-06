@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Threading;
 using TsukiAI.Core.Services;
 
@@ -10,6 +9,8 @@ namespace TsukiAI.VoiceChat.Views;
 public partial class DevLogWindow : Window
 {
     private ScrollViewer? _logScrollViewer;
+    private bool _followTail = true;
+    private bool _isProgrammaticScroll;
 
     public DevLogWindow()
     {
@@ -17,6 +18,7 @@ public partial class DevLogWindow : Window
         Loaded += (_, _) =>
         {
             RefreshLog();
+            AttachScrollTracking();
             DevLog.LogUpdated += OnLogUpdated;
         };
         Closed += (_, _) => DevLog.LogUpdated -= OnLogUpdated;
@@ -38,30 +40,29 @@ public partial class DevLogWindow : Window
         var text = DevLog.GetText();
         var viewer = GetLogScrollViewer();
         var previousOffset = viewer?.VerticalOffset ?? 0;
-        var previousScrollableHeight = viewer?.ScrollableHeight ?? 0;
-        var shouldStickToBottom = viewer is null || previousScrollableHeight <= 0 || previousOffset >= previousScrollableHeight - 6;
+        var shouldStickToBottom = _followTail || viewer is null;
 
-        LogBox.Text = text;
+        LogTextBlock.Text = text;
 
         Dispatcher.BeginInvoke(() =>
         {
             var sv = GetLogScrollViewer();
             if (sv is null)
             {
-                if (shouldStickToBottom)
-                {
-                    LogBox.ScrollToEnd();
-                }
                 return;
             }
 
             if (shouldStickToBottom)
             {
+                _isProgrammaticScroll = true;
                 sv.ScrollToEnd();
+                _isProgrammaticScroll = false;
             }
             else
             {
+                _isProgrammaticScroll = true;
                 sv.ScrollToVerticalOffset(previousOffset);
+                _isProgrammaticScroll = false;
             }
         }, DispatcherPriority.Background);
     }
@@ -76,7 +77,7 @@ public partial class DevLogWindow : Window
 
     private void CopyButton_Click(object sender, RoutedEventArgs e)
     {
-        var text = LogBox.Text ?? string.Empty;
+        var text = LogTextBlock.Text ?? string.Empty;
         if (string.IsNullOrWhiteSpace(text))
         {
             return;
@@ -110,38 +111,35 @@ public partial class DevLogWindow : Window
 
     private ScrollViewer? GetLogScrollViewer()
     {
-        if (_logScrollViewer is not null)
-        {
-            return _logScrollViewer;
-        }
-
-        _logScrollViewer = FindVisualChild<ScrollViewer>(LogBox);
+        _logScrollViewer ??= LogScrollViewer;
         return _logScrollViewer;
     }
 
-    private static T? FindVisualChild<T>(DependencyObject? parent) where T : DependencyObject
+    private void AttachScrollTracking()
     {
-        if (parent is null)
+        var viewer = GetLogScrollViewer();
+        if (viewer is null)
         {
-            return null;
+            return;
         }
 
-        var count = VisualTreeHelper.GetChildrenCount(parent);
-        for (var i = 0; i < count; i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T typed)
-            {
-                return typed;
-            }
+        viewer.ScrollChanged -= LogScrollViewer_ScrollChanged;
+        viewer.ScrollChanged += LogScrollViewer_ScrollChanged;
+        _followTail = IsNearBottom(viewer);
+    }
 
-            var nested = FindVisualChild<T>(child);
-            if (nested is not null)
-            {
-                return nested;
-            }
+    private void LogScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (_isProgrammaticScroll || sender is not ScrollViewer viewer)
+        {
+            return;
         }
 
-        return null;
+        _followTail = IsNearBottom(viewer);
+    }
+
+    private static bool IsNearBottom(ScrollViewer viewer)
+    {
+        return viewer.ScrollableHeight <= 0 || viewer.VerticalOffset >= viewer.ScrollableHeight - 24;
     }
 }

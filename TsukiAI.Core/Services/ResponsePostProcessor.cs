@@ -49,7 +49,7 @@ public static class ResponsePostProcessor
         foreach (var pattern in BlockedPatterns)
         {
             if (lower.Contains(pattern, StringComparison.Ordinal))
-                return "Okay - let's keep this practical. Tell me the exact next step you want.";
+                return "Fair point. Let me keep it simple - tell me what you want to do next.";
         }
         return text;
     }

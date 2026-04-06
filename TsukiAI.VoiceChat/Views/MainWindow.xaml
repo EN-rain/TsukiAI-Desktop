@@ -23,11 +23,12 @@
     </shell:WindowChrome.WindowChrome>
 
     <Window.Resources>
-        <SolidColorBrush x:Key="BgMainBrush" Color="#181B22"/>
-        <SolidColorBrush x:Key="BgCardBrush" Color="#111318"/>
-        <SolidColorBrush x:Key="BorderBrush" Color="#2A2F3A"/>
+        <SolidColorBrush x:Key="BgMainBrush" Color="#171320"/>
+        <SolidColorBrush x:Key="BgCardBrush" Color="#110E18"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#3A3150"/>
         <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E8EAED"/>
-        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A0A0A0"/>
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#B8AFCB"/>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
 
         <Style x:Key="TitleBarButton" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
@@ -48,11 +49,11 @@
             </Setter>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#2A2F3A"/>
+                    <Setter Property="Background" Value="#2F2740"/>
                     <Setter Property="Foreground" Value="#FFFFFF"/>
                 </Trigger>
                 <Trigger Property="IsPressed" Value="True">
-                    <Setter Property="Background" Value="#181B22"/>
+                    <Setter Property="Background" Value="#171320"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -78,7 +79,7 @@
         </Style>
 
         <Style x:Key="ModernButton" TargetType="Button">
-            <Setter Property="Background" Value="#2A2F3A"/>
+            <Setter Property="Background" Value="#2F2740"/>
             <Setter Property="Foreground" Value="#E0E0E0"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="16,8"/>
@@ -95,10 +96,10 @@
             </Setter>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#3A3D4A"/>
+                    <Setter Property="Background" Value="#3A3154"/>
                 </Trigger>
                 <Trigger Property="IsPressed" Value="True">
-                    <Setter Property="Background" Value="#181B22"/>
+                    <Setter Property="Background" Value="#171320"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -152,22 +153,22 @@
                                     Width="18"
                                     Height="18"
                                     CornerRadius="9"
-                                    BorderBrush="#3A3D4A"
+                                    BorderBrush="#4A3E66"
                                     BorderThickness="2"
-                                    Background="#111318"
+                                    Background="#110E18"
                                     Margin="0,0,8,0"
                                     VerticalAlignment="Center">
-                                <Ellipse x:Name="RadioDot" Width="8" Height="8" Fill="#7C6AEF" Opacity="0"/>
+                                <Ellipse x:Name="RadioDot" Width="8" Height="8" Fill="#9B7BFF" Opacity="0"/>
                             </Border>
                             <ContentPresenter Grid.Column="1" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="RadioDot" Property="Opacity" Value="1"/>
-                                <Setter TargetName="RadioBorder" Property="BorderBrush" Value="#7C6AEF"/>
+                                <Setter TargetName="RadioBorder" Property="BorderBrush" Value="#9B7BFF"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="RadioBorder" Property="BorderBrush" Value="#5A4DC7"/>
+                                <Setter TargetName="RadioBorder" Property="BorderBrush" Value="#7A5FE0"/>
                                 <Setter Property="Foreground" Value="#FFFFFF"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -193,9 +194,9 @@
                                     Width="18"
                                     Height="18"
                                     CornerRadius="4"
-                                    BorderBrush="#3A3D4A"
+                                    BorderBrush="#4A3E66"
                                     BorderThickness="2"
-                                    Background="#111318"
+                                    Background="#110E18"
                                     Margin="0,0,8,0"
                                     VerticalAlignment="Center">
                                 <Path x:Name="CheckMark"
@@ -211,11 +212,11 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="CheckMark" Property="Opacity" Value="1"/>
-                                <Setter TargetName="CheckBorder" Property="Background" Value="#7C6AEF"/>
-                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#7C6AEF"/>
+                                <Setter TargetName="CheckBorder" Property="Background" Value="#9B7BFF"/>
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#9B7BFF"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#5A4DC7"/>
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#7A5FE0"/>
                                 <Setter Property="Foreground" Value="#FFFFFF"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -228,16 +229,16 @@
             <Setter Property="Width" Value="52"/>
             <Setter Property="Height" Value="26"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Background" Value="#2A2F3A"/>
-            <Setter Property="BorderBrush" Value="#3A3D4A"/>
+            <Setter Property="Background" Value="#2F2740"/>
+            <Setter Property="BorderBrush" Value="#4A3E66"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
                         <Grid>
                             <Border x:Name="Track"
-                                    Background="#2A2F3A"
-                                    BorderBrush="#3A3D4A"
+                                    Background="#2F2740"
+                                    BorderBrush="#4A3E66"
                                     BorderThickness="{TemplateBinding BorderThickness}"
                                     CornerRadius="13">
                             </Border>
@@ -256,8 +257,8 @@
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Track" Property="Background" Value="#7C6AEF"/>
-                                <Setter TargetName="Track" Property="BorderBrush" Value="#7C6AEF"/>
+                                <Setter TargetName="Track" Property="Background" Value="#9B7BFF"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#9B7BFF"/>
                                 <Trigger.EnterActions>
                                     <BeginStoryboard>
                                         <Storyboard>
@@ -271,11 +272,11 @@
                                             </DoubleAnimation>
                                             <ColorAnimation Storyboard.TargetName="Track"
                                                             Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
-                                                            To="#7C6AEF"
+                                                            To="#9B7BFF"
                                                             Duration="0:0:0.18"/>
                                             <ColorAnimation Storyboard.TargetName="Track"
                                                             Storyboard.TargetProperty="(Border.BorderBrush).(SolidColorBrush.Color)"
-                                                            To="#7C6AEF"
+                                                            To="#9B7BFF"
                                                             Duration="0:0:0.18"/>
                                         </Storyboard>
                                     </BeginStoryboard>
@@ -293,18 +294,18 @@
                                             </DoubleAnimation>
                                             <ColorAnimation Storyboard.TargetName="Track"
                                                             Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
-                                                            To="#2A2F3A"
+                                                            To="#2F2740"
                                                             Duration="0:0:0.18"/>
                                             <ColorAnimation Storyboard.TargetName="Track"
                                                             Storyboard.TargetProperty="(Border.BorderBrush).(SolidColorBrush.Color)"
-                                                            To="#3A3D4A"
+                                                            To="#4A3E66"
                                                             Duration="0:0:0.18"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Track" Property="BorderBrush" Value="#5A4DC7"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#7A5FE0"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.45"/>
@@ -348,6 +349,7 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="0,0,8,0">
                     <Button Content="Dev Logs" Style="{StaticResource TitleBarButton}" Click="DevLogs_Click" Width="Auto" Padding="8,0" FontSize="12" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
                     <Button Content="Settings" Style="{StaticResource TitleBarButton}" Click="OpenMainSettings_Click" Width="Auto" Padding="8,0" FontSize="12" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    <Button Content="Voice Setup" Style="{StaticResource TitleBarButton}" Click="OpenVoiceSettings_Click" Width="Auto" Padding="8,0" FontSize="12" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
                     <Button Content="&#xE921;" Style="{StaticResource CaptionButton}" Click="Minimize_Click" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
                     <Button x:Name="MaximizeButton" Content="&#xE922;" Style="{StaticResource CaptionButton}" Click="Maximize_Click" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
                     <Button x:Name="RestoreButton" Content="&#xE923;" Style="{StaticResource CaptionButton}" Click="Maximize_Click" Visibility="Collapsed" Margin="4,0" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
@@ -356,12 +358,26 @@
             </Grid>
 
             <Border Grid.Row="1" Background="{StaticResource BgCardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,1">
-                <TextBlock Text="🎤 Voice Chat"
-                           HorizontalAlignment="Center"
-                           Margin="0,10,0,8"
-                           Foreground="#FFFFFF"
-                           FontWeight="SemiBold"
-                           FontSize="16"/>
+                <StackPanel Margin="0,10,0,8">
+                    <TextBlock x:Name="VoiceChatTitleText"
+                               Text="🎤 Voice Chat"
+                               HorizontalAlignment="Center"
+                               Foreground="#FFFFFF"
+                               FontWeight="SemiBold"
+                               FontSize="16"/>
+                    <StackPanel Margin="16,8,16,0"
+                                Visibility="{Binding IsSpeechIndicatorVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <TextBlock Text="{Binding SpeechIndicatorText, Mode=OneWay}"
+                                   Foreground="#C4B5FD"
+                                   FontSize="11"
+                                   Margin="0,0,0,4"/>
+                        <ProgressBar IsIndeterminate="True"
+                                     Height="3"
+                                     Background="#241C36"
+                                     Foreground="#9B7BFF"
+                                     BorderThickness="0"/>
+                    </StackPanel>
+                </StackPanel>
             </Border>
 
             <Grid Grid.Row="2" Margin="16">
@@ -373,18 +389,19 @@
 
                 <Border Grid.Column="0" Background="{StaticResource BgCardBrush}" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Padding="16">
                     <StackPanel>
-                        <Grid Margin="0,0,0,16">
+                        <Grid x:Name="ServerStatusPanel" Margin="0,0,0,16">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
-                                <TextBlock Text="Server Status"
+                                <TextBlock x:Name="ServerStatusLabel"
+                                           Text="Server Status"
                                            Foreground="{StaticResource TextPrimaryBrush}"
                                            VerticalAlignment="Center"/>
                                 <TextBlock x:Name="ServerStatusText"
                                            Text="Stopped"
-                                           Foreground="#9AA0AC"
+                                           Foreground="#B8AFCB"
                                            FontSize="11"/>
                             </StackPanel>
                             <ToggleButton x:Name="ServerStatusToggle"
@@ -412,7 +429,7 @@
                                           Style="{StaticResource ModernToggleSwitch}"/>
                         </Grid>
 
-                        <TextBlock Text="User Focus" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,4,0,16"/>
+                        <TextBlock x:Name="UserFocusHeader" Text="User Focus" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,4,0,16"/>
 
                         <RadioButton x:Name="AllUsersFocusRadio" Content="All Users" Style="{StaticResource ModernRadioButton}" Margin="0,0,0,12" Checked="AllUsersFocus_Checked"/>
                         <RadioButton x:Name="AutoFocusRadio" Content="Auto Focus" Style="{StaticResource ModernRadioButton}" IsChecked="True" Margin="0,0,0,12" Checked="AutoFocus_Checked"/>
@@ -426,7 +443,7 @@
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="FocusedUserIdInput"
                                      Grid.Column="0"
-                                     Background="#111318"
+                                     Background="#110E18"
                                      Foreground="{StaticResource TextPrimaryBrush}"
                                      BorderBrush="{StaticResource BorderBrush}"
                                      BorderThickness="1"
@@ -441,10 +458,10 @@
                                     Click="ApplyFocusedUser_Click"/>
                         </Grid>
 
-                        <Border x:Name="FocusStatusPanel" Background="#181B22" CornerRadius="6" Padding="12" Margin="0,8,0,0">
+                        <Border x:Name="FocusStatusPanel" Background="#171320" CornerRadius="6" Padding="12" Margin="0,8,0,0">
                             <StackPanel>
                                 <TextBlock x:Name="FocusStatusTitle" Text="Auto Focus Mode" FontSize="11" Foreground="#808080" Margin="0,0,0,8"/>
-                                <TextBlock x:Name="FocusStatusState" Text="Active" FontSize="13" FontWeight="SemiBold" Foreground="#7C6AEF" Margin="0,0,0,4"/>
+                                <TextBlock x:Name="FocusStatusState" Text="Active" FontSize="13" FontWeight="SemiBold" Foreground="#9B7BFF" Margin="0,0,0,4"/>
                                 <TextBlock x:Name="FocusStatusDescription" Text="Automatically detects and focuses on the speaking user"
                                            FontSize="11"
                                            Foreground="#A0A0A0"
@@ -452,7 +469,22 @@
                             </StackPanel>
                         </Border>
 
-                        <TextBlock Text="Tip: Right-click user in Discord -> Copy ID"
+                        <Border x:Name="VrChatRoutePanel" Background="#171320" CornerRadius="6" Padding="12" Margin="0,12,0,0" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="VRChat Routing"
+                                           FontSize="11"
+                                           Foreground="#808080"
+                                           Margin="0,0,0,8"/>
+                                <TextBlock x:Name="VrChatRouteDescription"
+                                           Text="Set the voice output device to your virtual cable, and set VRChat to listen to that routed microphone path."
+                                           FontSize="11"
+                                           Foreground="#A0A0A0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock x:Name="PlatformTipText"
+                                   Text="Tip: Right-click user in Discord -> Copy ID"
                                    FontSize="10"
                                    Foreground="#606060"
                                    TextWrapping="Wrap"
@@ -511,8 +543,8 @@
                             </Grid>
                         </Border>
 
-                        <Button Grid.Column="2" Content="Play Here" Style="{StaticResource ModernButton}" Background="#3498DB" Foreground="White" Padding="24,10" FontWeight="SemiBold" Click="TtsTestPlayHere_Click"/>
-                        <Button Grid.Column="4" Content="Play in Discord" Style="{StaticResource ModernButton}" Background="#27AE60" Foreground="White" Padding="24,10" FontWeight="SemiBold" Click="TtsTestPlayInDiscord_Click"/>
+                        <Button Grid.Column="2" x:Name="PlayHereButton" Content="Play Here" Style="{StaticResource ModernButton}" Background="#3498DB" Foreground="White" Padding="24,10" FontWeight="SemiBold" Click="TtsTestPlayHere_Click"/>
+                        <Button Grid.Column="4" x:Name="PlatformPlaybackButton" Content="Play in Discord" Style="{StaticResource ModernButton}" Background="#27AE60" Foreground="White" Padding="24,10" FontWeight="SemiBold" Click="TtsTestPlayInDiscord_Click"/>
                     </Grid>
                 </Grid>
             </Grid>

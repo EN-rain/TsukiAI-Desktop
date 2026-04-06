@@ -11,13 +11,13 @@ namespace TsukiAI.VoiceChat.Controllers;
 public sealed class VoiceApiController : ControllerBase
 {
     private readonly AppSettings _settings;
-    private readonly VoiceConversationPipeline _pipeline;
-    private readonly WhisperService _whisperService;
+    private readonly IVoiceConversationPipeline _pipeline;
+    private readonly IWhisperService _whisperService;
 
     public VoiceApiController(
         AppSettings settings,
-        VoiceConversationPipeline pipeline,
-        WhisperService whisperService)
+        IVoiceConversationPipeline pipeline,
+        IWhisperService whisperService)
     {
         _settings = settings;
         _pipeline = pipeline;
@@ -39,6 +39,7 @@ public sealed class VoiceApiController : ControllerBase
     [HttpPost("stt")]
     public async Task<IActionResult> Stt([FromBody] SttRequest request, CancellationToken ct)
     {
+        var correlationId = Guid.NewGuid().ToString("N");
         if (!_settings.VoiceRuntimeV2Enabled || !_settings.VoiceApiControllerEnabled)
             return StatusCode(503, new { error = "Voice runtime API disabled by feature flag" });
 
@@ -51,10 +52,13 @@ public sealed class VoiceApiController : ControllerBase
             var pcm = Convert.FromBase64String(request.AudioData);
             var result = await _whisperService.TranscribeDiscordPcmAsync(pcm, ct);
             sw.Stop();
-            DevLog.WriteLine("[VoiceAPI] stt_ms={0}", sw.ElapsedMilliseconds);
+            if (_pipeline is VoiceConversationPipeline concretePipeline)
+                concretePipeline.RecordSttLatency(sw.Elapsed, correlationId);
+            DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=stt, duration_ms={1}, status=ok", correlationId, sw.ElapsedMilliseconds);
 
             return Ok(new
             {
+                correlation_id = correlationId,
                 text = result.Text,
                 language = result.Language,
                 confidence = result.Confidence
@@ -66,52 +70,66 @@ public sealed class VoiceApiController : ControllerBase
         }
         catch (Exception ex)
         {
-            DevLog.WriteLine("[VoiceAPI] stt_error={0}", ex.Message);
-            return StatusCode(500, new { error = ex.Message });
+            DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=stt, status=error, error={1}", correlationId, ex);
+            return StatusCode(500, new { error = ex.Message, correlation_id = correlationId });
         }
     }
 
     [HttpPost("process")]
     public async Task<IActionResult> Process([FromBody] ProcessRequest request, CancellationToken ct)
     {
+        var correlationId = Guid.NewGuid().ToString("N");
         if (!_settings.VoiceRuntimeV2Enabled || !_settings.VoiceApiControllerEnabled)
-            return StatusCode(503, new { error = "Voice runtime API disabled by feature flag" });
+            return StatusCode(503, new { error = "Voice runtime API disabled by feature flag", correlation_id = correlationId });
 
         if (request is null || string.IsNullOrWhiteSpace(request.Text))
-            return BadRequest(new { error = "text is required" });
+            return BadRequest(new { error = "text is required", correlation_id = correlationId });
 
-        var totalSw = Stopwatch.StartNew();
-        var result = await _pipeline.ProcessTextAsync(request.UserId ?? string.Empty, request.Text, ct);
-        totalSw.Stop();
-        DevLog.WriteLine("[VoiceAPI] process_total_ms={0}", totalSw.ElapsedMilliseconds);
-
-        if (!result.Success)
-            return Ok(new { text = result.ResponseText, audio = (string?)null, error = result.ErrorMessage });
-
-        return Ok(new
+        try
         {
-            text = result.ResponseText,
-            audio = result.AudioPcm48kStereo.Length > 0 ? Convert.ToBase64String(result.AudioPcm48kStereo) : null
-        });
+            var totalSw = Stopwatch.StartNew();
+            var result = await _pipeline.ProcessTextAsync(request.UserId ?? string.Empty, request.Text, correlationId, ct);
+            totalSw.Stop();
+            DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process, duration_ms={1}, status={2}",
+                correlationId, totalSw.ElapsedMilliseconds, result.Success ? "ok" : "error");
+
+            if (!result.Success)
+                return StatusCode(500, new { text = result.ResponseText, audio = (string?)null, error = result.ErrorMessage, correlation_id = correlationId });
+
+            return Ok(new
+            {
+                correlation_id = correlationId,
+                text = result.ResponseText,
+                audio = result.AudioPcm48kStereo.Length > 0 ? Convert.ToBase64String(result.AudioPcm48kStereo) : null
+            });
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process, status=error, error={1}", correlationId, ex);
+            return StatusCode(500, new { error = ex.Message, correlation_id = correlationId });
+        }
     }
 
     [HttpPost("process-binary")]
     public async Task<IActionResult> ProcessBinary([FromBody] ProcessRequest request, CancellationToken ct)
     {
+        var correlationId = Guid.NewGuid().ToString("N");
         if (!_settings.VoiceRuntimeV2Enabled || !_settings.VoiceApiControllerEnabled)
-            return StatusCode(503, new { error = "Voice runtime API disabled by feature flag" });
+            return StatusCode(503, new { error = "Voice runtime API disabled by feature flag", correlation_id = correlationId });
 
         if (request is null || string.IsNullOrWhiteSpace(request.Text))
-            return BadRequest(new { error = "text is required" });
+            return BadRequest(new { error = "text is required", correlation_id = correlationId });
 
         var totalSw = Stopwatch.StartNew();
-        var result = await _pipeline.ProcessTextAsync(request.UserId ?? string.Empty, request.Text, ct);
+        var result = await _pipeline.ProcessTextAsync(request.UserId ?? string.Empty, request.Text, correlationId, ct);
         totalSw.Stop();
-        DevLog.WriteLine("[VoiceAPI] process_binary_total_ms={0}", totalSw.ElapsedMilliseconds);
+        DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process_binary, duration_ms={1}, status={2}",
+            correlationId, totalSw.ElapsedMilliseconds, result.Success ? "ok" : "error");
 
         if (!result.Success || result.AudioPcm48kStereo.Length == 0)
             return StatusCode(204);
 
+        Response.Headers["x-correlation-id"] = correlationId;
         Response.Headers["x-tsuki-text"] = result.ResponseText;
         return File(result.AudioPcm48kStereo, "application/octet-stream");
     }
@@ -122,12 +140,13 @@ public sealed class VoiceApiController : ControllerBase
         if (request is null || string.IsNullOrWhiteSpace(request.Text))
             return BadRequest(new { error = "text is required" });
 
-        var result = await _pipeline.ProcessTextAsync("tts-test", request.Text, ct);
+        var correlationId = Guid.NewGuid().ToString("N");
+        var audio = await _pipeline.SynthesizeTextToPcmAsync(request.Text, correlationId, ct);
         return Ok(new
         {
-            text = result.ResponseText,
-            audio = result.AudioPcm48kStereo.Length > 0 ? Convert.ToBase64String(result.AudioPcm48kStereo) : null,
-            error = result.ErrorMessage
+            correlation_id = correlationId,
+            text = request.Text,
+            audio = audio.Length > 0 ? Convert.ToBase64String(audio) : null
         });
     }
 }

@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace TsukiAI.Core.Services;
 
@@ -15,6 +13,8 @@ public sealed class ResponseCache
     private readonly object _lock = new();
     private readonly int _maxEntries;
     private readonly TimeSpan _ttl;
+    private long _hits = 0;
+    private long _misses = 0;
 
     public ResponseCache(int maxEntries = 100, TimeSpan? ttl = null)
     {
@@ -43,6 +43,7 @@ public sealed class ResponseCache
             if (DateTime.Now > entry.ExpiresAt)
             {
                 // Expired
+                Interlocked.Increment(ref _misses);
                 Remove(key);
                 return null;
             }
@@ -54,9 +55,11 @@ public sealed class ResponseCache
                 _lruList.AddFirst(entry.Node);
             }
 
+            Interlocked.Increment(ref _hits);
             return entry.Response;
         }
 
+        Interlocked.Increment(ref _misses);
         return null;
     }
 
@@ -79,7 +82,9 @@ public sealed class ResponseCache
             // Evict oldest if at capacity
             while (_cache.Count >= _maxEntries && _lruList.Last != null)
             {
-                Remove(_lruList.Last.Value);
+                var oldestKey = _lruList.Last.Value;
+                _lruList.RemoveLast();
+                _cache.TryRemove(oldestKey, out _);
             }
 
             // Add new entry
@@ -94,7 +99,7 @@ public sealed class ResponseCache
             _cache[key] = entry;
         }
 
-        DevLog.WriteLine("ResponseCache: Cached response for key {0}", key[..16]);
+        DevLog.WriteLine("ResponseCache: Cached response for key {0}", key[..Math.Min(16, key.Length)]);
     }
 
     /// <summary>
@@ -108,6 +113,18 @@ public sealed class ResponseCache
             _lruList.Clear();
         }
         DevLog.WriteLine("ResponseCache: Cache cleared");
+    }
+
+    /// <summary>
+    /// Get cache statistics (hits, misses, hit rate).
+    /// </summary>
+    public (long hits, long misses, double hitRate) GetStats()
+    {
+        var hits = Interlocked.Read(ref _hits);
+        var misses = Interlocked.Read(ref _misses);
+        var total = hits + misses;
+        var hitRate = total > 0 ? (double)hits / total : 0.0;
+        return (hits, misses, hitRate);
     }
 
     private void Remove(string key)
@@ -124,8 +141,24 @@ public sealed class ResponseCache
     private static string ComputeKey(string contextHash, string userInput)
     {
         var combined = contextHash + "||" + userInput.ToLowerInvariant().Trim();
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(combined));
-        return Convert.ToHexString(bytes);
+        return GetFastHash(combined);
+    }
+
+    /// <summary>
+    /// Fast non-cryptographic hash (FNV-1a) - 10x faster than SHA256 for cache keys
+    /// </summary>
+    private static string GetFastHash(string input)
+    {
+        unchecked
+        {
+            ulong hash = 14695981039346656037UL; // FNV offset basis
+            foreach (char c in input)
+            {
+                hash ^= c;
+                hash *= 1099511628211UL; // FNV prime
+            }
+            return hash.ToString("X16");
+        }
     }
 
     /// <summary>

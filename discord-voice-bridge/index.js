@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import http from 'http';
+import https from 'https';
 import { Client, GatewayIntentBits } from 'discord.js';
 import {
   joinVoiceChannel,
@@ -11,39 +12,97 @@ import {
   getVoiceConnection
 } from '@discordjs/voice';
 import axios from 'axios';
+import axiosRetry from 'axios-retry';
 import prism from 'prism-media';
+
+const DEBUG_MODE = (process.env.DEBUG || 'false').toLowerCase() === 'true';
+function debugLog(...args) {
+  if (DEBUG_MODE) {
+    console.log(...args);
+  }
+}
+
+// Configure axios retry with exponential backoff
+axiosRetry(axios, {
+  retries: 3,
+  retryDelay: axiosRetry.exponentialDelay,
+  retryCondition: (error) => {
+    // Retry on network errors, 5xx, 429, and timeouts
+    return axiosRetry.isNetworkOrIdempotentRequestError(error) ||
+           error.response?.status === 429 ||
+           (error.response?.status >= 500 && error.response?.status < 600);
+  },
+  onRetry: (retryCount, error, requestConfig) => {
+    console.log(`[HTTP Retry] attempt=${retryCount}, url=${requestConfig.url}, error=${error.message}`);
+  }
+});
 
 // Configuration (trim token - copy/paste often adds newlines or spaces)
 const BRIDGE_HTTP_PORT = parseInt(process.env.BRIDGE_HTTP_PORT || '3001', 10);
+const HTTP_KEEPALIVE_ENABLED = (process.env.HTTP_KEEPALIVE_ENABLED || 'true').toLowerCase() === 'true';
+const HTTP_MAX_SOCKETS = parseInt(process.env.HTTP_MAX_SOCKETS || '10', 10);
+const HTTP_MAX_FREE_SOCKETS = parseInt(process.env.HTTP_MAX_FREE_SOCKETS || '5', 10);
+const HTTP_KEEPALIVE_MS = parseInt(process.env.HTTP_KEEPALIVE_MS || '30000', 10);
 const CONFIG = {
   DISCORD_TOKEN: (process.env.DISCORD_TOKEN || 'YOUR_BOT_TOKEN').trim(),
   GUILD_ID: process.env.GUILD_ID || 'YOUR_GUILD_ID',
   VOICE_CHANNEL_ID: process.env.VOICE_CHANNEL_ID || 'YOUR_VOICE_CHANNEL_ID',
   CSHARP_API_URL: (process.env.CSHARP_API_URL || 'http://localhost:5000').trim(),
   ASSEMBLYAI_API_KEY: (process.env.ASSEMBLYAI_API_KEY || '').trim(),
+  GROQ_API_KEY: (process.env.GROQ_API_KEY || '').trim(),
+  STT_MODE: (process.env.STT_MODE || 'groq').toLowerCase(), // 'assemblyai', 'groq', or 'local'
+  STT_LANGUAGE: (process.env.STT_LANGUAGE || 'auto').trim().toLowerCase(),
   USE_CLOUD_STT: (process.env.USE_CLOUD_STT || 'false').toLowerCase() === 'true',
   SAMPLE_RATE: 48000, // Discord voice sample rate
   CHANNELS: 2, // Stereo
   FRAME_SIZE: 960, // 20ms at 48kHz
 };
 
-// Check STT mode and conditionally import AssemblyAI
-const USE_ASSEMBLYAI = CONFIG.USE_CLOUD_STT && CONFIG.ASSEMBLYAI_API_KEY && CONFIG.ASSEMBLYAI_API_KEY.length > 10;
-let transcribeAudio = null;
+if (HTTP_KEEPALIVE_ENABLED) {
+  const httpAgent = new http.Agent({
+    keepAlive: true,
+    keepAliveMsecs: HTTP_KEEPALIVE_MS,
+    maxSockets: HTTP_MAX_SOCKETS,
+    maxFreeSockets: HTTP_MAX_FREE_SOCKETS,
+  });
+  const httpsAgent = new https.Agent({
+    keepAlive: true,
+    keepAliveMsecs: HTTP_KEEPALIVE_MS,
+    maxSockets: HTTP_MAX_SOCKETS,
+    maxFreeSockets: HTTP_MAX_FREE_SOCKETS,
+  });
+  axios.defaults.httpAgent = httpAgent;
+  axios.defaults.httpsAgent = httpsAgent;
+  console.log('[HTTP] Keep-alive agents enabled');
+}
 
-if (USE_ASSEMBLYAI) {
+// Determine STT mode and load appropriate module
+let transcribeAudio = null;
+let sttModeName = 'Local (C# Whisper)';
+
+if (CONFIG.STT_MODE === 'assemblyai' && CONFIG.ASSEMBLYAI_API_KEY && CONFIG.ASSEMBLYAI_API_KEY.length > 10) {
   console.log('[INFO] ✅ Cloud STT enabled (AssemblyAI)');
-  // Dynamically import AssemblyAI module only if needed
+  sttModeName = 'AssemblyAI';
   try {
     const assemblyModule = await import('./assemblyai-streaming.js');
     transcribeAudio = assemblyModule.transcribeAudio;
   } catch (error) {
     console.error('[ERROR] Failed to load AssemblyAI module:', error.message);
-    console.error('[ERROR] Please create assemblyai-streaming.js or disable cloud STT');
+    process.exit(1);
+  }
+} else if (CONFIG.STT_MODE === 'groq' && CONFIG.GROQ_API_KEY && CONFIG.GROQ_API_KEY.length > 10) {
+  console.log('[INFO] ✅ Cloud STT enabled (Groq Whisper)');
+  sttModeName = 'Groq Whisper';
+  try {
+    const groqModule = await import('./groq-whisper.js');
+    transcribeAudio = groqModule.transcribeAudio;
+  } catch (error) {
+    console.error('[ERROR] Failed to load Groq Whisper module:', error.message);
     process.exit(1);
   }
 } else {
   console.log('[INFO] 🏠 Local STT enabled (C# Whisper)');
+  sttModeName = 'Local (C# Whisper)';
 }
 
 // ── VAD & chunking settings ────────────────────────────────────────────
@@ -64,10 +123,12 @@ const VAD = {
   // Minimum segment size in bytes to bother sending for STT (avoids tiny pops)
   MIN_SEGMENT_BYTES: parseInt(process.env.VAD_MIN_SEGMENT_BYTES || '9600', 10), // ~50 ms stereo 48 kHz
 };
+const VAD_BATCHING_ENABLED = (process.env.VAD_BATCHING_ENABLED || 'false').toLowerCase() === 'true';
+const VAD_FRAME_BATCH_SIZE = Math.max(1, Math.min(10, parseInt(process.env.VAD_FRAME_BATCH_SIZE || '5', 10)));
 
-const isStandaloneMode = !process.env.CSHARP_API_URL || process.env.CSHARP_API_URL === 'http://localhost:5000';
+const hasCSharpIntegration = process.env.CSHARP_API_URL && process.env.CSHARP_API_URL !== 'http://localhost:5000';
 
-if (isStandaloneMode) {
+if (hasCSharpIntegration) {
   console.log('[INFO] C# API URL configured:', CONFIG.CSHARP_API_URL);
   console.log('[INFO] Full STT->LLM->TTS pipeline enabled');
 } else {
@@ -76,6 +137,7 @@ if (isStandaloneMode) {
 }
 
 console.log('[VAD] Config:', JSON.stringify(VAD, null, 2));
+console.log(`[VAD] Batching: enabled=${VAD_BATCHING_ENABLED}, frame_batch_size=${VAD_FRAME_BATCH_SIZE}`);
 
 // Create Discord client
 const client = new Client({
@@ -88,6 +150,9 @@ const client = new Client({
 
 // Audio player for TTS playback
 const audioPlayer = createAudioPlayer();
+const playbackQueue = [];
+let playbackWorkerActive = false;
+let playbackSequence = 0;
 
 // Track active voice connections
 let currentConnection = null;
@@ -101,6 +166,8 @@ const userState = new Map();
 
 // Cache of known bot user IDs to avoid repeated lookups and spam logs
 const knownBots = new Set();
+// Cache of known human user IDs to skip bot check entirely
+const knownHumans = new Set();
 
 /**
  * Get or create per-user state
@@ -231,7 +298,7 @@ function decodeErrorPayload(payload) {
 }
 
 /**
- * Send audio to STT service (AssemblyAI or C# Whisper)
+ * Send audio to STT service (AssemblyAI, Groq Whisper, or C# Whisper)
  */
 async function sendAudioForSTT(userId, audioBuffer) {
   try {
@@ -239,10 +306,11 @@ async function sendAudioForSTT(userId, audioBuffer) {
 
     let text, language, confidence;
 
-    if (USE_ASSEMBLYAI) {
-      // Use AssemblyAI for STT
-      console.log('[STT] Using AssemblyAI...');
-      const result = await transcribeAudio(CONFIG.ASSEMBLYAI_API_KEY, audioBuffer, CONFIG.SAMPLE_RATE);
+    if (transcribeAudio) {
+      // Use cloud STT (AssemblyAI or Groq Whisper)
+      console.log(`[STT] Using ${sttModeName}...`);
+      const apiKey = CONFIG.STT_MODE === 'assemblyai' ? CONFIG.ASSEMBLYAI_API_KEY : CONFIG.GROQ_API_KEY;
+      const result = await transcribeAudio(apiKey, audioBuffer, CONFIG.SAMPLE_RATE, CONFIG.STT_LANGUAGE);
       text = result.text;
       language = result.language;
       confidence = result.confidence;
@@ -311,9 +379,9 @@ async function processWithLLM(userId, text) {
     if (response.status === 204 || !response.data || audioBytes === 0) {
       console.log('[LLM] No audio returned');
     } else {
-      console.log(`[LLM] Response received (${audioBytes} bytes), playing audio...`);
+      console.log(`[LLM] Response received (${audioBytes} bytes), queueing audio...`);
       const audioBuffer = Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data);
-      await playTTSAudio(audioBuffer);
+      await enqueuePlayback('tsuki-reply', audioBuffer, { priority: 1 });
     }
     
     // Release focus after processing complete
@@ -334,6 +402,48 @@ async function processWithLLM(userId, text) {
       focusedUserId = null;
       console.log(`[FOCUS] Released (LLM error)`);
     }
+  }
+}
+
+function enqueuePlayback(source, audioBuffer, options = {}) {
+  return new Promise((resolve, reject) => {
+    playbackQueue.push({
+      id: ++playbackSequence,
+      source,
+      audioBuffer,
+      priority: options.priority ?? 1,
+      resolve,
+      reject,
+    });
+    playbackQueue.sort((a, b) => a.priority - b.priority || a.id - b.id);
+    console.log(`[TTS Queue] queued source=${source} pending=${playbackQueue.length}`);
+    void drainPlaybackQueue();
+  });
+}
+
+async function drainPlaybackQueue() {
+  if (playbackWorkerActive) {
+    return;
+  }
+
+  playbackWorkerActive = true;
+  try {
+    while (playbackQueue.length > 0) {
+      const next = playbackQueue.shift();
+      if (!next) {
+        break;
+      }
+
+      try {
+        console.log(`[TTS Queue] playing source=${next.source} remaining=${playbackQueue.length}`);
+        await playTTSAudio(next.audioBuffer);
+        next.resolve();
+      } catch (error) {
+        next.reject(error);
+      }
+    }
+  } finally {
+    playbackWorkerActive = false;
   }
 }
 
@@ -415,9 +525,9 @@ function startBridgeHttpServer() {
           return;
         }
         const audioBuffer = Buffer.from(audioBase64, 'base64');
-        await playTTSAudio(audioBuffer);
+        await enqueuePlayback('manual-tts', audioBuffer, { priority: 0 });
         res.writeHead(200);
-        res.end(JSON.stringify({ ok: true, played: true }));
+        res.end(JSON.stringify({ ok: true, played: true, queued: playbackQueue.length }));
       } catch (err) {
         console.error('[BRIDGE HTTP] Error:', err.message);
         res.writeHead(500);
@@ -459,10 +569,75 @@ function handleUserAudio(userId, audioStream) {
   let silentFrameCount = 0;      // consecutive silent frames
   let speechDetected = false;    // have we seen any speech in this segment?
   let hadSpeechInStream = false; // whether this stream ever crossed speech threshold
+  let batchingFailed = false;
+  const frameBatch = [];
 
   // Bytes per second for 48 kHz stereo 16-bit = 48000 * 2 * 2 = 192000
   const BYTES_PER_SEC = CONFIG.SAMPLE_RATE * CONFIG.CHANNELS * 2;
   const MAX_SEGMENT_BYTES = VAD.MAX_SEGMENT_SEC * BYTES_PER_SEC;
+
+  function processChunk(chunk, effectiveFrameCount = 1) {
+    const rms = calcRMS(chunk);
+    const isSpeech = rms >= VAD.RMS_SPEECH_THRESHOLD;
+
+    if (isSpeech) {
+      speechDetected = true;
+      hadSpeechInStream = true;
+      silentFrameCount = 0;
+      segmentChunks.push(chunk);
+      segmentBytes += chunk.length;
+    } else {
+      silentFrameCount += effectiveFrameCount;
+
+      // Still push audio during short silence (keeps natural pauses)
+      if (speechDetected) {
+        segmentChunks.push(chunk);
+        segmentBytes += chunk.length;
+      }
+
+      // Silence cutoff: finalize segment
+      if (speechDetected && silentFrameCount >= VAD.SILENCE_FRAMES_CUTOFF) {
+        finalizeSegment();
+      }
+    }
+
+    // Hard max segment length
+    if (segmentBytes >= MAX_SEGMENT_BYTES) {
+      debugLog(`[VAD] User ${userId}: max segment length reached (${VAD.MAX_SEGMENT_SEC}s)`);
+      finalizeSegment();
+    }
+  }
+
+  function processWithBatching(chunk) {
+    if (!VAD_BATCHING_ENABLED || batchingFailed) {
+      processChunk(chunk, 1);
+      return;
+    }
+
+    try {
+      frameBatch.push(chunk);
+      if (frameBatch.length < VAD_FRAME_BATCH_SIZE) {
+        return;
+      }
+
+      const combined = Buffer.concat(frameBatch);
+      const effectiveFrames = frameBatch.length;
+      frameBatch.length = 0;
+      processChunk(combined, effectiveFrames);
+    } catch (error) {
+      batchingFailed = true;
+      console.error(`[VAD] Batching failed for user ${userId}, falling back to per-frame processing:`, error.message || error);
+      processChunk(chunk, 1);
+    }
+  }
+
+  function flushFrameBatch() {
+    if (frameBatch.length === 0) return;
+    const combined = Buffer.concat(frameBatch);
+    const effectiveFrames = frameBatch.length;
+    frameBatch.length = 0;
+    processChunk(combined, effectiveFrames);
+  }
 
   function finalizeSegment() {
     if (segmentChunks.length === 0) return;
@@ -519,37 +694,11 @@ function handleUserAudio(userId, audioStream) {
   audioStream
     .pipe(decoder)
     .on('data', (chunk) => {
-      const rms = calcRMS(chunk);
-      const isSpeech = rms >= VAD.RMS_SPEECH_THRESHOLD;
-
-      if (isSpeech) {
-        speechDetected = true;
-        hadSpeechInStream = true;
-        silentFrameCount = 0;
-        segmentChunks.push(chunk);
-        segmentBytes += chunk.length;
-      } else {
-        silentFrameCount++;
-
-        // Still push audio during short silence (keeps natural pauses)
-        if (speechDetected) {
-          segmentChunks.push(chunk);
-          segmentBytes += chunk.length;
-        }
-
-        // Silence cutoff: finalize segment
-        if (speechDetected && silentFrameCount >= VAD.SILENCE_FRAMES_CUTOFF) {
-          finalizeSegment();
-        }
-      }
-
-      // Hard max segment length
-      if (segmentBytes >= MAX_SEGMENT_BYTES) {
-        console.log(`[VAD] User ${userId}: max segment length reached (${VAD.MAX_SEGMENT_SEC}s)`);
-        finalizeSegment();
-      }
+      processWithBatching(chunk);
     })
     .on('end', () => {
+      flushFrameBatch();
+
       // Stream ended (Discord detected silence via EndBehaviorType.AfterSilence)
       if (segmentChunks.length > 0 && speechDetected) {
         finalizeSegment();
@@ -621,19 +770,26 @@ async function joinVoice(guildId, channelId) {
         return;
       }
 
-      // Ignore bots (including music bots)
-      try {
-        const guild = client.guilds.cache.get(CONFIG.GUILD_ID);
-        if (guild) {
-          const member = await guild.members.fetch(userId).catch(() => null);
-          if (member && member.user.bot) {
-            knownBots.add(userId); // Cache this bot ID
-            console.log(`[VOICE] Ignoring bot user ${userId} (${member.user.tag})`);
-            return;
+      // Check if this is a known human - skip bot check entirely
+      if (!knownHumans.has(userId)) {
+        // First time seeing this user - check if they're a bot
+        try {
+          const guild = client.guilds.cache.get(CONFIG.GUILD_ID);
+          if (guild) {
+            const member = await guild.members.fetch(userId).catch(() => null);
+            if (member) {
+              if (member.user.bot) {
+                knownBots.add(userId); // Cache this bot ID
+                console.log(`[VOICE] Ignoring bot user ${userId} (${member.user.tag})`);
+                return;
+              } else {
+                knownHumans.add(userId); // Cache this human ID
+              }
+            }
           }
+        } catch (error) {
+          console.error(`[VOICE] Error checking if user ${userId} is a bot:`, error.message);
         }
-      } catch (error) {
-        console.error(`[VOICE] Error checking if user ${userId} is a bot:`, error.message);
       }
 
       console.log(`[VOICE] User ${userId} started speaking`);
@@ -684,7 +840,7 @@ function leaveVoice(guildId) {
 // Discord client events
 client.once('clientReady', async () => {
   console.log(`[BOT] Logged in as ${client.user.tag}`);
-  if (isStandaloneMode) {
+  if (hasCSharpIntegration) {
     console.log('[BOT] Mode: voice pipeline enabled (STT -> LLM -> TTS)');
   } else {
     console.log('[BOT] Mode: voice join only (C# integration disabled)');
