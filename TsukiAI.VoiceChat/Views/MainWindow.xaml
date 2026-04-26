@@ -242,7 +242,9 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
-                    <TextBlock Text="🌙" FontSize="16" Margin="0,0,8,0"/>
+                    <Border Width="20" Height="20" CornerRadius="4" Margin="0,0,8,0" ClipToBounds="True">
+                        <Image Source="pack://application:,,,/tsuki_icon.jpg" Stretch="UniformToFill"/>
+                    </Border>
                     <TextBlock Text="TsukiAI" FontSize="14" FontWeight="SemiBold" Foreground="#FFFFFF"/>
                 </StackPanel>
 
@@ -340,18 +342,13 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <Path Grid.Column="0"
-                                          Width="18" Height="18"
-                                          Stretch="Uniform"
-                                          Fill="#9B7BFF"
-                                          Data="M 12,2 C 11.4,2 11,2.4 11,3 L 11,6 C 11,6.6 11.4,7 12,7 C 12.6,7 13,6.6 13,6 L 13,3 C 13,2.4 12.6,2 12,2 M 17,5 C 16.7,4.6 16.2,4.5 15.8,4.7 L 13.2,6 C 12.8,6.2 12.6,6.7 12.8,7.1 C 13,7.5 13.5,7.7 13.9,7.5 L 16.5,6.2 C 16.9,6 17,5.5 17,5 M 7,5 C 7,5.5 7.3,6 7.7,6.2 L 10.3,7.5 C 10.7,7.7 11.2,7.5 11.4,7.1 C 11.6,6.7 11.4,6.2 11,6 L 8.4,4.7 C 8,4.5 7.5,4.6 7,5 M 12,8 C 9.2,8 7,10.2 7,13 C 7,15.8 9.2,18 12,18 C 14.8,18 17,15.8 17,13 C 17,10.2 14.8,8 12,8 M 19.5,10 C 19,9.8 18.5,10 18.3,10.4 L 17,13 C 16.8,13.4 17,13.9 17.4,14.1 C 17.8,14.3 18.3,14.1 18.5,13.7 L 19.8,11.1 C 20,10.7 19.9,10.2 19.5,10 M 4.5,10 C 4.1,10.2 4,10.7 4.2,11.1 L 5.5,13.7 C 5.7,14.1 6.2,14.3 6.6,14.1 C 7,13.9 7.2,13.4 7,13 L 5.7,10.4 C 5.5,10 5,9.8 4.5,10"/>
                                     <TextBlock Grid.Column="1"
                                                Text="Voice Controls"
                                                Foreground="#FFFFFF"
                                                FontSize="14"
                                                FontWeight="SemiBold"
                                                VerticalAlignment="Center"
-                                               Margin="10,0,0,0"/>
+                                               Margin="0,0,0,0"/>
                                     <Button x:Name="ToggleSidebarButton"
                                             Grid.Column="2"
                                             Width="28"
@@ -378,12 +375,7 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <Path Grid.Column="0"
-                                          Width="16" Height="16"
-                                          Stretch="Uniform"
-                                          Fill="#7DD3C0"
-                                          Data="M 12,2 C 6.5,2 2,6.5 2,12 C 2,17.5 6.5,22 12,22 C 17.5,22 22,17.5 22,12 C 22,6.5 17.5,2 12,2 M 12,4 C 16.4,4 20,7.6 20,12 C 20,16.4 16.4,20 12,20 C 7.6,20 4,16.4 4,12 C 4,7.6 7.6,4 12,4 M 12,6 C 11.4,6 11,6.4 11,7 L 11,12.2 C 11,12.6 11.2,13 11.6,13.2 L 15.6,15.4 C 16.1,15.7 16.7,15.5 17,15 C 17.3,14.5 17.1,13.9 16.6,13.6 L 13,11.6 L 13,7 C 13,6.4 12.6,6 12,6"/>
-                                    <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                    <StackPanel Grid.Column="1" Margin="0,0,0,0">
                                         <TextBlock Text="Voice Reception"
                                                    Foreground="#FFFFFF"
                                                    FontSize="13"

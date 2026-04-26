@@ -84,8 +84,10 @@ export async function transcribeAudio(apiKey, audioBuffer, sampleRate = 48000, s
     const languageCode = (sttLanguage || 'auto').trim().toLowerCase();
     const transcriptRequest = {
       audio_url: uploadUrl,
-      speech_models: ['universal'],
+      speech_model: 'best',
       language_detection: languageCode === 'auto',
+      punctuate: true,
+      format_text: true
     };
     if (languageCode !== 'auto') {
       transcriptRequest.language_code = languageCode;

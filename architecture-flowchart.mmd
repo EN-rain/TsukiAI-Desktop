@@ -1,0 +1,45 @@
+flowchart TD
+    A[Voice Input] --> B{Input Source}
+    B -->|Discord Bridge| C[Node.js Voice Capture + VAD]
+    B -->|Local Microphone| D[C# Microphone Capture]
+
+    C --> E{STT Mode}
+    D --> F[Local STT Pipeline]
+
+    E -->|Groq Whisper| G[Cloud STT]
+    E -->|AssemblyAI| H[Cloud STT]
+    E -->|Local| I[C# Whisper STT]
+
+    F --> J[Transcribed Text]
+    G --> J
+    H --> J
+    I --> J
+
+    J --> K[Conversation History]
+    J --> L[Semantic Memory Search]
+    K --> M[Prompt Builder]
+    L --> M
+
+    M --> N{Inference Backend}
+    N -->|Remote Provider| O[RemoteInferenceClient]
+    N -->|Local Ollama| P[OllamaClient]
+
+    O --> Q[LLM Response]
+    P --> Q
+
+    Q --> R[Memory Write-Back Queue]
+    Q --> S{TTS Mode}
+
+    S -->|VOICEVOX Local| T[Local TTS]
+    S -->|Cloud TTS| U[Remote TTS]
+
+    T --> V[PCM Audio Output]
+    U --> V
+
+    V --> W{Output Target}
+    W -->|Discord| X[Bridge Playback in Voice Channel]
+    W -->|Local Runtime| Y[Local Audio Playback]
+
+    J --> Z[Local HTTP API]
+    Q --> Z
+    V --> Z
