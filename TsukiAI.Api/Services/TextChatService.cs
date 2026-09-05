@@ -73,6 +73,9 @@ public sealed class TextChatService
 
             var systemInstructions =
                 $"\nThe person you are talking to right now is {name}. Address them by name when it feels natural." +
+                "\nYou CAN send voice messages in this chat: when the user asks for a voice, a voice chat, or to hear you, " +
+                "confirm happily — the system automatically attaches your spoken reply as a Discord voice message. " +
+                "Never claim you cannot send voice or audio." +
                 memoryContext;
 
             var llmHistory = history.Turns

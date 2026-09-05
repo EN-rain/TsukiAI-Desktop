@@ -12,6 +12,8 @@ import {
   getVoiceConnection
 } from '@discordjs/voice';
 import axios from 'axios';
+import { spawn as spawnProcess } from 'child_process';
+import ffmpegPath from 'ffmpeg-static';
 import axiosRetry from 'axios-retry';
 import prism from 'prism-media';
 
@@ -908,24 +910,37 @@ let textTurnInFlight = false;
 const lastTextTurnAt = new Map(); // userId -> epoch ms
 
 // Convert 48kHz stereo s16le PCM (the API's TTS format) to ogg/opus for
-// Discord voice messages, using the bundled ffmpeg.
+// Discord voice messages. Spawns the bundled ffmpeg-static directly —
+// prism-media's FFmpeg helper failed to locate the binary in the container.
 function pcmToOggOpus(pcmBuffer) {
   return new Promise((resolve, reject) => {
-    const ffmpeg = new prism.FFmpeg({
-      args: [
-        '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0',
-        '-c:a', 'libopus', '-b:a', '64k', '-ar', '48000', '-ac', '2',
-        '-f', 'ogg', 'pipe:1',
-      ],
-    });
+    if (!ffmpegPath) {
+      reject(new Error('ffmpeg-static binary not found'));
+      return;
+    }
+
+    const proc = spawnProcess(ffmpegPath, [
+      '-loglevel', 'error',
+      '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0',
+      '-c:a', 'libopus', '-b:a', '64k', '-ar', '48000', '-ac', '2',
+      '-f', 'ogg', 'pipe:1',
+    ]);
+
     const chunks = [];
-    ffmpeg.stdout.on('data', (c) => chunks.push(c));
-    ffmpeg.stderr.on('data', (d) => debugLog('[VOICE-MSG] ffmpeg:', d.toString().trim()));
-    ffmpeg.on('error', reject);
-    ffmpeg.stdout.on('end', () => resolve(Buffer.concat(chunks)));
-    ffmpeg.stdin.on('error', reject);
-    ffmpeg.stdin.write(pcmBuffer);
-    ffmpeg.stdin.end();
+    proc.stdout.on('data', (c) => chunks.push(c));
+    let stderr = '';
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(chunks));
+      } else {
+        reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(0, 200)}`));
+      }
+    });
+    proc.stdin.on('error', reject);
+    proc.stdin.write(pcmBuffer);
+    proc.stdin.end();
   });
 }
 
