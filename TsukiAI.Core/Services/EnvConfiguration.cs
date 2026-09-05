@@ -48,6 +48,12 @@ public static class EnvConfiguration
         var voiceApiControllerEnabled = ParseBool(env, "TSUKI_VOICE_API_CONTROLLER", settings.VoiceApiControllerEnabled);
         var voiceBargeInEnabled = ParseBool(env, "TSUKI_VOICE_BARGE_IN", settings.VoiceBargeInEnabled);
         var semanticMemoryEnabled = ParseBool(env, "TSUKI_SEMANTIC_MEMORY_ENABLED", settings.SemanticMemoryEnabled);
+        var inferenceMode = settings.InferenceMode;
+        var inferenceModeRaw = ReadString(env, "TSUKI_INFERENCE_MODE", string.Empty);
+        if (inferenceModeRaw.Length > 0 && !Enum.TryParse<InferenceMode>(inferenceModeRaw, ignoreCase: true, out inferenceMode))
+        {
+            inferenceMode = settings.InferenceMode;
+        }
 
         return settings with
         {
@@ -66,6 +72,7 @@ public static class EnvConfiguration
             MistralApiKey = ReadString(env, "TSUKI_MISTRAL_API_KEY", settings.MistralApiKey),
             CloudTtsUrl = ReadString(env, "TSUKI_CLOUD_TTS_URL", settings.CloudTtsUrl),
             SemanticMemoryEnabled = semanticMemoryEnabled,
+            InferenceMode = inferenceMode,
             VoicevoxBaseUrl = ReadString(env, "TSUKI_VOICEVOX_BASE_URL", settings.VoicevoxBaseUrl),
             ModelName = ReadString(env, "TSUKI_MODEL_NAME", settings.ModelName),
             UseDeepLTranslate = useDeepLTranslate,

@@ -883,6 +883,11 @@ client.on('error', (error) => {
 // Text mentions: when Tsuki is @-mentioned in the configured text channel,
 // run the message through the same LLM pipeline as voice turns and reply in text.
 // TEXT_REPLY_MODE='any' widens this to every non-bot message in the channel.
+// Guardrails: one turn at a time globally, per-user cooldown, short error reply.
+const TEXT_USER_COOLDOWN_MS = Math.max(1000, parseInt(process.env.TEXT_USER_COOLDOWN_MS || '3000', 10));
+let textTurnInFlight = false;
+const lastTextTurnAt = new Map(); // userId -> epoch ms
+
 client.on('messageCreate', async (message) => {
   try {
     if (!CONFIG.TEXT_CHANNEL_ID || message.channel.id !== CONFIG.TEXT_CHANNEL_ID) return;
@@ -895,24 +900,47 @@ client.on('messageCreate', async (message) => {
     const text = message.content.replace(/<@!?(\d+)>/g, ' ').replace(/\s+/g, ' ').trim();
     if (!text) return;
 
-    console.log(`[TEXT] Mention from ${message.author.tag}: ${text}`);
-    await message.channel.sendTyping().catch(() => {});
+    const now = Date.now();
+    const lastAt = lastTextTurnAt.get(message.author.id) || 0;
+    if (now - lastAt < TEXT_USER_COOLDOWN_MS) {
+      debugLog(`[TEXT] cooldown drop for ${message.author.tag} (${now - lastAt}ms < ${TEXT_USER_COOLDOWN_MS}ms)`);
+      return;
+    }
+    if (textTurnInFlight) {
+      debugLog('[TEXT] drop: another text turn already in flight');
+      return;
+    }
 
-    const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/voice/process`, {
-      userId: message.author.id,
-      text,
-    }, { timeout: 180000 });
+    lastTextTurnAt.set(message.author.id, now);
+    textTurnInFlight = true;
+    console.log(`[TEXT] ${CONFIG.TEXT_REPLY_MODE === 'any' ? 'Message' : 'Mention'} from ${message.author.tag}: ${text}`);
 
-    const reply = response?.data?.text;
-    if (reply) {
-      // Discord hard-caps messages at 2000 chars.
-      await message.reply(String(reply).slice(0, 1900));
-      console.log(`[TEXT] Replied to ${message.author.tag} (${reply.length} chars)`);
-    } else {
-      console.log('[TEXT] Empty response, not replying');
+    try {
+      await message.channel.sendTyping().catch(() => {});
+
+      const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/voice/process`, {
+        userId: message.author.id,
+        text,
+        audio: false, // text reply only — skip VOICEVOX synthesis
+      }, { timeout: 180000 });
+
+      const reply = response?.data?.text;
+      if (reply) {
+        // Discord hard-caps messages at 2000 chars.
+        await message.reply(String(reply).slice(0, 1900));
+        console.log(`[TEXT] Replied to ${message.author.tag} (${reply.length} chars)`);
+      } else {
+        console.log('[TEXT] Empty response, not replying');
+      }
+    } catch (turnError) {
+      console.error('[TEXT] Turn failed:', turnError?.message);
+      await message.reply('my brain hiccuped — try again in a moment ✨').catch(() => {});
+    } finally {
+      textTurnInFlight = false;
     }
   } catch (error) {
-    console.error('[TEXT] Failed to handle mention:', error?.message);
+    textTurnInFlight = false;
+    console.error('[TEXT] Failed to handle message:', error?.message);
   }
 });
 

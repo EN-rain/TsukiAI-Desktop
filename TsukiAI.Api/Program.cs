@@ -206,7 +206,7 @@ app.MapPost("/api/chat", async (HttpContext ctx, IVoiceConversationPipeline pipe
     if (payload is null || string.IsNullOrWhiteSpace(payload.Text))
         return Results.BadRequest(new { error = "text is required" });
 
-    var result = await pipeline.ProcessTextAsync("web", payload.Text, ct: ctx.RequestAborted);
+    var result = await pipeline.ProcessTextAsync("web", payload.Text, ct: ctx.RequestAborted, synthesizeAudio: false);
     if (!result.Success)
         return Results.Json(new { error = result.ErrorMessage }, statusCode: 500);
 

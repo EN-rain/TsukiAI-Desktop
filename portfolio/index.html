@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="description" content="Tsuki — a 24/7 AI voice companion living on Discord." />
+    <title>Tsuki — your night-sky companion</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23e8c07a'%3E%3Cpath d='M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <header class="nav">
+      <div class="nav-inner">
+        <span class="brand">
+          <svg viewBox="0 0 24 24" fill="currentColor" class="moon" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+          Tsuki
+        </span>
+        <nav aria-label="Sections">
+          <a href="#about">About</a>
+          <a href="#how">How she works</a>
+          <a href="#stack">Stack</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <svg viewBox="0 0 24 24" fill="currentColor" class="hero-moon" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+        <h1>Tsuki</h1>
+        <p class="tagline">A night-sky companion who lives in your voice channel — listening, thinking, and answering out loud, around the clock.</p>
+        <p class="status" role="status">
+          <span class="dot" aria-hidden="true"></span> Online 24/7 on Discord
+        </p>
+      </section>
+
+      <section id="about" class="section">
+        <h2>About</h2>
+        <p>
+          Tsuki is a self-hosted AI companion. She sits in a Discord voice channel,
+          hears when you speak, understands the room's context, and replies with her
+          own synthesized voice — no button presses, no wake words. Between turns she
+          remembers what matters to you, so conversations pick up where they left off.
+        </p>
+        <p>
+          She started as a desktop app for late-night chats and grew into a persistent
+          presence: the same persona and memories, available from anywhere Discord is.
+        </p>
+      </section>
+
+      <section id="how" class="section">
+        <h2>How she works</h2>
+        <ol class="pipeline">
+          <li>
+            <h3>She listens</h3>
+            <p>Voice activity detection splits the channel audio into turns, which are transcribed by Whisper.</p>
+          </li>
+          <li>
+            <h3>She thinks</h3>
+            <p>A persona-tuned LLM builds the reply, with semantic search over long-term memory when the moment calls for it.</p>
+          </li>
+          <li>
+            <h3>She speaks</h3>
+            <p>Her reply is synthesized into a natural voice and streamed back into the voice channel.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="stack" class="section">
+        <h2>Under the hood</h2>
+        <ul class="stack-grid">
+          <li><strong>Discord voice bridge</strong><span>Node.js · VAD · @discordjs/voice</span></li>
+          <li><strong>Brain &amp; memory</strong><span>ASP.NET Core 8 · provider failover · ChromaDB</span></li>
+          <li><strong>Voice</strong><span>Groq Whisper · VOICEVOX · DeepL</span></li>
+          <li><strong>Home</strong><span>AWS "Tsuki's Bedroom" · Docker Compose · always on</span></li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Tsuki runs herself — deployed, not hosted. <span class="whisper">zzz</span></p>
+    </footer>
+  </body>
+</html>

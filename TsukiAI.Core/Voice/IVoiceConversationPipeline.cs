@@ -6,7 +6,8 @@ public interface IVoiceConversationPipeline
         string userId,
         string text,
         string? correlationId = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        bool synthesizeAudio = true);
 
     Task<byte[]> SynthesizeTextToPcmAsync(
         string text,

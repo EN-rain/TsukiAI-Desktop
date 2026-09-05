@@ -129,7 +129,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
         FlushHistoryNow();
     }
 
-    public async Task<VoiceProcessResult> ProcessTextAsync(string userId, string text, string? correlationId = null, CancellationToken ct = default)
+    public async Task<VoiceProcessResult> ProcessTextAsync(string userId, string text, string? correlationId = null, CancellationToken ct = default, bool synthesizeAudio = true)
     {
         correlationId ??= Guid.NewGuid().ToString("N");
         Interlocked.Increment(ref _queueDepth);
@@ -223,6 +223,17 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
             var ttsText = StripParenthesesForTts(responseText);
             if (string.IsNullOrWhiteSpace(ttsText))
                 ttsText = responseText;
+
+            if (!synthesizeAudio)
+            {
+                // Text-only turn (web chat / Discord text mentions): skip VOICEVOX
+                // synthesis entirely — the caller only consumes ResponseText.
+                EnqueueConversationTurn(text, responseText);
+                totalSw.Stop();
+                _latencyTracker.RecordLatency("total", totalSw.Elapsed);
+                LogLatencyPercentiles(correlationId);
+                return new VoiceProcessResult(true, text, responseText, Array.Empty<byte>());
+            }
 
             var ttsSw = Stopwatch.StartNew();
             byte[] wav;
