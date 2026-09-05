@@ -383,7 +383,7 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
                 ttsText = cut > 0 ? ttsText[..cut] + "…" : ttsText[..MaxTtsChars];
             }
 
-            var pcm = await SynthesizeWithToneAsync(ttsText, ClassifyTone(reply), voicevox, audioProcessing, ctx.RequestAborted);
+            var pcm = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, audioProcessing, ctx.RequestAborted);
             audio = pcm.Length > 0 ? Convert.ToBase64String(pcm) : null;
         }
         catch (Exception ex)
@@ -396,93 +396,6 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
 });
 
 // Health lives outside the auth fallback via [AllowAnonymous] on the controller action.
-
-// ---------------------------------------------------------------------------
-// Voice tones: VOICEVOX supports emotion styles per speaker plus prosody knobs
-// (intonation/pitch/speed) in the audio query. Default map uses Mochiko-san's
-// emotion styles; override via TSUKI_VOICE_TONE_STYLES="normal=20,happy=79,...".
-// ---------------------------------------------------------------------------
-static Dictionary<string, int> ParseToneStyles()
-{
-    var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["normal"] = 20, // Mochiko-san Normal
-        ["happy"] = 79,  // Joy
-        ["sad"] = 77,    // Crying
-        ["angry"] = 78,  // Anger
-        ["calm"] = 80,   // Relaxed
-    };
-
-    var raw = Environment.GetEnvironmentVariable("TSUKI_VOICE_TONE_STYLES");
-    if (string.IsNullOrWhiteSpace(raw)) return map;
-
-    foreach (var pair in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-    {
-        var kv = pair.Split('=', 2);
-        if (kv.Length == 2 && int.TryParse(kv[1], out var id))
-            map[kv[0].ToLowerInvariant()] = id;
-    }
-    return map;
-}
-
-static string ClassifyTone(string text)
-{
-    var t = text.ToLowerInvariant();
-    if (Regex.IsMatch(t, @"\b(sorry|sigh|aww|sad|lonely|alone|tired|miss you|hugs)\b") || t.Contains("..."))
-        return "sad";
-    if (Regex.IsMatch(t, @"\b(mad|angry|hate|ugh|grr|idiot|stupid)\b"))
-        return "angry";
-    if (text.Contains('!') || Regex.IsMatch(t, @"\b(haha|lol|lmao|yay|yey|nice|great|love|wooo|yippie)\b"))
-        return "happy";
-    return "normal";
-}
-
-static async Task<byte[]> SynthesizeWithToneAsync(
-    string text, string tone, VoicevoxClient voicevox, AudioProcessingService audioProcessing, CancellationToken ct)
-{
-    var styles = ParseToneStyles();
-    var styleId = styles.TryGetValue(tone, out var id) ? id : styles["normal"];
-
-    var queryJson = await voicevox.AudioQueryAsync(text, styleId, ct);
-    if (string.IsNullOrWhiteSpace(queryJson))
-        return Array.Empty<byte>();
-
-    // Prosody knobs per tone — even with one speaker these change the feel.
-    var (intonation, pitch, speed) = tone switch
-    {
-        "happy" => (1.35f, 0.12f, 1.05f),
-        "sad" => (0.65f, -0.08f, 0.92f),
-        "angry" => (1.25f, 0.05f, 1.08f),
-        "calm" => (0.85f, -0.03f, 0.95f),
-        _ => (1.0f, 0.0f, 1.0f),
-    };
-
-    try
-    {
-        var node = System.Text.Json.Nodes.JsonNode.Parse(queryJson);
-        if (node is not null)
-        {
-            node["intonationScale"] = intonation;
-            node["pitchScale"] = pitch;
-            node["speedScale"] = speed;
-            queryJson = node.ToJsonString();
-        }
-    }
-    catch
-    {
-        // Fall back to the unpatched query.
-    }
-
-    var wav = await voicevox.SynthesizeFromQueryAsync(queryJson, styleId, ct);
-    return wav.Length == 0 ? Array.Empty<byte>() : audioProcessing.ConvertVoiceVoxWavToDiscordPcm(wav);
-}
-
-
-// SPA fallback: any unmatched GET serves the web app shell (auth policy does NOT
-// apply to it, or the login page could never load).
-app.MapFallbackToFile("index.html").AllowAnonymous();
-
-app.Run();
 
 sealed class AddMemoryRequest
 {

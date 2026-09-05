@@ -173,6 +173,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
 
             var llmSw = Stopwatch.StartNew();
             string responseText;
+            string? emotionHint = null;
             if (TryBuildDateTimeResponse(text, out var localDateTimeResponse))
             {
                 responseText = localDateTimeResponse;
@@ -212,6 +213,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
                     return new VoiceProcessResult(false, text, "Rate limit reached, please try again in a moment.", Array.Empty<byte>(), rateLimitEx.Message);
                 }
                 responseText = SanitizeForVoice(reply.Reply);
+                emotionHint = reply.Emotion;
             }
             llmSw.Stop();
             _latencyTracker.RecordLatency("llm", llmSw.Elapsed);
@@ -246,6 +248,11 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
                 && !LooksPrimarilyJapanese(ttsText)
                 && runtimeSettings.TtsMode == TtsMode.LocalVoiceVox;
 
+            // Emotion-aware tone: pick VOICEVOX style + prosody from the reply's
+            // emotion (LLM hint) and text heuristics.
+            var tone = VoiceToneEngine.ClassifyTone(ttsText, emotionHint);
+            var toneStyle = VoiceToneEngine.StyleFor(tone);
+
             if (needsTranslation && _translationService.IsEnabled)
             {
                 // Run translation and audio_query for the original text concurrently.
@@ -253,7 +260,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
                 // phoneme data; we discard that result and re-query with translated text.
                 // Net saving: translation latency is fully hidden behind audio_query.
                 var translateTask = _translationService.TranslateToJapaneseAsync(responseText, currentCts.Token, correlationId);
-                var warmQueryTask = _voicevoxClient.AudioQueryAsync(ttsText, runtimeSettings.VoicevoxSpeakerStyleId, currentCts.Token, correlationId);
+                var warmQueryTask = _voicevoxClient.AudioQueryAsync(ttsText, toneStyle, currentCts.Token, correlationId);
 
                 await Task.WhenAll(translateTask, warmQueryTask);
                 ttsText = translateTask.Result;
@@ -267,12 +274,14 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
                 }
                 else
                 {
-                    queryJson = await _voicevoxClient.AudioQueryAsync(ttsText, runtimeSettings.VoicevoxSpeakerStyleId, currentCts.Token, correlationId);
+                    queryJson = await _voicevoxClient.AudioQueryAsync(ttsText, toneStyle, currentCts.Token, correlationId);
                 }
+
+                queryJson = VoiceToneEngine.PatchQuery(queryJson, tone);
 
                 wav = string.IsNullOrWhiteSpace(queryJson)
                     ? Array.Empty<byte>()
-                    : await _voicevoxClient.SynthesizeFromQueryAsync(queryJson, runtimeSettings.VoicevoxSpeakerStyleId, currentCts.Token, correlationId);
+                    : await _voicevoxClient.SynthesizeFromQueryAsync(queryJson, toneStyle, currentCts.Token, correlationId);
             }
             else
             {
@@ -280,7 +289,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
                 if (needsTranslation && !_translationService.IsEnabled)
                     DevLog.WriteLine("[VoiceFlow] translation_requested_but_deepl_unavailable=1");
 
-                wav = await SynthesizeWavAsync(ttsText, currentCts.Token, correlationId);
+                wav = await SynthesizeWavAsync(ttsText, currentCts.Token, correlationId, tone);
             }
 
             var pcm = _audioProcessingService.ConvertVoiceVoxWavToDiscordPcm(wav);
@@ -332,7 +341,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
             return Array.Empty<byte>();
         }
 
-        var wav = await SynthesizeWavAsync(ttsText, ct, correlationId);
+        var wav = await SynthesizeWavAsync(ttsText, ct, correlationId, VoiceToneEngine.ClassifyTone(ttsText));
         if (wav.Length == 0)
         {
             return Array.Empty<byte>();
@@ -430,14 +439,26 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
         }
     }
 
-    private async Task<byte[]> SynthesizeWavAsync(string text, CancellationToken ct, string? correlationId)
+    private async Task<byte[]> SynthesizeWavAsync(string text, CancellationToken ct, string? correlationId, string? tone = null)
     {
         var runtimeSettings = GetRuntimeSettings();
+        tone ??= VoiceToneEngine.ClassifyTone(text);
 
         // Auto-fallback: if CloudRemote is selected but no URL is configured, use local VOICEVOX
         if (runtimeSettings.TtsMode == TtsMode.CloudRemote && string.IsNullOrWhiteSpace(runtimeSettings.CloudTtsUrl))
         {
             DevLog.WriteLine("[VoiceFlow][CloudTTS] CloudTtsUrl is empty, falling back to local VOICEVOX");
+            try
+            {
+                var toned = await VoiceToneEngine.SynthesizeAsync(text, _voicevoxClient, _audioProcessingService, ct, correlationId: correlationId);
+                if (toned.Length > 0)
+                    return toned;
+            }
+            catch (Exception ex)
+            {
+                DevLog.WriteLine("[VoiceFlow][LocalTTS] tone synthesis failed ({0}), falling back", ex.GetBaseException().Message);
+            }
+
             try
             {
                 return await _voicevoxClient.SynthesizeWavAsync(text, runtimeSettings.VoicevoxSpeakerStyleId, ct, correlationId);
@@ -465,7 +486,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
                     },
                     ct);
                 queryResp.EnsureSuccessStatusCode();
-                var queryJson = await queryResp.Content.ReadAsStringAsync(ct);
+                var queryJson = VoiceToneEngine.PatchQuery(await queryResp.Content.ReadAsStringAsync(ct), tone);
 
                 using var synthResp = await CloudTtsRetryPipeline.ExecuteAsync(
                     async innerCt =>
@@ -487,6 +508,17 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
                 DevLog.WriteLine("[VoiceFlow][CloudTTS] failed ({0})", ex.GetBaseException().Message);
                 return Array.Empty<byte>();
             }
+        }
+
+        try
+        {
+            var toned = await VoiceToneEngine.SynthesizeAsync(text, _voicevoxClient, _audioProcessingService, ct, correlationId: correlationId);
+            if (toned.Length > 0)
+                return toned;
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine("[VoiceFlow][LocalTTS] tone synthesis failed ({0}), falling back", ex.GetBaseException().Message);
         }
 
         try
