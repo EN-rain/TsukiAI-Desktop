@@ -11,7 +11,7 @@ using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
 using TsukiAI.Core.ViewModels;
 using TsukiAI.VoiceChat.Controllers;
-using TsukiAI.VoiceChat.Infrastructure;
+
 using TsukiAI.VoiceChat.Services;
 using TsukiAI.VoiceChat.ViewModels;
 using TsukiAI.VoiceChat.Views;

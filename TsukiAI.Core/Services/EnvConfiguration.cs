@@ -3,7 +3,7 @@ using System.Globalization;
 using System.IO;
 using TsukiAI.Core.Models;
 
-namespace TsukiAI.VoiceChat.Infrastructure;
+namespace TsukiAI.Core.Services;
 
 public sealed record EnvVarStatus(string Key, bool IsSet, string DisplayValue);
 

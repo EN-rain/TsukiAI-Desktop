@@ -18,5 +18,3 @@ public sealed class WhisperService : IWhisperService
         return Task.FromResult(new TranscriptionResult(string.Empty, "en", 0.0f));
     }
 }
-
-public sealed record TranscriptionResult(string Text, string Language, float Confidence);

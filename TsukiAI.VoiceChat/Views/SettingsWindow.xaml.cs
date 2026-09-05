@@ -14,7 +14,7 @@ using System.Diagnostics;
 using NAudio.Wave;
 using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
-using TsukiAI.VoiceChat.Infrastructure;
+
 using MessageBox = System.Windows.MessageBox;
 
 namespace TsukiAI.VoiceChat.Views;

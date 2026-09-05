@@ -7,7 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TsukiAI.Core", "TsukiAI.Cor
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TsukiAI.VoiceChat", "TsukiAI.VoiceChat\TsukiAI.VoiceChat.csproj", "{A1B2C3D4-0002-0002-0002-000000000002}"
 EndProject
-
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TsukiAI.Api", "TsukiAI.Api\TsukiAI.Api.csproj", "{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -42,6 +43,18 @@ Global
 		{A1B2C3D4-0002-0002-0002-000000000002}.Release|x64.Build.0 = Release|Any CPU
 		{A1B2C3D4-0002-0002-0002-000000000002}.Release|x86.ActiveCfg = Release|Any CPU
 		{A1B2C3D4-0002-0002-0002-000000000002}.Release|x86.Build.0 = Release|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Debug|x64.Build.0 = Debug|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Debug|x86.Build.0 = Debug|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Release|x64.ActiveCfg = Release|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Release|x64.Build.0 = Release|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Release|x86.ActiveCfg = Release|Any CPU
+		{469DAB0C-53E3-4516-A1D4-023B4C3A9BAE}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

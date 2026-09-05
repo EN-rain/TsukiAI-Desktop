@@ -10,21 +10,21 @@ public static class SettingsService
 
     public static async Task<string> GetBaseDirAsync()
     {
-        var baseDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "TsukiAI"
-        );
-        // Directory.CreateDirectory is fast and synchronous - no need for Task.Run
-        Directory.CreateDirectory(baseDir);
+        var baseDir = GetBaseDir();
         return await Task.FromResult(baseDir);
     }
-    
+
+    // TSUKI_DATA_DIR lets server deployments (Docker) point storage at a mounted volume;
+    // the desktop default stays %APPDATA%\TsukiAI.
     public static string GetBaseDir()
     {
-        var baseDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "TsukiAI"
-        );
+        var overrideDir = Environment.GetEnvironmentVariable("TSUKI_DATA_DIR");
+        var baseDir = string.IsNullOrWhiteSpace(overrideDir)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "TsukiAI"
+            )
+            : overrideDir;
         Directory.CreateDirectory(baseDir);
         return baseDir;
     }

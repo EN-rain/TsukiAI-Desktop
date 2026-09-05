@@ -101,3 +101,4 @@ data/
 logs/
 screenshots/
 models/
+.zcode/
