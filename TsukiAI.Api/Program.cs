@@ -118,6 +118,15 @@ builder.Services.AddSingleton<IWhisperService>(sp => sp.GetRequiredService<GroqW
 builder.Services.AddSingleton<VoiceConversationPipeline>();
 builder.Services.AddSingleton<IVoiceConversationPipeline>(sp => sp.GetRequiredService<VoiceConversationPipeline>());
 
+// Discord text chat brain: per-user memory, names, retention. Uses its own
+// provider-switching client WITHOUT global semantic memory — TextChatService
+// scopes all memory writes/recall per user itself.
+builder.Services.AddSingleton<TextChatService>(sp => new TextChatService(
+    new SwitchingInferenceClient(settings),
+    sp.GetRequiredService<ISemanticMemoryService>(),
+    settings));
+builder.Services.AddHostedService<MemoryRetentionWorker>();
+
 var app = builder.Build();
 
 // Static SPA assets first: they short-circuit before auth/routing. Serving them
@@ -181,7 +190,7 @@ app.MapPost("/api/memory/add", async (HttpContext ctx, ISemanticMemoryService me
     if (payload is null || string.IsNullOrWhiteSpace(payload.Text))
         return Results.BadRequest(new { error = "text is required" });
 
-    await memory.AddMemoryAsync(payload.Text, payload.Source ?? "web", ctx.RequestAborted);
+    await memory.AddMemoryAsync(payload.Text, payload.Source ?? "web", ct: ctx.RequestAborted);
     return Results.Ok(new { status = "ok" });
 });
 
@@ -190,7 +199,7 @@ app.MapGet("/api/memory/search", async (HttpContext ctx, string q, int? k, ISema
     if (string.IsNullOrWhiteSpace(q))
         return Results.BadRequest(new { error = "q is required" });
 
-    var hits = await memory.SearchAsync(q, k ?? 5, ctx.RequestAborted);
+    var hits = await memory.SearchAsync(q, k ?? 5, ct: ctx.RequestAborted);
     return Results.Ok(hits);
 });
 
@@ -342,6 +351,22 @@ app.MapDelete("/api/history", () =>
     return Results.Ok(new { status = "ok" });
 });
 
+// Per-user Discord text chat: own history, own memories, speaker names.
+app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textChat) =>
+{
+    using var sr = new StreamReader(ctx.Request.Body);
+    var body = await sr.ReadToEndAsync();
+    var payload = string.IsNullOrWhiteSpace(body)
+        ? null
+        : JsonSerializer.Deserialize<DiscordChatRequest>(body, bodyJsonOptions);
+
+    if (payload is null || string.IsNullOrWhiteSpace(payload.UserId) || string.IsNullOrWhiteSpace(payload.Text))
+        return Results.BadRequest(new { error = "userId and text are required" });
+
+    var reply = await textChat.ReplyAsync(payload.UserId, payload.UserName ?? "someone", payload.Text, ctx.RequestAborted);
+    return Results.Ok(new { text = reply });
+});
+
 // Health lives outside the auth fallback via [AllowAnonymous] on the controller action.
 
 // SPA fallback: any unmatched GET serves the web app shell (auth policy does NOT
@@ -407,13 +432,21 @@ sealed class SttPatch
     public string? LanguageCode { get; set; }
 }
 
+sealed class DiscordChatRequest
+{
+    public string UserId { get; set; } = string.Empty;
+    public string? UserName { get; set; }
+    public string Text { get; set; } = string.Empty;
+}
+
 /// <summary>Falls back to a no-op memory service when semantic memory is disabled.</summary>
 sealed class NullSemanticMemoryService : ISemanticMemoryService
 {
     public static readonly NullSemanticMemoryService Instance = new();
 
     public Task<bool> EnsureReadyAsync(CancellationToken ct = default) => Task.FromResult(false);
-    public Task AddMemoryAsync(string text, string source = "voicechat", CancellationToken ct = default) => Task.CompletedTask;
-    public Task<IReadOnlyList<SemanticMemoryHit>> SearchAsync(string query, int topK = 5, CancellationToken ct = default)
+    public Task AddMemoryAsync(string text, string source = "voicechat", string? userId = null, CancellationToken ct = default) => Task.CompletedTask;
+    public Task<IReadOnlyList<SemanticMemoryHit>> SearchAsync(string query, int topK = 5, string? userId = null, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<SemanticMemoryHit>>([]);
+    public Task DeleteOlderThanAsync(TimeSpan age, CancellationToken ct = default) => Task.CompletedTask;
 }

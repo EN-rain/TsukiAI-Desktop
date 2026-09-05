@@ -439,7 +439,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
 
         try
         {
-            return await _semanticMemory.SearchAsync(userText, 3, budgetCts.Token);
+            return await _semanticMemory.SearchAsync(userText, 3, ct: budgetCts.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -495,7 +495,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
 
             // Already async, no Task.Run wrapper needed
             var memoryHits = shouldSearchPast && _semanticMemory is not null
-                ? await _semanticMemory.SearchAsync(userText, 5, ct)
+                ? await _semanticMemory.SearchAsync(userText, 5, ct: ct)
                 : Array.Empty<SemanticMemoryHit>();
                 
             var fullPrompt = BuildPromptWithHistory(userText, recentHistory, memoryHits, historyWindow);
@@ -1053,7 +1053,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
                 {
                     try
                     {
-                        await _semanticMemory.AddMemoryAsync(payload, "voicechat", _memoryWriteCts.Token);
+                        await _semanticMemory.AddMemoryAsync(payload, "voicechat", ct: _memoryWriteCts.Token);
                     }
                     catch (OperationCanceledException) when (_memoryWriteCts.IsCancellationRequested)
                     {

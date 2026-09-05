@@ -918,10 +918,12 @@ client.on('messageCreate', async (message) => {
     try {
       await message.channel.sendTyping().catch(() => {});
 
-      const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/voice/process`, {
+      // Per-user memory endpoint: userId keys Tsuki's memory for this person,
+      // userName lets her address them by name.
+      const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/chat/discord`, {
         userId: message.author.id,
+        userName: message.member?.displayName || message.author.globalName || message.author.username,
         text,
-        audio: false, // text reply only — skip VOICEVOX synthesis
       }, { timeout: 180000 });
 
       const reply = response?.data?.text;

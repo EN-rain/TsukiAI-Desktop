@@ -83,7 +83,7 @@ public sealed class ChromaHttpSemanticMemoryService : ISemanticMemoryService, ID
         }
     }
 
-    public async Task AddMemoryAsync(string text, string source = "voicechat", CancellationToken ct = default)
+    public async Task AddMemoryAsync(string text, string source = "voicechat", string? userId = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text) || IsCircuitOpen())
             return;
@@ -101,7 +101,12 @@ public sealed class ChromaHttpSemanticMemoryService : ISemanticMemoryService, ID
             {
                 ids = new[] { Guid.NewGuid().ToString("N") },
                 documents = new[] { text },
-                metadatas = new[] { new { source } }
+                metadatas = new[] { new
+                {
+                    source,
+                    user_id = userId ?? string.Empty,
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                } }
             };
             using var resp = await SendAsync(
                 HttpMethod.Post, $"{_routePrefix}/collections/{collectionId}/add", body, ct);
@@ -121,7 +126,7 @@ public sealed class ChromaHttpSemanticMemoryService : ISemanticMemoryService, ID
         }
     }
 
-    public async Task<IReadOnlyList<SemanticMemoryHit>> SearchAsync(string query, int topK = 5, CancellationToken ct = default)
+    public async Task<IReadOnlyList<SemanticMemoryHit>> SearchAsync(string query, int topK = 5, string? userId = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query) || IsCircuitOpen())
             return [];
@@ -136,7 +141,11 @@ public sealed class ChromaHttpSemanticMemoryService : ISemanticMemoryService, ID
                 return [];
             }
 
-            var body = new { query_texts = new[] { query }, n_results = k };
+            // Scope to the user when provided: one user's memories never leak
+            // into another user's recall.
+            var body = userId is null
+                ? (object)new { query_texts = new[] { query }, n_results = k }
+                : new { query_texts = new[] { query }, n_results = k, where = new { user_id = userId } };
             using var resp = await SendAsync(
                 HttpMethod.Post, $"{_routePrefix}/collections/{collectionId}/query", body, ct);
 
@@ -188,6 +197,43 @@ public sealed class ChromaHttpSemanticMemoryService : ISemanticMemoryService, ID
         {
             RecordFailure("search(exception)", ex.Message);
             return [];
+        }
+    }
+
+    public async Task DeleteOlderThanAsync(TimeSpan age, CancellationToken ct = default)
+    {
+        if (IsCircuitOpen())
+            return;
+
+        try
+        {
+            var collectionId = await GetCollectionIdAsync(ct);
+            if (collectionId is null)
+                return;
+
+            var cutoff = DateTimeOffset.UtcNow.Subtract(age).ToUnixTimeSeconds();
+            var body = new
+            {
+                where = new Dictionary<string, object>
+                {
+                    ["timestamp"] = new Dictionary<string, object> { ["$lt"] = cutoff }
+                }
+            };
+            using var resp = await SendAsync(
+                HttpMethod.Post, $"{_routePrefix}/collections/{collectionId}/delete", body, ct);
+
+            if (resp is { IsSuccessStatusCode: true })
+            {
+                RecordSuccess();
+                DevLog.WriteLine("SemanticMemory(ChromaHttp): purged memories older than {0} days", (int)age.TotalDays);
+                return;
+            }
+
+            RecordFailure("delete-old", $"status={resp?.StatusCode}: {await ReadErrorAsync(resp, ct)}");
+        }
+        catch (Exception ex)
+        {
+            RecordFailure("delete-old(exception)", ex.Message);
         }
     }
 

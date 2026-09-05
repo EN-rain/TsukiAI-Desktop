@@ -97,7 +97,7 @@ public sealed class ChromaSqliteSemanticMemoryService : ISemanticMemoryService, 
         }
     }
 
-    public async Task AddMemoryAsync(string text, string source = "voicechat", CancellationToken ct = default)
+    public async Task AddMemoryAsync(string text, string source = "voicechat", string? userId = null, CancellationToken ct = default)
     {
         if (!CanRun() || string.IsNullOrWhiteSpace(text) || IsCircuitOpen())
             return;
@@ -134,7 +134,7 @@ public sealed class ChromaSqliteSemanticMemoryService : ISemanticMemoryService, 
         }
     }
 
-    public async Task<IReadOnlyList<SemanticMemoryHit>> SearchAsync(string query, int topK = 5, CancellationToken ct = default)
+    public async Task<IReadOnlyList<SemanticMemoryHit>> SearchAsync(string query, int topK = 5, string? userId = null, CancellationToken ct = default)
     {
         if (!CanRun() || string.IsNullOrWhiteSpace(query) || IsCircuitOpen())
             return [];
@@ -201,6 +201,10 @@ public sealed class ChromaSqliteSemanticMemoryService : ISemanticMemoryService, 
             return [];
         }
     }
+
+    // Retention purge is not wired for the desktop sqlite worker yet; memories
+    // there are pruned with the conversation history instead.
+    public Task DeleteOlderThanAsync(TimeSpan age, CancellationToken ct = default) => Task.CompletedTask;
 
     public void Dispose()
     {
