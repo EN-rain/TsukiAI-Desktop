@@ -48,6 +48,9 @@ const CONFIG = {
   GUILD_ID: process.env.GUILD_ID || 'YOUR_GUILD_ID',
   VOICE_CHANNEL_ID: process.env.VOICE_CHANNEL_ID || 'YOUR_VOICE_CHANNEL_ID',
   TEXT_CHANNEL_ID: (process.env.TEXT_CHANNEL_ID || '').trim(),
+  // 'mention' (default): reply only when @-mentioned. 'any': treat every
+  // non-bot message in the channel as input.
+  TEXT_REPLY_MODE: (process.env.TEXT_REPLY_MODE || 'mention').trim().toLowerCase(),
   CSHARP_API_URL: (process.env.CSHARP_API_URL || 'http://localhost:5000').trim(),
   CSHARP_API_KEY: (process.env.CSHARP_API_KEY || '').trim(),
   ASSEMBLYAI_API_KEY: (process.env.ASSEMBLYAI_API_KEY || '').trim(),
@@ -879,11 +882,14 @@ client.on('error', (error) => {
 
 // Text mentions: when Tsuki is @-mentioned in the configured text channel,
 // run the message through the same LLM pipeline as voice turns and reply in text.
+// TEXT_REPLY_MODE='any' widens this to every non-bot message in the channel.
 client.on('messageCreate', async (message) => {
   try {
     if (!CONFIG.TEXT_CHANNEL_ID || message.channel.id !== CONFIG.TEXT_CHANNEL_ID) return;
     if (message.author.bot) return;
-    if (!message.mentions.has(client.user)) return;
+
+    const mentioned = message.mentions.has(client.user);
+    if (CONFIG.TEXT_REPLY_MODE !== 'any' && !mentioned) return;
 
     // Strip the mention itself so Tsuki doesn't read "@Tsuki ..." as content.
     const text = message.content.replace(/<@!?(\d+)>/g, ' ').replace(/\s+/g, ' ').trim();
