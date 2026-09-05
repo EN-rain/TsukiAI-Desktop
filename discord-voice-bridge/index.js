@@ -885,8 +885,25 @@ client.on('error', (error) => {
 // TEXT_REPLY_MODE='any' widens this to every non-bot message in the channel.
 // Guardrails: one turn at a time globally, per-user cooldown, short error reply.
 const TEXT_USER_COOLDOWN_MS = Math.max(1000, parseInt(process.env.TEXT_USER_COOLDOWN_MS || '3000', 10));
-// Send her text replies as Discord voice messages (playable in the chat) too.
-const TEXT_VOICE_REPLIES = (process.env.TEXT_VOICE_REPLIES || 'true').toLowerCase() !== 'false';
+// Voice replies in text chat: 'all' = every reply gets a voice message,
+// 'keywords' = only when the user's message contains a keyword (TEXT_VOICE_KEYWORDS),
+// 'off' = text only. Keywords are comma-separated, case-insensitive substrings.
+const TEXT_VOICE_MODE = (process.env.TEXT_VOICE_MODE || 'all').trim().toLowerCase();
+const TEXT_VOICE_KEYWORDS = (process.env.TEXT_VOICE_KEYWORDS || '')
+  .split(',')
+  .map((k) => k.trim().toLowerCase())
+  .filter(Boolean);
+
+function wantsVoiceReply(text) {
+  if (TEXT_VOICE_MODE === 'off') return false;
+  if (TEXT_VOICE_MODE === 'keywords') {
+    if (TEXT_VOICE_KEYWORDS.length === 0) return false;
+    const hay = text.toLowerCase();
+    return TEXT_VOICE_KEYWORDS.some((k) => hay.includes(k));
+  }
+  return true;
+}
+
 let textTurnInFlight = false;
 const lastTextTurnAt = new Map(); // userId -> epoch ms
 
@@ -943,12 +960,13 @@ client.on('messageCreate', async (message) => {
       await message.channel.sendTyping().catch(() => {});
 
       // Per-user memory endpoint: userId keys Tsuki's memory for this person,
-      // userName lets her address them by name; voice=true synthesizes her reply.
+      // userName lets her address them by name; voice per TEXT_VOICE_MODE.
+      const wantVoice = wantsVoiceReply(text);
       const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/chat/discord`, {
         userId: message.author.id,
         userName: message.member?.displayName || message.author.globalName || message.author.username,
         text,
-        voice: TEXT_VOICE_REPLIES,
+        voice: wantVoice,
       }, { timeout: 180000 });
 
       const reply = response?.data?.text;
@@ -958,7 +976,7 @@ client.on('messageCreate', async (message) => {
         console.log(`[TEXT] Replied to ${message.author.tag} (${reply.length} chars)`);
 
         // Follow up with her actual voice as a Discord voice message.
-        if (TEXT_VOICE_REPLIES && response?.data?.audio) {
+        if (wantVoice && response?.data?.audio) {
           try {
             const pcm = Buffer.from(response.data.audio, 'base64');
             const ogg = await pcmToOggOpus(pcm);

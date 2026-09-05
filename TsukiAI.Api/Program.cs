@@ -372,7 +372,17 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
     {
         try
         {
-            var pcm = await pipeline.SynthesizeTextToPcmAsync(reply, ct: ctx.RequestAborted);
+            // Guardrail: cap synthesis length — very long replies would produce
+            // huge voice messages and stall VOICEVOX on the small instance.
+            var ttsText = reply;
+            const int MaxTtsChars = 280;
+            if (ttsText.Length > MaxTtsChars)
+            {
+                var cut = ttsText.LastIndexOf(' ', MaxTtsChars);
+                ttsText = cut > 0 ? ttsText[..cut] + "…" : ttsText[..MaxTtsChars];
+            }
+
+            var pcm = await pipeline.SynthesizeTextToPcmAsync(ttsText, ct: ctx.RequestAborted);
             audio = pcm.Length > 0 ? Convert.ToBase64String(pcm) : null;
         }
         catch (Exception ex)
