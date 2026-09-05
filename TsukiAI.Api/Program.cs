@@ -352,7 +352,9 @@ app.MapDelete("/api/history", () =>
 });
 
 // Per-user Discord text chat: own history, own memories, speaker names.
-app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textChat) =>
+// voice=true also synthesizes her reply so the bridge can send it as a
+// Discord voice message.
+app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textChat, IVoiceConversationPipeline pipeline) =>
 {
     using var sr = new StreamReader(ctx.Request.Body);
     var body = await sr.ReadToEndAsync();
@@ -364,7 +366,22 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
         return Results.BadRequest(new { error = "userId and text are required" });
 
     var reply = await textChat.ReplyAsync(payload.UserId, payload.UserName ?? "someone", payload.Text, ctx.RequestAborted);
-    return Results.Ok(new { text = reply });
+
+    string? audio = null;
+    if (payload.Voice)
+    {
+        try
+        {
+            var pcm = await pipeline.SynthesizeTextToPcmAsync(reply, ct: ctx.RequestAborted);
+            audio = pcm.Length > 0 ? Convert.ToBase64String(pcm) : null;
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine("Api: discord chat TTS synthesis failed: {0}", ex.Message);
+        }
+    }
+
+    return Results.Ok(new { text = reply, audio });
 });
 
 // Health lives outside the auth fallback via [AllowAnonymous] on the controller action.
@@ -437,6 +454,7 @@ sealed class DiscordChatRequest
     public string UserId { get; set; } = string.Empty;
     public string? UserName { get; set; }
     public string Text { get; set; } = string.Empty;
+    public bool Voice { get; set; }
 }
 
 /// <summary>Falls back to a no-op memory service when semantic memory is disabled.</summary>

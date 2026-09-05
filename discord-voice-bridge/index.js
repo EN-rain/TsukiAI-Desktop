@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import http from 'http';
 import https from 'https';
-import { Client, GatewayIntentBits } from 'discord.js';
+import { Client, GatewayIntentBits, MessageFlags } from 'discord.js';
 import {
   joinVoiceChannel,
   createAudioPlayer,
@@ -885,8 +885,32 @@ client.on('error', (error) => {
 // TEXT_REPLY_MODE='any' widens this to every non-bot message in the channel.
 // Guardrails: one turn at a time globally, per-user cooldown, short error reply.
 const TEXT_USER_COOLDOWN_MS = Math.max(1000, parseInt(process.env.TEXT_USER_COOLDOWN_MS || '3000', 10));
+// Send her text replies as Discord voice messages (playable in the chat) too.
+const TEXT_VOICE_REPLIES = (process.env.TEXT_VOICE_REPLIES || 'true').toLowerCase() !== 'false';
 let textTurnInFlight = false;
 const lastTextTurnAt = new Map(); // userId -> epoch ms
+
+// Convert 48kHz stereo s16le PCM (the API's TTS format) to ogg/opus for
+// Discord voice messages, using the bundled ffmpeg.
+function pcmToOggOpus(pcmBuffer) {
+  return new Promise((resolve, reject) => {
+    const ffmpeg = new prism.FFmpeg({
+      args: [
+        '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0',
+        '-c:a', 'libopus', '-b:a', '64k', '-ar', '48000', '-ac', '2',
+        '-f', 'ogg', 'pipe:1',
+      ],
+    });
+    const chunks = [];
+    ffmpeg.stdout.on('data', (c) => chunks.push(c));
+    ffmpeg.stderr.on('data', (d) => debugLog('[VOICE-MSG] ffmpeg:', d.toString().trim()));
+    ffmpeg.on('error', reject);
+    ffmpeg.stdout.on('end', () => resolve(Buffer.concat(chunks)));
+    ffmpeg.stdin.on('error', reject);
+    ffmpeg.stdin.write(pcmBuffer);
+    ffmpeg.stdin.end();
+  });
+}
 
 client.on('messageCreate', async (message) => {
   try {
@@ -919,11 +943,12 @@ client.on('messageCreate', async (message) => {
       await message.channel.sendTyping().catch(() => {});
 
       // Per-user memory endpoint: userId keys Tsuki's memory for this person,
-      // userName lets her address them by name.
+      // userName lets her address them by name; voice=true synthesizes her reply.
       const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/chat/discord`, {
         userId: message.author.id,
         userName: message.member?.displayName || message.author.globalName || message.author.username,
         text,
+        voice: TEXT_VOICE_REPLIES,
       }, { timeout: 180000 });
 
       const reply = response?.data?.text;
@@ -931,6 +956,23 @@ client.on('messageCreate', async (message) => {
         // Discord hard-caps messages at 2000 chars.
         await message.reply(String(reply).slice(0, 1900));
         console.log(`[TEXT] Replied to ${message.author.tag} (${reply.length} chars)`);
+
+        // Follow up with her actual voice as a Discord voice message.
+        if (TEXT_VOICE_REPLIES && response?.data?.audio) {
+          try {
+            const pcm = Buffer.from(response.data.audio, 'base64');
+            const ogg = await pcmToOggOpus(pcm);
+            if (ogg.length > 0) {
+              await message.channel.send({
+                files: [{ attachment: ogg, name: 'voice-message.ogg' }],
+                flags: MessageFlags.IsVoiceMessage,
+              });
+              console.log(`[TEXT] Sent voice message (${ogg.length} bytes)`);
+            }
+          } catch (voiceError) {
+            console.error('[TEXT] Voice message failed:', voiceError?.message);
+          }
+        }
       } else {
         console.log('[TEXT] Empty response, not replying');
       }
