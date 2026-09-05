@@ -1,20 +1,26 @@
 # TsukiAI — Desktop → Web Migration Plan
 
-> Status: approved 2026-09-05. Target: single-user web app on a VPS, everything API-reliant,
-> own domain. The WPF desktop app stays compiling and usable until the web app reaches parity.
+> Status: approved 2026-09-05; **role split revised 2026-09-05** (user decision):
+> the **desktop app stays** as the local "assistance and fun" companion — it is not
+> being replaced. The web deployment's primary job is a **24/7 persistent Tsuki on
+> Discord**; the React SPA rides along as a secondary admin surface (settings,
+> memory, chat) reachable from any browser.
 
 ## Target architecture
 
 ```
-Browser (React SPA, your-domain.com)
-   |  HTTPS + SignalR/WebSocket (mic audio up, TTS audio down, streamed LLM tokens)
+Discord voice channel  <---  bridge container (discord-voice-bridge, 24/7)
+                                 |  /api/voice/* with X-Api-Key
+Browser (React SPA, your-domain.com)  -- HTTPS (settings/memory/chat, secondary)
+   |
    v
 Caddy (TLS, Let's Encrypt)  ->  TsukiAI.Api (ASP.NET Core 8, reuses TsukiAI.Core)
-   |-- SQLite/JSON state on a Docker volume (chat history, provider state, non-secret settings)
+   |-- JSON state on a Docker volume (chat history, provider state, non-secret settings)
    |-- ChromaDB container (REST API — replaces the spawned Python worker)
    |-- VOICEVOX container (official docker image — replaces local run.exe)
    +-- Cloud APIs (Groq/Cerebras/Gemini/... LLM, Groq Whisper/AssemblyAI STT, DeepL) — already HTTP, unchanged
-[Phase 2+: discord-voice-bridge as another compose service; Ollama reachable via configurable URL]
+
+Desktop (WPF app) — local mic/voice fun against the same Tsuki persona, unchanged
 ```
 
 Key wins: `TsukiAI.Core` is pure net8.0 (no WPF) and the app already serves `/api/voice/*` +
@@ -101,10 +107,25 @@ minimal logic change; only mic capture/output moves into the browser.
       4. Watch `docker compose logs -f caddy api` for the first boot; log in with the
          password, flip semantic memory on in Settings, and do a test voice turn.
 
-## Phase 5 — Deferred (unchanged, by user decision)
-- Discord voice bot: bridge service slot is in docker-compose.yml (commented).
+## Phase 5 — 24/7 Discord assistant [wired, deploy pending]
+Promoted from "deferred" to the web deployment's primary workload (user decision 2026-09-05).
+- [x] `discord-voice-bridge` already drove `/api/voice/stt`, `/process-binary`, `/test-tts` via
+      `CSHARP_API_URL` — same contract the API kept, so the bridge works against the VPS API
+      unchanged.
+- [x] API-key auth for headless clients: `TSUKI_API_KEY` on the server, `X-Api-Key` header on
+      requests (`ApiKeyAuthenticationHandler` + policy scheme that routes X-Api-Key requests to
+      it, cookie requests to the browser scheme). Verified matrix: no auth 401, wrong key 401,
+      correct key 200, cookie 200, health anon 200.
+- [x] Bridge sends `CSHARP_API_KEY` as the X-Api-Key header (index.js sets the axios default).
+- [x] `discord-voice-bridge/Dockerfile` + compose `bridge` service enabled: env from
+      `discord-voice-bridge/.env` (Discord token/guild/channel), `CSHARP_API_URL=http://api:8080`.
+- [ ] At deploy time: create `discord-voice-bridge/.env` from its example, enable the `voice`
+      profile (VOICEVOX container) so the pipeline has TTS, `docker compose up -d` and confirm
+      the bot joins the voice channel.
+
+## Still deferred
 - Ollama/local models: config-only when a GPU box exists (TSUKI_REMOTE_INFERENCE_URL).
-- VRChat OSC: only when the server can reach your PC (self-host or tunnel) — decide later.
+- VRChat OSC: desktop-only anyway; stays with the desktop app.
 
 ## Checkpoints
 - After Phase 1: verify API boots, `/api/voice/health` responds, login works, a text chat turn

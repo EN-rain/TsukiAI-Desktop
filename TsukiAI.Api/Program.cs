@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using TsukiAI.Api.Hubs;
+using TsukiAI.Api.Infrastructure;
 using TsukiAI.Api.Services;
 using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
@@ -38,8 +39,21 @@ if (!publicMode)
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
 
+// Machine clients (discord-voice-bridge) authenticate with a shared secret in
+// the X-Api-Key header; browsers use the session cookie.
+var apiKey = Environment.GetEnvironmentVariable("TSUKI_API_KEY")?.Trim();
+
 builder.Services
-    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddAuthentication("Smart")
+    .AddPolicyScheme("Smart", "Cookie or API key", options =>
+    {
+        // UseAuthentication runs exactly one default scheme; route each request
+        // to the handler that can actually evaluate it.
+        options.ForwardDefaultSelector = ctx =>
+            ctx.Request.Headers.ContainsKey(ApiKeyAuthenticationHandler.HeaderName)
+                ? ApiKeyAuthenticationHandler.SchemeName
+                : CookieAuthenticationDefaults.AuthenticationScheme;
+    })
     .AddCookie(options =>
     {
         options.Cookie.Name = "tsuki_web";
@@ -53,7 +67,9 @@ builder.Services
             ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return Task.CompletedTask;
         };
-    });
+    })
+    .AddScheme<ApiKeyOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.SchemeName,
+        options => options.ApiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey);
 
 builder.Services.AddAuthorization(options =>
 {

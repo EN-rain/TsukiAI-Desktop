@@ -48,6 +48,7 @@ const CONFIG = {
   GUILD_ID: process.env.GUILD_ID || 'YOUR_GUILD_ID',
   VOICE_CHANNEL_ID: process.env.VOICE_CHANNEL_ID || 'YOUR_VOICE_CHANNEL_ID',
   CSHARP_API_URL: (process.env.CSHARP_API_URL || 'http://localhost:5000').trim(),
+  CSHARP_API_KEY: (process.env.CSHARP_API_KEY || '').trim(),
   ASSEMBLYAI_API_KEY: (process.env.ASSEMBLYAI_API_KEY || '').trim(),
   GROQ_API_KEY: (process.env.GROQ_API_KEY || '').trim(),
   STT_MODE: (process.env.STT_MODE || 'groq').toLowerCase(), // 'assemblyai', 'groq', or 'local'
@@ -133,6 +134,11 @@ const hasCSharpIntegration = !!(process.env.CSHARP_API_URL && process.env.CSHARP
 
 if (hasCSharpIntegration) {
   console.log('[INFO] C# API URL configured:', CONFIG.CSHARP_API_URL);
+  // Web API behind cookie auth: headless clients authenticate with X-Api-Key.
+  if (CONFIG.CSHARP_API_KEY) {
+    axios.defaults.headers.common['X-Api-Key'] = CONFIG.CSHARP_API_KEY;
+    console.log('[INFO] C# API key auth enabled');
+  }
   console.log('[INFO] Full STT->LLM->TTS pipeline enabled');
 } else {
   console.log('[INFO] Running in standalone mode - C# integration disabled');

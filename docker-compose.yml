@@ -45,16 +45,19 @@ services:
     restart: unless-stopped
     profiles: ["voice"]
 
-  # Phase 5 (deferred): Discord voice bridge, pointed at the public API instead of
-  # a desktop localhost. Uncomment after building discord-voice-bridge into an image.
-  # bridge:
-  #   build: ./discord-voice-bridge
-  #   restart: unless-stopped
-  #   env_file: ./discord-voice-bridge/.env
-  #   environment:
-  #     TSUKI_API_BASE_URL: http://api:8080
-  #   depends_on:
-  #     - api
+  # 24/7 Discord voice assistant: joins your voice channel and drives the API.
+  # Requires discord-voice-bridge/.env with DISCORD_TOKEN, GUILD_ID,
+  # VOICE_CHANNEL_ID (see discord-voice-bridge/.env.example). TSUKI_API_KEY must
+  # be set in the root .env so the bridge can authenticate to the API.
+  bridge:
+    build: ./discord-voice-bridge
+    restart: unless-stopped
+    env_file: ./discord-voice-bridge/.env
+    environment:
+      CSHARP_API_URL: http://api:8080
+      CSHARP_API_KEY: ${TSUKI_API_KEY:?Set TSUKI_API_KEY in .env}
+    depends_on:
+      - api
 
 volumes:
   caddy-data:
