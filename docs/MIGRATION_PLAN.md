@@ -65,24 +65,46 @@ minimal logic change; only mic capture/output moves into the browser.
       tabs render with correct server state.
 - Deployment note: production serving (Caddy static + API proxy) lands in Phase 4.
 
-## Phase 3 — Data, secrets, polish
-- One-shot import of `%APPDATA%\TsukiAI\chat_history.json` / settings into server storage.
-- All API keys live only in server env/secret files — never sent to the browser. The plaintext
-  `settings.json` key store disappears.
-- Latency tracking and provider failover (`ProviderSwitchingService`) carried over as-is.
+## Phase 3 — Data, secrets, polish  [done]
+- [x] `scripts/import-local-data.ps1`: copies desktop `%APPDATA%\TsukiAI` history +
+      provider-state into the server data dir and writes a **redacted** settings.json
+      (API keys stripped); prints which env vars to set instead.
+- [x] Per-provider key env vars added to `EnvConfiguration` (TSUKI_CEREBRAS/GROQ/GEMINI/
+      GITHUB/MISTRAL_API_KEY) + TSUKI_SEMANTIC_MEMORY_ENABLED — server keys now come from
+      environment only. The real DeepL key in the root `.env` stays untracked and moves to
+      the server `.env` at deploy time.
+- [x] History/provider state stays JSON on the `tsuki-data` Docker volume (SQLite upgrade
+      postponed — JSON satisfies single-user scale and keeps the Core services untouched).
+- Note: storage layout changed from the original SQLite plan; settings/history files live
+  under `TSUKI_DATA_DIR` (default `%APPDATA%\TsukiAI` for desktop, `/data` in Docker).
 
-## Phase 4 — Deployment (VPS + Docker + domain)
-- Multi-stage Dockerfile (API + frontend build); `docker-compose.yml`: caddy, api, chromadb,
-  voicevox (bridge service commented out until Phase 5).
-- DNS A-record for the domain -> VPS; Caddy auto-TLS.
-- `.env` on server holds keys; `.env.example` updated. The real DeepL key currently sitting in the
-  root `.env` must be moved to the server.
+## Phase 4 — Deployment (VPS + Docker + domain)  [files done, deploy pending]
+- [x] Root `Dockerfile`: multi-stage (node builds web -> dotnet publishes API -> single
+      aspnet runtime image serving the SPA from wwwroot + API on :8080, non-root user,
+      /data volume).
+- [x] `docker-compose.yml`: caddy (auto-TLS), api, chromadb, voicevox (optional `voice`
+      profile), commented Phase-5 bridge service.
+- [x] `Caddyfile`: `{$DOMAIN} -> reverse_proxy api:8080`, gzip.
+- [x] `.env.example`: full web-deployment surface documented (DOMAIN, TSUKI_WEB_PASSWORD,
+      per-provider keys, STT key/model, memory flag).
+- [x] SPA serving verified locally: API serves static assets, SPA fallback, and auth
+      together (required UseStaticFiles BEFORE auth middleware — extension requests never
+      reach the :nonfile fallback, and auth-after-routing 401'd them otherwise).
+- [ ] **Not executable on this machine (no Docker installed).** First deploy on the VPS:
+      1. `git clone` repo (or push + pull), copy `.env.example` -> `.env`, fill in
+         DOMAIN + TSUKI_WEB_PASSWORD + keys.
+      2. Run `scripts/import-local-data.ps1 -TargetDir .\tsuki-data` on the Windows box,
+         copy `tsuki-data/` to the VPS, and point the `tsuki-data` volume at it (or
+         bind-mount it per compose).
+      3. `docker compose up -d --build` — Caddy obtains certificates automatically once
+         the DNS A-record points at the VPS.
+      4. Watch `docker compose logs -f caddy api` for the first boot; log in with the
+         password, flip semantic memory on in Settings, and do a test voice turn.
 
-## Phase 5 — Deferred
-- Discord voice bot: run `discord-voice-bridge` as a second compose service pointing at the public
-  API instead of localhost:5000.
-- Ollama/local models: keep `OllamaClient`, point it at a LAN/GPU box URL — config only.
-- VRChat OSC: only feasible when the server can reach your PC (self-host or tunnel) — decide later.
+## Phase 5 — Deferred (unchanged, by user decision)
+- Discord voice bot: bridge service slot is in docker-compose.yml (commented).
+- Ollama/local models: config-only when a GPU box exists (TSUKI_REMOTE_INFERENCE_URL).
+- VRChat OSC: only when the server can reach your PC (self-host or tunnel) — decide later.
 
 ## Checkpoints
 - After Phase 1: verify API boots, `/api/voice/health` responds, login works, a text chat turn

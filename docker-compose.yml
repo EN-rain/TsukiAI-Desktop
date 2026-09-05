@@ -1,0 +1,63 @@
+# TsukiAI web deployment. Copy .env.example to .env, fill in secrets, then:
+#   docker compose up -d
+# Domain TLS is automatic via Caddy + Let's Encrypt (needs DNS A-record -> this host).
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Inside the compose network these point at sibling containers:
+      - TSUKI_CHROMA_URL=http://chromadb:8000
+      - TSUKI_VOICEVOX_BASE_URL=http://voicevox:50021
+      - TSUKI_SEMANTIC_MEMORY_ENABLED=true
+    volumes:
+      - tsuki-data:/data
+    depends_on:
+      - chromadb
+
+  chromadb:
+    image: chromadb/chroma:latest
+    restart: unless-stopped
+    volumes:
+      - chroma-data:/chroma/chroma
+
+  # Optional: local TTS engine. Enable with: docker compose --profile voice up -d
+  # and set TSUKI_VOICEVOX_BASE_URL=http://voicevox:50021 (compose sets it already).
+  voicevox:
+    image: voicevox/voicevox_engine:cpu-latest
+    restart: unless-stopped
+    profiles: ["voice"]
+
+  # Phase 5 (deferred): Discord voice bridge, pointed at the public API instead of
+  # a desktop localhost. Uncomment after building discord-voice-bridge into an image.
+  # bridge:
+  #   build: ./discord-voice-bridge
+  #   restart: unless-stopped
+  #   env_file: ./discord-voice-bridge/.env
+  #   environment:
+  #     TSUKI_API_BASE_URL: http://api:8080
+  #   depends_on:
+  #     - api
+
+volumes:
+  caddy-data:
+  caddy-config:
+  tsuki-data:
+  chroma-data:

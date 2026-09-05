@@ -1,0 +1,6 @@
+# Caddy: automatic HTTPS for the TsukiAI domain; everything proxies to the API
+# container, which serves both the SPA and the API.
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy api:8080
+}

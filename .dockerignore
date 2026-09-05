@@ -1,0 +1,14 @@
+.git
+.zcode
+.env
+.env.*
+!.env.example
+**/bin
+**/obj
+**/node_modules
+**/dist
+discord-voice-bridge
+voicevox_engine
+tsuki-data
+docs
+*.md

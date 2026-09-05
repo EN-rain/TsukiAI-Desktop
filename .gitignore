@@ -102,3 +102,4 @@ logs/
 screenshots/
 models/
 .zcode/
+TsukiAI.Api/wwwroot/

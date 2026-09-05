@@ -19,11 +19,17 @@ public static class EnvConfiguration
         "TSUKI_DEEPL_API_KEY",
         "TSUKI_REMOTE_INFERENCE_URL",
         "TSUKI_REMOTE_INFERENCE_API_KEY",
+        "TSUKI_CEREBRAS_API_KEY",
+        "TSUKI_GROQ_API_KEY",
+        "TSUKI_GEMINI_API_KEY",
+        "TSUKI_GITHUB_API_KEY",
+        "TSUKI_MISTRAL_API_KEY",
         "TSUKI_CLOUD_TTS_URL",
         "TSUKI_VOICEVOX_BASE_URL",
         "TSUKI_MODEL_NAME",
         "TSUKI_USE_DEEPL_TRANSLATE",
         "TSUKI_USE_DEEPL_FREE_API",
+        "TSUKI_SEMANTIC_MEMORY_ENABLED",
         "TSUKI_VOICE_RUNTIME_V2",
         "TSUKI_VOICE_API_CONTROLLER",
         "TSUKI_VOICE_BARGE_IN"
@@ -41,6 +47,7 @@ public static class EnvConfiguration
         var voiceRuntimeV2Enabled = ParseBool(env, "TSUKI_VOICE_RUNTIME_V2", settings.VoiceRuntimeV2Enabled);
         var voiceApiControllerEnabled = ParseBool(env, "TSUKI_VOICE_API_CONTROLLER", settings.VoiceApiControllerEnabled);
         var voiceBargeInEnabled = ParseBool(env, "TSUKI_VOICE_BARGE_IN", settings.VoiceBargeInEnabled);
+        var semanticMemoryEnabled = ParseBool(env, "TSUKI_SEMANTIC_MEMORY_ENABLED", settings.SemanticMemoryEnabled);
 
         return settings with
         {
@@ -52,7 +59,13 @@ public static class EnvConfiguration
             DeepLApiKey = ReadString(env, "TSUKI_DEEPL_API_KEY", settings.DeepLApiKey),
             RemoteInferenceUrl = ReadString(env, "TSUKI_REMOTE_INFERENCE_URL", settings.RemoteInferenceUrl),
             RemoteInferenceApiKey = ReadString(env, "TSUKI_REMOTE_INFERENCE_API_KEY", settings.RemoteInferenceApiKey),
+            CerebrasApiKey = ReadString(env, "TSUKI_CEREBRAS_API_KEY", settings.CerebrasApiKey),
+            GroqApiKey = ReadString(env, "TSUKI_GROQ_API_KEY", settings.GroqApiKey),
+            GeminiApiKey = ReadString(env, "TSUKI_GEMINI_API_KEY", settings.GeminiApiKey),
+            GitHubApiKey = ReadString(env, "TSUKI_GITHUB_API_KEY", settings.GitHubApiKey),
+            MistralApiKey = ReadString(env, "TSUKI_MISTRAL_API_KEY", settings.MistralApiKey),
             CloudTtsUrl = ReadString(env, "TSUKI_CLOUD_TTS_URL", settings.CloudTtsUrl),
+            SemanticMemoryEnabled = semanticMemoryEnabled,
             VoicevoxBaseUrl = ReadString(env, "TSUKI_VOICEVOX_BASE_URL", settings.VoicevoxBaseUrl),
             ModelName = ReadString(env, "TSUKI_MODEL_NAME", settings.ModelName),
             UseDeepLTranslate = useDeepLTranslate,

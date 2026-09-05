@@ -104,6 +104,12 @@ builder.Services.AddSingleton<IVoiceConversationPipeline>(sp => sp.GetRequiredSe
 
 var app = builder.Build();
 
+// Static SPA assets first: they short-circuit before auth/routing. Serving them
+// later lets requests with file extensions fall through routing (MapFallbackToFile
+// uses a :nonfile pattern, so .js/.css never reach it) and end up 401'd by the
+// authorization fallback policy instead of being served.
+app.UseStaticFiles();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -321,6 +327,10 @@ app.MapDelete("/api/history", () =>
 });
 
 // Health lives outside the auth fallback via [AllowAnonymous] on the controller action.
+
+// SPA fallback: any unmatched GET serves the web app shell (auth policy does NOT
+// apply to it, or the login page could never load).
+app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
 
