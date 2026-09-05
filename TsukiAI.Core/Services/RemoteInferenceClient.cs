@@ -814,7 +814,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
                 new { role = "system", content = systemPrompt },
                 new { role = "user", content = fullPrompt }
             },
-            max_tokens = runtimeTuning.MaxTokens,
+            max_tokens = GetEffectiveMaxTokens(Model, runtimeTuning),
             temperature = runtimeTuning.Temperature,
             top_p = runtimeTuning.TopP,
             presence_penalty = runtimeTuning.PresencePenalty,
@@ -849,6 +849,14 @@ public sealed class RemoteInferenceClient : IInferenceClient
 
         if (!response.IsSuccessStatusCode && (int)response.StatusCode is 400 or 404 or 422)
         {
+            // Log the provider's error body before falling through — e.g. a decommissioned
+            // model reports model_not_found here, which is otherwise indistinguishable
+            // from a bad endpoint.
+            var rejectBody = await response.Content.ReadAsStringAsync(ct);
+            DevLog.WriteLine("RemoteInferenceClient: chat/completions rejected ({0}) at {1}: {2}",
+                (int)response.StatusCode,
+                chatCompletionsUrl,
+                rejectBody.Length > 300 ? rejectBody[..300] + "..." : rejectBody);
             DevLog.WriteLine("RemoteInferenceClient: Falling back to legacy payload format");
             response.Dispose();
 
@@ -867,6 +875,22 @@ public sealed class RemoteInferenceClient : IInferenceClient
         }
 
         return response;
+    }
+
+    /// <summary>
+    /// Reasoning models (gpt-oss, qwen3) spend completion tokens on hidden chain-of-thought
+    /// before any visible text; without headroom the reply arrives empty even though the
+    /// call succeeded. The visible reply stays bounded by GenerationMaxReplyChars.
+    /// </summary>
+    private static int GetEffectiveMaxTokens(string model, GenerationTuningSettings tuning)
+    {
+        var isReasoningModel =
+            model.Contains("gpt-oss", StringComparison.OrdinalIgnoreCase) ||
+            model.Contains("qwen3", StringComparison.OrdinalIgnoreCase);
+        if (!isReasoningModel)
+            return tuning.MaxTokens;
+
+        return Math.Max(tuning.MaxTokens * 4, 512);
     }
 
     private static string? ExtractAssistantText(JsonElement root)

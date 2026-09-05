@@ -37,23 +37,33 @@ minimal logic change; only mic capture/output moves into the browser.
 - Secrets (LLM/STT/TTS/DeepL keys, web password) come from environment variables / Docker secrets
   only. The web UI never receives them.
 
-## Phase 1 — API project (`TsukiAI.Api`)  [in progress]
+## Phase 1 — API project (`TsukiAI.Api`)  [done]
 - [x] Move cross-platform pipeline services into TsukiAI.Core.
 - [x] `ChromaHttpSemanticMemoryService` in Core (Chroma REST v2, auto-embed) replacing the Python
       worker + sqlite sidecar.
 - [x] `InferenceClientFactory` in Core (multi-provider resolution previously duplicated in App.xaml.cs).
 - [x] ASP.NET Core Web API project: ported `VoiceApiController`, `/api/memory/*`, `/api/chat`,
-      SignalR `VoiceHub` (turn-based events; token streaming in Phase 2).
+      SignalR `VoiceHub` (turn-based events; token streaming in Phase 2+).
 - [x] Real server-side STT: `GroqWhisperService` (multipart forward to Groq; accepts browser
       webm/wav audio directly).
 - [x] Single-user auth: `TSUKI_WEB_PASSWORD` + session cookie; API refuses public binding without it.
+- [x] `/api/settings` GET/PUT (non-secret subset), `/api/history` GET/DELETE.
+- [x] E2E verified: login -> chat turn -> real Groq reply. Two fixes landed during testing:
+      stale provider model defaults (llama-3.3-70b-versatile was decommissioned on Groq; now
+      openai/gpt-oss-120b) and extra max_tokens headroom for reasoning models (gpt-oss/qwen3
+      burn completion tokens on hidden reasoning and return empty content otherwise).
 
-## Phase 2 — Web frontend (React + TypeScript + Vite)
-- Pages: chat (text), voice room (push-to-talk + streaming transcript), settings (non-secret
-  prefs; provider/model selection), memory viewer.
-- Voice: `getUserMedia` + AudioWorklet/MediaRecorder capture -> upload/WS; playback via WebAudio.
-  Keyboard shortcuts replace global hotkeys (F8 etc.).
-- Served as static files by Caddy alongside the API.
+## Phase 2 — Web frontend (React + TypeScript + Vite)  [done]
+- [x] `web/` Vite + React 18 + TS + Tailwind v4, dark night-sky theme (ink surfaces, moon-gold
+      accent; no dev proxy dependency in production).
+- [x] Views: chat (restores voice history, live turns, per-reply TTS playback), voice room
+      (push-to-talk button + Space hold, MediaRecorder webm/opus -> STT -> process -> PCM
+      playback), settings (non-secret editing), memory (search + teach).
+- [x] Auth: local mode auto-session; password form in public mode; 401 event bounces to login.
+- [x] API keys never sent to the browser; settings API exposes a non-secret subset only.
+- [x] Verified in browser: auto-login, history render, live chat turn end-to-end, all four
+      tabs render with correct server state.
+- Deployment note: production serving (Caddy static + API proxy) lands in Phase 4.
 
 ## Phase 3 — Data, secrets, polish
 - One-shot import of `%APPDATA%\TsukiAI\chat_history.json` / settings into server storage.

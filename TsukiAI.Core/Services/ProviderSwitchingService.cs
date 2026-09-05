@@ -109,17 +109,19 @@ public sealed class ProviderSwitchingService
 
     /// <summary>
     /// Gets the model name for a given provider.
+    /// Defaults verified against provider catalogs 2026-09; providers decommission
+    /// models regularly, so check /models on the provider before adding new ones.
     /// </summary>
     public static string GetProviderModel(string providerName)
     {
         return providerName.ToLowerInvariant() switch
         {
-            "groq" => "llama-3.3-70b-versatile",
+            "groq" => "openai/gpt-oss-120b",
             "cerebras" => "llama3.1-8b",
-            "gemini" => "gemini-1.5-flash",
-            "github" => "gpt-4o-mini",
+            "gemini" => "gemini-2.0-flash",
+            "github" => "openai/gpt-4o-mini",
             "mistral" => "mistral-small-latest",
-            _ => "llama-3.3-70b-versatile"
+            _ => "openai/gpt-oss-120b"
         };
     }
 

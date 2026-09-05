@@ -8,6 +8,9 @@ using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
 using TsukiAI.VoiceChat.Services;
 
+// Body JSON uses camelCase/snake_case from web clients; default deserialization is case-sensitive.
+var bodyJsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------------------------------------------------------------------------
@@ -109,24 +112,24 @@ app.UseAuthorization();
 // ---------------------------------------------------------------------------
 app.MapPost("/auth/login", async (HttpContext ctx, JsonElement body) =>
 {
-    if (!publicMode)
-        return Results.Ok(new { status = "ok", mode = "local" });
-
-    var password = body.ValueKind == JsonValueKind.Object &&
-                   body.TryGetProperty("password", out var p) && p.ValueKind == JsonValueKind.String
-        ? p.GetString()
-        : null;
-
-    if (string.IsNullOrWhiteSpace(password) || password != webPassword)
+    if (publicMode)
     {
-        DevLog.WriteLine("Auth: failed login attempt from {0}", ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown");
-        return Results.Unauthorized();
+        var password = body.ValueKind == JsonValueKind.Object &&
+                       body.TryGetProperty("password", out var p) && p.ValueKind == JsonValueKind.String
+            ? p.GetString()
+            : null;
+
+        if (string.IsNullOrWhiteSpace(password) || password != webPassword)
+        {
+            DevLog.WriteLine("Auth: failed login attempt from {0}", ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+            return Results.Unauthorized();
+        }
     }
 
     var claimsPrincipal = new System.Security.Claims.ClaimsPrincipal(
         new System.Security.Claims.ClaimsIdentity("tsuki_web"));
     await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, claimsPrincipal);
-    return Results.Ok(new { status = "ok" });
+    return Results.Ok(new { status = "ok", mode = publicMode ? "public" : "local" });
 }).AllowAnonymous();
 
 app.MapPost("/auth/logout", async (HttpContext ctx) =>
@@ -152,7 +155,7 @@ app.MapPost("/api/memory/add", async (HttpContext ctx, ISemanticMemoryService me
     if (string.IsNullOrWhiteSpace(body))
         return Results.BadRequest(new { error = "Empty body" });
 
-    var payload = JsonSerializer.Deserialize<AddMemoryRequest>(body);
+    var payload = JsonSerializer.Deserialize<AddMemoryRequest>(body, bodyJsonOptions);
     if (payload is null || string.IsNullOrWhiteSpace(payload.Text))
         return Results.BadRequest(new { error = "text is required" });
 
@@ -176,7 +179,7 @@ app.MapPost("/api/chat", async (HttpContext ctx, IVoiceConversationPipeline pipe
     var body = await sr.ReadToEndAsync();
     var payload = string.IsNullOrWhiteSpace(body)
         ? null
-        : JsonSerializer.Deserialize<ChatRequest>(body);
+        : JsonSerializer.Deserialize<ChatRequest>(body, bodyJsonOptions);
 
     if (payload is null || string.IsNullOrWhiteSpace(payload.Text))
         return Results.BadRequest(new { error = "text is required" });
@@ -186,6 +189,135 @@ app.MapPost("/api/chat", async (HttpContext ctx, IVoiceConversationPipeline pipe
         return Results.Json(new { error = result.ErrorMessage }, statusCode: 500);
 
     return Results.Ok(new { text = result.ResponseText });
+});
+
+// ---------------------------------------------------------------------------
+// Settings (non-secret subset only — API keys are never readable via the API)
+// ---------------------------------------------------------------------------
+app.MapGet("/api/settings", (AppSettings s) =>
+{
+    var activeProvider = default(string);
+    if (s.UseMultipleAiProviders && !string.IsNullOrWhiteSpace(s.MultiAiProvidersCsv))
+    {
+        activeProvider = new ProviderSwitchingService().GetCurrentProvider(s.MultiAiProvidersCsv);
+    }
+
+    return Results.Ok(new
+    {
+        model_name = s.ModelName,
+        inference_mode = s.InferenceMode.ToString(),
+        use_multiple_providers = s.UseMultipleAiProviders,
+        multi_providers_csv = s.MultiAiProvidersCsv,
+        active_provider = activeProvider,
+        reply_tone_preset = s.ReplyTonePreset,
+        generation = new
+        {
+            max_tokens = s.GenerationMaxTokens,
+            temperature = s.GenerationTemperature,
+            top_p = s.GenerationTopP,
+            top_k = s.GenerationTopK,
+            repeat_penalty = s.GenerationRepeatPenalty,
+            max_reply_chars = s.GenerationMaxReplyChars
+        },
+        tts = new
+        {
+            mode = s.TtsMode.ToString(),
+            voicevox_base_url = s.VoicevoxBaseUrl,
+            speaker_style_id = s.VoicevoxSpeakerStyleId
+        },
+        translation = new
+        {
+            voice_translate_to_japanese = s.VoiceTranslateToJapanese,
+            use_deepl = s.UseDeepLTranslate,
+            use_deepl_free_api = s.UseDeepLFreeApi
+        },
+        memory = new { semantic_memory_enabled = s.SemanticMemoryEnabled },
+        stt = new { mode = s.SttMode.ToString(), language_code = s.SttLanguageCode }
+    });
+});
+
+app.MapPut("/api/settings", async (HttpContext ctx, AppSettings current) =>
+{
+    using var sr = new StreamReader(ctx.Request.Body);
+    var body = await sr.ReadToEndAsync();
+    var patch = string.IsNullOrWhiteSpace(body)
+        ? null
+        : JsonSerializer.Deserialize<SettingsPatch>(body, bodyJsonOptions);
+
+    if (patch is null)
+        return Results.BadRequest(new { error = "empty body" });
+
+    var updated = current;
+    if (!string.IsNullOrWhiteSpace(patch.ModelName)) updated = updated with { ModelName = patch.ModelName };
+    if (!string.IsNullOrWhiteSpace(patch.ReplyTonePreset)) updated = updated with { ReplyTonePreset = patch.ReplyTonePreset };
+    if (patch.Generation is not null)
+    {
+        var g = patch.Generation;
+        updated = updated with
+        {
+            GenerationMaxTokens = g.MaxTokens ?? updated.GenerationMaxTokens,
+            GenerationTemperature = g.Temperature ?? updated.GenerationTemperature,
+            GenerationTopP = g.TopP ?? updated.GenerationTopP,
+            GenerationTopK = g.TopK ?? updated.GenerationTopK,
+            GenerationRepeatPenalty = g.RepeatPenalty ?? updated.GenerationRepeatPenalty,
+            GenerationMaxReplyChars = g.MaxReplyChars ?? updated.GenerationMaxReplyChars
+        };
+    }
+    if (patch.Tts is not null)
+    {
+        var t = patch.Tts;
+        updated = updated with
+        {
+            VoicevoxBaseUrl = t.VoicevoxBaseUrl ?? updated.VoicevoxBaseUrl,
+            VoicevoxSpeakerStyleId = t.SpeakerStyleId ?? updated.VoicevoxSpeakerStyleId
+        };
+        if (!string.IsNullOrWhiteSpace(t.Mode) &&
+            Enum.TryParse<TtsMode>(t.Mode, ignoreCase: true, out var ttsMode))
+        {
+            updated = updated with { TtsMode = ttsMode };
+        }
+    }
+    if (patch.Translation is not null)
+    {
+        var tr = patch.Translation;
+        updated = updated with
+        {
+            VoiceTranslateToJapanese = tr.VoiceTranslateToJapanese ?? updated.VoiceTranslateToJapanese,
+            UseDeepLTranslate = tr.UseDeepl ?? updated.UseDeepLTranslate,
+            UseDeepLFreeApi = tr.UseDeeplFreeApi ?? updated.UseDeepLFreeApi
+        };
+    }
+    if (patch.Memory is not null && patch.Memory.SemanticMemoryEnabled is { } memEnabled)
+        updated = updated with { SemanticMemoryEnabled = memEnabled };
+    if (patch.Stt is not null)
+    {
+        var stt = patch.Stt;
+        updated = updated with { SttLanguageCode = stt.LanguageCode ?? updated.SttLanguageCode };
+        if (!string.IsNullOrWhiteSpace(stt.Mode) &&
+            Enum.TryParse<SttMode>(stt.Mode, ignoreCase: true, out var sttMode))
+        {
+            updated = updated with { SttMode = sttMode };
+        }
+    }
+
+    await SettingsService.SaveAsync(updated);
+    DevLog.WriteLine("Api: settings updated via web UI");
+    return Results.Ok(new { status = "ok" });
+});
+
+app.MapGet("/api/history", async () =>
+{
+    var history = await ConversationHistoryService.LoadVoiceChatHistoryAsync();
+    var messages = history?.Messages
+        .Select(m => new { role = m.Role, content = m.Content, timestamp = m.Timestamp, speaker_id = m.SpeakerId })
+        .ToList() ?? [];
+    return Results.Ok(new { messages, last_updated = history?.LastUpdated });
+});
+
+app.MapDelete("/api/history", () =>
+{
+    ConversationHistoryService.ClearVoiceChatHistory();
+    return Results.Ok(new { status = "ok" });
 });
 
 // Health lives outside the auth fallback via [AllowAnonymous] on the controller action.
@@ -201,6 +333,52 @@ sealed class AddMemoryRequest
 sealed class ChatRequest
 {
     public string Text { get; set; } = string.Empty;
+}
+
+sealed class SettingsPatch
+{
+    public string? ModelName { get; set; }
+    public string? ReplyTonePreset { get; set; }
+    public GenerationPatch? Generation { get; set; }
+    public TtsPatch? Tts { get; set; }
+    public TranslationPatch? Translation { get; set; }
+    public MemoryPatch? Memory { get; set; }
+    public SttPatch? Stt { get; set; }
+}
+
+sealed class GenerationPatch
+{
+    public int? MaxTokens { get; set; }
+    public float? Temperature { get; set; }
+    public float? TopP { get; set; }
+    public int? TopK { get; set; }
+    public float? RepeatPenalty { get; set; }
+    public int? MaxReplyChars { get; set; }
+}
+
+sealed class TtsPatch
+{
+    public string? Mode { get; set; }
+    public string? VoicevoxBaseUrl { get; set; }
+    public int? SpeakerStyleId { get; set; }
+}
+
+sealed class TranslationPatch
+{
+    public bool? VoiceTranslateToJapanese { get; set; }
+    public bool? UseDeepl { get; set; }
+    public bool? UseDeeplFreeApi { get; set; }
+}
+
+sealed class MemoryPatch
+{
+    public bool? SemanticMemoryEnabled { get; set; }
+}
+
+sealed class SttPatch
+{
+    public string? Mode { get; set; }
+    public string? LanguageCode { get; set; }
 }
 
 /// <summary>Falls back to a no-op memory service when semantic memory is disabled.</summary>

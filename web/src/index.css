@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme {
+  /* Night-sky palette: deep ink surfaces, warm moon-gold accent. */
+  --color-ink-950: #070b16;
+  --color-ink-900: #0b1020;
+  --color-ink-800: #11172b;
+  --color-ink-700: #1a2240;
+  --color-ink-600: #2a3560;
+  --color-moon-300: #f0d9a8;
+  --color-moon-400: #e8c07a;
+  --color-moon-500: #d9a959;
+  --color-mist-100: #e6e9f2;
+  --color-mist-400: #9aa3bd;
+  --color-mist-500: #8b93ab;
+  --color-rose-alert: #f1948a;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-ink-900);
+  color: var(--color-mist-100);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    sans-serif;
+}
+
+/* Visible focus for keyboard users on every interactive element. */
+:focus-visible {
+  outline: 2px solid var(--color-moon-400);
+  outline-offset: 2px;
+}
