@@ -397,6 +397,12 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
 
 // Health lives outside the auth fallback via [AllowAnonymous] on the controller action.
 
+// SPA fallback: any unmatched GET serves the web app shell (auth policy does NOT
+// apply to it, or the login page could never load).
+app.MapFallbackToFile("index.html").AllowAnonymous();
+
+app.Run();
+
 sealed class AddMemoryRequest
 {
     public string Text { get; set; } = string.Empty;
