@@ -71,8 +71,16 @@ public sealed class TextChatService
                   string.Join("\n", memories.Select(m => $"- {m.Text}"))
                 : string.Empty;
 
+            // Name usage is a small random chance (~15% of replies) — being
+            // addressed by name every single message feels robotic.
+            var useName = Random.Shared.NextDouble() < 0.15;
+            var nameRule = useName
+                ? $"You may use {name}'s name once in this reply, only if it fits naturally."
+                : "Do not use their name in this reply.";
+
             var systemInstructions =
-                $"\nThe person you are talking to right now is {name}. Address them by name when it feels natural." +
+                $"\nThe person you are talking to right now is {name}." +
+                $"\n{nameRule}" +
                 "\nYou CAN send voice messages in this chat: when the user asks for a voice, a voice chat, or to hear you, " +
                 "confirm happily — the system automatically attaches your spoken reply as a Discord voice message. " +
                 "Never claim you cannot send voice or audio." +
