@@ -123,6 +123,18 @@ Promoted from "deferred" to the web deployment's primary workload (user decision
       profile (VOICEVOX container) so the pipeline has TTS, `docker compose up -d` and confirm
       the bot joins the voice channel.
 
+## Next rework (user direction, 2026-09-05 evening)
+- Web becomes **Tsuki's portfolio + public chat bot** — not a private admin app.
+  VPS topology: VPS <-> Discord (24/7 bot), VPS <-> user's PC (link TBD: tunnel),
+  VPS <-> portfolio site (public chat against the API).
+- Own domain confirmed NOT required for the Discord bridge (outbound-only).
+  Caddy/domain deferred until the portfolio needs HTTPS; until then the UI
+  stays unpublished (ports closed) or IP-only.
+- The cookie-auth admin SPA will be reworked: public portfolio page + chat,
+  private admin surface for settings/memory.
+- Discord bridge deployed 2026-09-05 with user-provided token; guild/voice
+  channel IDs on the server in discord-voice-bridge/.env.
+
 ## Still deferred
 - Ollama/local models: config-only when a GPU box exists (TSUKI_REMOTE_INFERENCE_URL).
 - VRChat OSC: desktop-only anyway; stays with the desktop app.
