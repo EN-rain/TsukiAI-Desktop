@@ -47,6 +47,7 @@ const CONFIG = {
   DISCORD_TOKEN: (process.env.DISCORD_TOKEN || 'YOUR_BOT_TOKEN').trim(),
   GUILD_ID: process.env.GUILD_ID || 'YOUR_GUILD_ID',
   VOICE_CHANNEL_ID: process.env.VOICE_CHANNEL_ID || 'YOUR_VOICE_CHANNEL_ID',
+  TEXT_CHANNEL_ID: (process.env.TEXT_CHANNEL_ID || '').trim(),
   CSHARP_API_URL: (process.env.CSHARP_API_URL || 'http://localhost:5000').trim(),
   CSHARP_API_KEY: (process.env.CSHARP_API_KEY || '').trim(),
   ASSEMBLYAI_API_KEY: (process.env.ASSEMBLYAI_API_KEY || '').trim(),
@@ -154,6 +155,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
   ],
 });
 
@@ -873,6 +875,39 @@ client.once('clientReady', async () => {
 
 client.on('error', (error) => {
   console.error('[BOT] Client error:', error.message);
+});
+
+// Text mentions: when Tsuki is @-mentioned in the configured text channel,
+// run the message through the same LLM pipeline as voice turns and reply in text.
+client.on('messageCreate', async (message) => {
+  try {
+    if (!CONFIG.TEXT_CHANNEL_ID || message.channel.id !== CONFIG.TEXT_CHANNEL_ID) return;
+    if (message.author.bot) return;
+    if (!message.mentions.has(client.user)) return;
+
+    // Strip the mention itself so Tsuki doesn't read "@Tsuki ..." as content.
+    const text = message.content.replace(/<@!?(\d+)>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!text) return;
+
+    console.log(`[TEXT] Mention from ${message.author.tag}: ${text}`);
+    await message.channel.sendTyping().catch(() => {});
+
+    const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/voice/process`, {
+      userId: message.author.id,
+      text,
+    }, { timeout: 180000 });
+
+    const reply = response?.data?.text;
+    if (reply) {
+      // Discord hard-caps messages at 2000 chars.
+      await message.reply(String(reply).slice(0, 1900));
+      console.log(`[TEXT] Replied to ${message.author.tag} (${reply.length} chars)`);
+    } else {
+      console.log('[TEXT] Empty response, not replying');
+    }
+  } catch (error) {
+    console.error('[TEXT] Failed to handle mention:', error?.message);
+  }
 });
 
 // Handle process termination
