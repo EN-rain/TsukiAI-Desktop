@@ -54,6 +54,7 @@ public static class EnvConfiguration
         {
             inferenceMode = settings.InferenceMode;
         }
+        var useMultipleProviders = ParseBool(env, "TSUKI_USE_MULTIPLE_PROVIDERS", settings.UseMultipleAiProviders);
 
         return settings with
         {
@@ -73,6 +74,8 @@ public static class EnvConfiguration
             CloudTtsUrl = ReadString(env, "TSUKI_CLOUD_TTS_URL", settings.CloudTtsUrl),
             SemanticMemoryEnabled = semanticMemoryEnabled,
             InferenceMode = inferenceMode,
+            UseMultipleAiProviders = useMultipleProviders,
+            MultiAiProvidersCsv = ReadString(env, "TSUKI_MULTI_PROVIDERS_CSV", settings.MultiAiProvidersCsv),
             VoicevoxBaseUrl = ReadString(env, "TSUKI_VOICEVOX_BASE_URL", settings.VoicevoxBaseUrl),
             ModelName = ReadString(env, "TSUKI_MODEL_NAME", settings.ModelName),
             UseDeepLTranslate = useDeepLTranslate,

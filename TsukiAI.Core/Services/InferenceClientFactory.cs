@@ -19,17 +19,13 @@ public static class InferenceClientFactory
 
         if (settings.UseMultipleAiProviders && !string.IsNullOrWhiteSpace(settings.MultiAiProvidersCsv))
         {
-            var providerSwitcher = new ProviderSwitchingService();
-            var currentProvider = providerSwitcher.GetCurrentProvider(settings.MultiAiProvidersCsv);
-            effectiveRemoteUrl = ProviderSwitchingService.GetProviderUrl(currentProvider);
-            effectiveRemoteApiKey = ProviderSwitchingService.GetProviderApiKey(currentProvider, settings);
-            effectiveModelName = ProviderSwitchingService.GetProviderModel(currentProvider);
-
-            DevLog.WriteLine("InferenceClientFactory: Multi-provider mode enabled, using provider: {0}", currentProvider);
-            DevLog.WriteLine("InferenceClientFactory: Provider URL: {0}", effectiveRemoteUrl);
-            DevLog.WriteLine("InferenceClientFactory: Provider model: {0}", effectiveModelName);
+            // Hot-switching wrapper: resolves the active provider from state on
+            // every call, so the pipeline's 429 failover takes effect immediately.
+            DevLog.WriteLine("InferenceClientFactory: multi-provider hot-switching enabled ({0})",
+                settings.MultiAiProvidersCsv);
+            return new SwitchingInferenceClient(settings, semanticMemory);
         }
-        else
+
         {
             effectiveRemoteUrl = ResolveStartupRemoteUrl(settings.RemoteInferenceUrl);
             effectiveRemoteApiKey = ResolveEffectiveRemoteApiKey(settings, effectiveRemoteUrl);
