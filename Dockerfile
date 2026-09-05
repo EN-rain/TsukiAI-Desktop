@@ -23,6 +23,9 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
 COPY --from=api /app/publish ./
 COPY --from=web /src/web/dist ./wwwroot
+# Persona style anchor: PromptBuilder injects the Modelfile's PERSONALITY/SPEECH
+# lines into every system prompt (third candidate path: AppContext.BaseDirectory/assets).
+COPY assets/Modelfile ./assets/Modelfile
 
 # Data dir for settings/history/provider state (mount a volume here).
 ENV TSUKI_DATA_DIR=/data \
