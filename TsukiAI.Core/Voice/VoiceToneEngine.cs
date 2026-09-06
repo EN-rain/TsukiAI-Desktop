@@ -16,7 +16,7 @@ public static class VoiceToneEngine
     public static readonly string[] KnownTones = ["normal", "happy", "sad", "angry", "calm"];
 
     // Natural Japanese speaking pace, morae per second (VOICEVOX default ~7).
-    private const double MoraRate = 7.5;
+    private const double MoraRate = 4.5;
 
     private static int CountMoras(string queryJson)
     {

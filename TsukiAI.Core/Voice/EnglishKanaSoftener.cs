@@ -114,8 +114,9 @@ public static partial class EnglishKanaSoftener
             return Map.TryGetValue(word.TrimEnd('\'', '’'), out var kana) ? kana : word;
         });
 
-        // Japanese has no spaces and VOICEVOX inserts a pause at each one —
-        // without this the softened English stops between every word.
-        return Regex.Replace(replaced, @"\s+", "");
+        // NOTE: spaces are intentionally KEPT between words — VOICEVOX turns
+        // them into tiny natural pauses. Stripping them produces dense,
+        // sped-up sibilant katakana clusters that read as static.
+        return replaced;
     }
 }
