@@ -13,6 +13,32 @@ public static class VoiceToneEngine
 {
     public static readonly string[] KnownTones = ["normal", "happy", "sad", "angry", "calm"];
 
+    // Natural Japanese speaking pace, morae per second (VOICEVOX default ~7).
+    private const double MoraRate = 7.5;
+
+    private static int CountMoras(string queryJson)
+    {
+        try
+        {
+            var doc = System.Text.Json.Nodes.JsonNode.Parse(queryJson);
+            var phrases = doc?["accent_phrases"];
+            if (phrases is null) return 0;
+
+            var count = 0;
+            foreach (var phrase in phrases.AsArray())
+            {
+                var moras = phrase?["moras"];
+                if (moras is not null)
+                    count += moras.AsArray().Count;
+            }
+            return count;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     public static Dictionary<string, int> ToneStyles()
     {
         var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
@@ -156,11 +182,17 @@ public static class VoiceToneEngine
         double speedFactor = 1.0;
         if (softened)
         {
-            var rawJson = await voicevox.AudioQueryAsync(originalText, styleId, ct, correlationId);
-            var rawDuration = EstimateDurationSeconds(rawJson);
+            // Tuned katakana adds morae, slowing the read. Normalize to a fixed
+            // speaking rate (~7.5 morae/s, natural Japanese pace) instead of
+            // measuring the raw reading — OpenJTalk's pause insertion on English
+            // words made raw-text duration comparisons unreliable.
             var softDuration = EstimateDurationSeconds(queryJson);
-            if (rawDuration > 0 && softDuration > rawDuration)
-                speedFactor = Math.Round(softDuration / rawDuration, 3);
+            var moraCount = CountMoras(queryJson);
+            if (softDuration > 0 && moraCount > 0)
+            {
+                var targetDuration = moraCount / MoraRate;
+                speedFactor = Math.Clamp(softDuration / targetDuration, 0.9, 2.5);
+            }
         }
         if (string.IsNullOrWhiteSpace(queryJson))
             return Array.Empty<byte>();
