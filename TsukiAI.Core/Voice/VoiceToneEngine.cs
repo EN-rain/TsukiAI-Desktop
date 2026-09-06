@@ -181,6 +181,12 @@ public static class VoiceToneEngine
         text = EnglishKanaSoftener.Apply(text);
         var softened = !string.Equals(text, originalText, StringComparison.Ordinal);
 
+        // Emotion styles + prosody patches produce harsh static on English
+        // katakana readings — softened English stays on the plain normal style
+        // with pace correction only. Japanese keeps the full emotion tones.
+        if (softened)
+            tone = "normal";
+
         var queryJson = await voicevox.AudioQueryAsync(text, styleId, ct, correlationId);
         double speedFactor = 1.0;
         if (softened)
