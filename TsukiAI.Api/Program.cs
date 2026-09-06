@@ -356,18 +356,6 @@ app.MapDelete("/api/history", () =>
 // voice=true also synthesizes her reply so the bridge can send it as a
 // Discord voice message.
 
-// MiniMax cloud English TTS: MINIMAX_API_KEYS is a comma-separated list of API
-// keys — rotation sticks to the last working key and advances on failure
-// (out of credits, etc.), so she keeps speaking as long as any key has balance.
-var minimaxKeys = (Environment.GetEnvironmentVariable("MINIMAX_API_KEYS")
-    ?? Environment.GetEnvironmentVariable("MINIMAX_API_KEY") ?? "")
-    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-var minimaxVoiceId = Environment.GetEnvironmentVariable("MINIMAX_VOICE_ID")?.Trim() ?? "English_Soft-spokenGirl";
-var minimaxModel = Environment.GetEnvironmentVariable("MINIMAX_MODEL")?.Trim() is { Length: > 0 } mm ? mm : "speech-2.8-hd";
-var minimaxHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
-var minimaxKeyIndex = 0;
-if (minimaxKeys.Length > 0)
-    DevLog.WriteLine("Api: MiniMax English TTS enabled (model {0}, {1} key(s))", minimaxModel, minimaxKeys.Length);
 
 app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textChat, VoicevoxClient voicevox, TranslationService translation, AppSettings settings) =>
 {
@@ -415,56 +403,11 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
                 wav = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, ctx.RequestAborted);
                 engineUsed = "voicevox";
             }
-            else if (minimaxKeys.Length > 0)
-            {
-                // MiniMax cloud TTS (exact voice). Rotates across keys: sticks
-                // to the last working key, advances on failure (out of credits,
-                // invalid key, etc.). Final fallback: VOICEVOX so she never
-                // goes silent.
-                for (var attempt = 0; attempt < minimaxKeys.Length && wav.Length == 0; attempt++)
-                {
-                    var keyIndex = (minimaxKeyIndex + attempt) % minimaxKeys.Length;
-                    try
-                    {
-                        var speech = new
-                        {
-                            model = minimaxModel,
-                            text = ttsText,
-                            voice_setting = new { voice_id = minimaxVoiceId, speed = 1.0, vol = 1.0 },
-                            audio_setting = new { format = "wav", sample_rate = 32000, channel = 1 },
-                        };
-                        using var req = new HttpRequestMessage(HttpMethod.Post,
-                            "https://api.minimax.io/v1/t2a_v2");
-                        req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", minimaxKeys[keyIndex]);
-                        req.Content = JsonContent.Create(speech);
-                        using var resp = await minimaxHttp.SendAsync(req, ctx.RequestAborted);
-                        var respBody = await resp.Content.ReadAsStringAsync(ctx.RequestAborted);
-                        var doc = System.Text.Json.Nodes.JsonNode.Parse(respBody);
-                        var hexAudio = doc?["data"]?["audio"]?.GetValue<string>();
-                        if (string.IsNullOrWhiteSpace(hexAudio))
-                            throw new Exception("no audio in response: " + respBody[..Math.Min(150, respBody.Length)]);
-                        wav = Convert.FromHexString(hexAudio);
-                        minimaxKeyIndex = keyIndex; // stick to the working key
-                        engineUsed = "minimax";
-                    }
-                    catch (Exception keyEx)
-                    {
-                        DevLog.WriteLine("Api: minimax key #{0} failed: {1}", keyIndex + 1, keyEx.Message);
-                    }
-                }
-
-                if (wav.Length == 0)
-                {
-                    DevLog.WriteLine("Api: all minimax keys failed, falling back to VOICEVOX");
-                    wav = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, ctx.RequestAborted);
-                    engineUsed = "voicevox-fallback";
-                }
-            }
             else
             {
-                DevLog.WriteLine("Api: no MINIMAX_API_KEYS configured, falling back to VOICEVOX");
+                // English: VOICEVOX with the katakana accent softener.
                 wav = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, ctx.RequestAborted);
-                engineUsed = "voicevox-fallback";
+                engineUsed = "voicevox";
             }
 
             if (wav.Length > 0)
