@@ -371,6 +371,7 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
     string? audio = null;
     double? durationSecs = null;
     string? waveform = null;
+    string? ttsTextOut = null;
     if (payload.Voice)
     {
         try
@@ -385,9 +386,9 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
                 ttsText = cut > 0 ? ttsText[..cut] + "…" : ttsText[..MaxTtsChars];
             }
 
-            // Japanese voice: same behavior as the desktop voice pipeline —
-            // DeepL-translate the reply before synthesis when enabled.
-            if (settings.VoiceTranslateToJapanese && translation.IsEnabled)
+            // Japanese voice is opt-in per message: only translate when the
+            // user's message asks for it (e.g. contains "japanese"/"日本語").
+            if (settings.VoiceTranslateToJapanese && translation.IsEnabled && MentionsJapanese(payload.Text))
             {
                 var ja = await translation.TranslateToJapaneseAsync(ttsText, ctx.RequestAborted);
                 if (!string.IsNullOrWhiteSpace(ja))
@@ -401,6 +402,7 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
             {
                 audio = Convert.ToBase64String(wav);
                 (durationSecs, waveform) = AnalyzeVoiceWav(wav);
+                ttsTextOut = ttsText;
             }
         }
         catch (Exception ex)
@@ -409,7 +411,7 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
         }
     }
 
-    return Results.Ok(new { text = reply, audio, duration_secs = durationSecs, waveform });
+    return Results.Ok(new { text = reply, audio, tts_text = ttsTextOut, duration_secs = durationSecs, waveform });
 });
 
 // Health lives outside the auth fallback via [AllowAnonymous] on the controller action.
@@ -419,6 +421,15 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
 app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
+
+static bool MentionsJapanese(string text)
+{
+    var keywords = (Environment.GetEnvironmentVariable("TSUKI_VOICE_JAPANESE_KEYWORDS") ??
+                    "japanese,japan,日本語,日本,nihongo")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var t = text.ToLowerInvariant();
+    return keywords.Any(k => t.Contains(k.ToLowerInvariant()));
+}
 
 static (double DurationSecs, string Waveform) AnalyzeVoiceWav(byte[] wav)
 {
