@@ -943,10 +943,13 @@ function pcmToOggOpus(pcmBuffer) {
       return;
     }
 
+    // Discord voice messages must be MONO 48kHz opus — stereo files render
+    // but stall in the client's voice-message player.
     const proc = spawnProcess(ffmpegPath, [
       '-loglevel', 'error',
-      '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0',
-      '-c:a', 'libopus', '-b:a', '64k', '-ar', '48000', '-ac', '2',
+      '-f', 's16le', '-ar', '48000', '-ac', '1', '-i', 'pipe:0',
+      '-c:a', 'libopus', '-b:a', '64k', '-ar', '48000', '-ac', '1',
+      '-application', 'voip',
       '-f', 'ogg', 'pipe:1',
     ]);
 
