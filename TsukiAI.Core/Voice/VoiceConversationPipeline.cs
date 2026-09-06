@@ -456,7 +456,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
             {
                 var tonedWav = await VoiceToneEngine.SynthesizeAsync(text, _voicevoxClient, ct, correlationId: correlationId);
                 if (tonedWav.Length > 0)
-                    return _audioProcessingService.ConvertVoiceVoxWavToDiscordPcm(tonedWav);
+                    return tonedWav;
             }
             catch (Exception ex)
             {
@@ -518,7 +518,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
         {
             var tonedWav = await VoiceToneEngine.SynthesizeAsync(text, _voicevoxClient, ct, correlationId: correlationId);
             if (tonedWav.Length > 0)
-                return _audioProcessingService.ConvertVoiceVoxWavToDiscordPcm(tonedWav);
+                return tonedWav;
         }
         catch (Exception ex)
         {

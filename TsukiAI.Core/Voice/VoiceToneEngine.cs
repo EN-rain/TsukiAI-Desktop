@@ -201,8 +201,6 @@ public static class VoiceToneEngine
 
         queryJson = PatchQuery(queryJson, tone, speedFactor);
 
-        var wav = await voicevox.SynthesizeFromQueryAsync(queryJson, styleId, ct, correlationId);
-        DevLog.WriteLine("VoiceToneEngine: wav={0} bytes, style={1}, tone={2}, speedFactor={3}, est={4}", wav.Length, styleId, tone, speedFactor, EstimateDurationSeconds(queryJson).ToString("0.00"));
-        return wav;
+        return await voicevox.SynthesizeFromQueryAsync(queryJson, styleId, ct, correlationId);
     }
 }
