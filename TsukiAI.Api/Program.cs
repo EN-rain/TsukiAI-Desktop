@@ -355,7 +355,7 @@ app.MapDelete("/api/history", () =>
 // Per-user Discord text chat: own history, own memories, speaker names.
 // voice=true also synthesizes her reply so the bridge can send it as a
 // Discord voice message.
-app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textChat, VoicevoxClient voicevox, AudioProcessingService audioProcessing) =>
+app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textChat, VoicevoxClient voicevox, TranslationService translation, AppSettings settings) =>
 {
     using var sr = new StreamReader(ctx.Request.Body);
     var body = await sr.ReadToEndAsync();
@@ -383,6 +383,15 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
             {
                 var cut = ttsText.LastIndexOf(' ', MaxTtsChars);
                 ttsText = cut > 0 ? ttsText[..cut] + "…" : ttsText[..MaxTtsChars];
+            }
+
+            // Japanese voice: same behavior as the desktop voice pipeline —
+            // DeepL-translate the reply before synthesis when enabled.
+            if (settings.VoiceTranslateToJapanese && translation.IsEnabled)
+            {
+                var ja = await translation.TranslateToJapaneseAsync(ttsText, ctx.RequestAborted);
+                if (!string.IsNullOrWhiteSpace(ja))
+                    ttsText = ja.Trim();
             }
 
             // Ship the raw VOICEVOX WAV — the bridge lets ffmpeg resample with
