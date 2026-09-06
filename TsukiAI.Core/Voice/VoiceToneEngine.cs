@@ -77,7 +77,7 @@ public static class VoiceToneEngine
     };
 
     /// <summary>Patches intonation/pitch/speed into a VOICEVOX audio query JSON.</summary>
-    public static string PatchQuery(string queryJson, string tone)
+    public static string PatchQuery(string queryJson, string tone, double speedFactor = 1.0)
     {
         try
         {
@@ -87,12 +87,45 @@ public static class VoiceToneEngine
             var (intonation, pitch, speed) = ProsodyFor(tone);
             node["intonationScale"] = intonation;
             node["pitchScale"] = pitch;
-            node["speedScale"] = speed;
+            node["speedScale"] = Math.Round(speed * speedFactor, 3);
             return node.ToJsonString();
         }
         catch
         {
             return queryJson;
+        }
+    }
+
+    /// <summary>Estimates natural spoken duration (seconds) from an audio query's mora lengths + pauses.</summary>
+    public static double EstimateDurationSeconds(string queryJson)
+    {
+        try
+        {
+            var doc = System.Text.Json.Nodes.JsonNode.Parse(queryJson);
+            if (doc is null) return 0;
+
+            double total = 0;
+            var phrases = doc["accent_phrases"];
+            if (phrases is null) return 0;
+
+            foreach (var phrase in phrases.AsArray())
+            {
+                var moras = phrase?["moras"];
+                if (moras is not null)
+                {
+                    foreach (var mora in moras.AsArray())
+                    {
+                        total += mora?["consonantLength"]?.GetValue<double>() ?? 0;
+                        total += mora?["vowelLength"]?.GetValue<double>() ?? 0;
+                    }
+                }
+                total += phrase?["pauseLength"]?.GetValue<double>() ?? 0;
+            }
+            return total;
+        }
+        catch
+        {
+            return 0;
         }
     }
 
@@ -113,13 +146,26 @@ public static class VoiceToneEngine
         var styleId = StyleFor(tone);
 
         // Pre-convert common English words to tuned katakana (accent softening).
+        // The tuned katakana is longer than VOICEVOX's own reading, so measure
+        // both durations and speed the softened version up to match the raw pace.
+        var originalText = text;
         text = EnglishKanaSoftener.Apply(text);
+        var softened = !string.Equals(text, originalText, StringComparison.Ordinal);
 
         var queryJson = await voicevox.AudioQueryAsync(text, styleId, ct, correlationId);
+        double speedFactor = 1.0;
+        if (softened)
+        {
+            var rawJson = await voicevox.AudioQueryAsync(originalText, styleId, ct, correlationId);
+            var rawDuration = EstimateDurationSeconds(rawJson);
+            var softDuration = EstimateDurationSeconds(queryJson);
+            if (rawDuration > 0 && softDuration > rawDuration)
+                speedFactor = Math.Round(softDuration / rawDuration, 3);
+        }
         if (string.IsNullOrWhiteSpace(queryJson))
             return Array.Empty<byte>();
 
-        queryJson = PatchQuery(queryJson, tone);
+        queryJson = PatchQuery(queryJson, tone, speedFactor);
 
         return await voicevox.SynthesizeFromQueryAsync(queryJson, styleId, ct, correlationId);
     }
