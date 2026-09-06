@@ -358,6 +358,15 @@ app.MapDelete("/api/history", () =>
 
 // Local English TTS (Kokoro container) — voice/speed tunable via env.
 var kokoroHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+
+// MiniMax cloud English TTS (optional): when MINIMAX_API_KEY + MINIMAX_VOICE_ID
+// are set, English replies use the cloned voice; Kokoro is the fallback.
+var minimaxKey = Environment.GetEnvironmentVariable("MINIMAX_API_KEY")?.Trim();
+var minimaxVoiceId = Environment.GetEnvironmentVariable("MINIMAX_VOICE_ID")?.Trim();
+var minimaxModel = Environment.GetEnvironmentVariable("MINIMAX_MODEL")?.Trim() is { Length: > 0 } mm ? mm : "speech-2.8-hd";
+var minimaxHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+if (!string.IsNullOrWhiteSpace(minimaxKey) && !string.IsNullOrWhiteSpace(minimaxVoiceId))
+    DevLog.WriteLine("Api: MiniMax English TTS enabled (model {0})", minimaxModel);
 var kokoroVoice = Environment.GetEnvironmentVariable("TSUKI_KOKORO_VOICE") is { Length: > 0 } kv ? kv.Trim() : "af_heart";
 var kokoroSpeed = float.TryParse(Environment.GetEnvironmentVariable("TSUKI_KOKORO_SPEED"), out var ks) ? ks : 1.0f;
 
@@ -406,6 +415,47 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
 
                 wav = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, ctx.RequestAborted);
                 engineUsed = "voicevox";
+            }
+            else if (!string.IsNullOrWhiteSpace(minimaxKey) && !string.IsNullOrWhiteSpace(minimaxVoiceId))
+            {
+                // MiniMax cloned voice (exact match). Falls back to Kokoro on
+                // failure (e.g. insufficient balance).
+                try
+                {
+                    var speech = new
+                    {
+                        model = minimaxModel,
+                        text = ttsText,
+                        voice_setting = new { voice_id = minimaxVoiceId, speed = 1.0, vol = 1.0 },
+                        audio_setting = new { format = "wav", sample_rate = 32000, channel = 1 },
+                    };
+                    using var resp = await minimaxHttp.PostAsJsonAsync(
+                        "https://api.minimax.io/v1/t2a_v2", speech, ctx.RequestAborted);
+                    var respBody = await resp.Content.ReadAsStringAsync(ctx.RequestAborted);
+                    var doc = System.Text.Json.Nodes.JsonNode.Parse(respBody);
+                    var hexAudio = doc?["data"]?["audio"]?.GetValue<string>();
+                    if (string.IsNullOrWhiteSpace(hexAudio))
+                        throw new Exception("no audio in response: " + respBody[..Math.Min(150, respBody.Length)]);
+                    wav = Convert.FromHexString(hexAudio);
+                    engineUsed = "minimax";
+                }
+                catch (Exception minimaxEx)
+                {
+                    DevLog.WriteLine("Api: minimax synthesis failed ({0}), falling back to kokoro", minimaxEx.Message);
+                    var speech = new
+                    {
+                        model = "kokoro",
+                        input = ttsText,
+                        voice = kokoroVoice,
+                        speed = kokoroSpeed,
+                        response_format = "wav"
+                    };
+                    using var resp = await kokoroHttp.PostAsJsonAsync(
+                        "http://kokoro:8880/v1/audio/speech", speech, ctx.RequestAborted);
+                    resp.EnsureSuccessStatusCode();
+                    wav = await resp.Content.ReadAsByteArrayAsync(ctx.RequestAborted);
+                    engineUsed = "kokoro-fallback";
+                }
             }
             else
             {
