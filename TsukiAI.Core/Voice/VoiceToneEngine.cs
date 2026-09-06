@@ -115,7 +115,7 @@ public static class VoiceToneEngine
             var (intonation, pitch, speed) = ProsodyFor(tone);
             node["intonationScale"] = intonation;
             node["pitchScale"] = pitch;
-            node["speedScale"] = Math.Round(speed * speedFactor, 3);
+            node["speedScale"] = Math.Clamp(Math.Round(speed * speedFactor, 3), 0.5, 1.6);
             return node.ToJsonString();
         }
         catch
@@ -194,7 +194,9 @@ public static class VoiceToneEngine
             if (softDuration > 0 && moraCount > 0)
             {
                 var targetDuration = moraCount / MoraRate;
-                speedFactor = Math.Clamp(softDuration / targetDuration, 0.9, 2.5);
+                // High speedScale values make VOICEVOX produce harsh artifacts —
+                // cap the correction and accept a slightly slower read.
+                speedFactor = Math.Clamp(softDuration / targetDuration, 0.9, 1.6);
             }
         }
         if (string.IsNullOrWhiteSpace(queryJson))
