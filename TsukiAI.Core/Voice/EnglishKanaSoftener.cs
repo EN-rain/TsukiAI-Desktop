@@ -108,10 +108,14 @@ public static partial class EnglishKanaSoftener
         if (string.IsNullOrWhiteSpace(text) || !Regex.IsMatch(text, @"[A-Za-z]"))
             return text;
 
-        return WordRegex().Replace(text, match =>
+        var replaced = WordRegex().Replace(text, match =>
         {
             var word = match.Value;
             return Map.TryGetValue(word.TrimEnd('\'', '’'), out var kana) ? kana : word;
         });
+
+        // Japanese has no spaces and VOICEVOX inserts a pause at each one —
+        // without this the softened English stops between every word.
+        return Regex.Replace(replaced, @"\s+", "");
     }
 }
