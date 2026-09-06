@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import http from 'http';
 import https from 'https';
-import { Client, GatewayIntentBits, MessageFlags, Routes } from 'discord.js';
+import { Client, GatewayIntentBits, MessageFlags, Routes, PermissionsBitField } from 'discord.js';
 import {
   joinVoiceChannel,
   createAudioPlayer,
@@ -174,6 +174,13 @@ let playbackSequence = 0;
 let currentConnection = null;
 // Focus mode: track which user is currently being processed (ignore all others)
 let focusedUserId = null;
+// Persistent manual focus list (via /focus, cleared via /unfocus).
+// When non-empty, ONLY these users are listened to.
+const manualFocusList = new Set();
+// Input gate: closed for the entire duration of a turn (speech -> STT -> LLM ->
+// TTS playback). While closed, EVERYONE's voice is filtered out until Tsuki is
+// done speaking her reply.
+let turnGateClosed = false;
 // Track users with an active audio capture to avoid duplicate subscriptions.
 const activeAudioCaptures = new Set();
 
@@ -255,12 +262,16 @@ async function finalizeTurn(userId) {
   }
 
   state.processing = true;
+  // Close the input gate for this whole turn: STT -> LLM -> TTS playback.
+  // Everyone else (and this user too) is filtered until the reply finishes.
+  turnGateClosed = true;
   try {
     debugLog(`[TURN] User ${userId}: finalizing turn (${segments.length} segment(s), ${combined.length} bytes)`);
     await sendAudioForSTT(userId, combined);
     state.lastResponseAt = Date.now();
   } finally {
     state.processing = false;
+    turnGateClosed = false;
   }
 }
 
@@ -783,6 +794,17 @@ async function joinVoice(guildId, channelId) {
         return;
       }
 
+      // TURN GATE: input is closed while a turn (STT -> LLM -> TTS playback)
+      // is in progress — all voice is filtered until Tsuki finishes speaking.
+      if (turnGateClosed) {
+        return;
+      }
+
+      // MANUAL FOCUS: when the focus list is non-empty, only listed users pass.
+      if (manualFocusList.size > 0 && !manualFocusList.has(userId)) {
+        return;
+      }
+
       // FOCUS MODE: If we're focused on another user, ignore everyone else
       if (focusedUserId && focusedUserId !== userId) {
         return; // Silently ignore other users while focused
@@ -875,6 +897,154 @@ client.once('clientReady', async () => {
     startBridgeHttpServer();
   } catch (error) {
     console.error('[BOT] Failed to auto-join voice:', error.message);
+  }
+
+  // Register guild slash commands (visible instantly, no global propagation wait)
+  try {
+    const guild = client.guilds.cache.get(CONFIG.GUILD_ID);
+    if (guild) {
+      await guild.commands.set([
+        {
+          name: 'join',
+          description: 'Make Tsuki join a voice channel',
+          options: [{ name: 'channel_id', description: 'Voice channel ID', type: 3, required: true }],
+        },
+        {
+          name: 'leave',
+          description: 'Make Tsuki leave a voice channel',
+          options: [{ name: 'channel_id', description: 'Voice channel ID', type: 3, required: true }],
+        },
+        {
+          name: 'focus',
+          description: 'Only listen to this user',
+          options: [{ name: 'user_id', description: 'User ID', type: 3, required: true }],
+        },
+        {
+          name: 'unfocus',
+          description: 'Stop focusing on this user',
+          options: [{ name: 'user_id', description: 'User ID', type: 3, required: true }],
+        },
+        {
+          name: 'focuslist',
+          description: 'Show which users Tsuki is focused on',
+        },
+      ]);
+      console.log('[BOT] Slash commands registered');
+    }
+  } catch (error) {
+    console.error('[BOT] Slash command registration failed:', error.message);
+  }
+});
+
+function isValidSnowflake(id) {
+  return /^\d{17,20}$/.test(id);
+}
+
+async function resolveUserName(guild, userId) {
+  try {
+    const member = await guild.members.fetch(userId);
+    return member.displayName || member.user.username;
+  } catch {
+    return `unknown (${userId})`;
+  }
+}
+
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  // GUARDRAIL: only members with Manage Channels can control Tsuki.
+  if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageChannels)) {
+    await interaction.reply({ content: 'You need the **Manage Channels** permission to control Tsuki.', ephemeral: true });
+    return;
+  }
+
+  const guild = interaction.guild;
+  const arg = interaction.options.getString('channel_id') || interaction.options.getString('user_id') || '';
+
+  try {
+    switch (interaction.commandName) {
+      case 'join': {
+        if (!isValidSnowflake(arg)) {
+          await interaction.reply({ content: 'That does not look like a valid channel ID (numbers only).', ephemeral: true });
+          return;
+        }
+        if (currentConnection) {
+          leaveVoice(CONFIG.GUILD_ID);
+        }
+        // Reset in-progress turns and focus when switching channels.
+        focusedUserId = null;
+        turnGateClosed = false;
+        userState.clear();
+        try {
+          await joinVoice(CONFIG.GUILD_ID, arg);
+          await interaction.reply(`Joined <#${arg}>. I'm listening.`);
+        } catch (joinError) {
+          await interaction.reply(`Failed to join <#${arg}>: ${joinError.message}`);
+        }
+        return;
+      }
+      case 'leave': {
+        if (!isValidSnowflake(arg)) {
+          await interaction.reply({ content: 'That does not look like a valid channel ID.', ephemeral: true });
+          return;
+        }
+        const voice = currentConnection?.joinConfig?.channelId;
+        if (voice !== arg) {
+          await interaction.reply({ content: `I'm not in <#${arg}> right now.`, ephemeral: true });
+          return;
+        }
+        leaveVoice(CONFIG.GUILD_ID);
+        focusedUserId = null;
+        turnGateClosed = false;
+        userState.clear();
+        await interaction.reply(`Left <#${arg}>. See you later!`);
+        return;
+      }
+      case 'focus': {
+        if (!isValidSnowflake(arg)) {
+          await interaction.reply({ content: 'That does not look like a valid user ID.', ephemeral: true });
+          return;
+        }
+        const member = await guild.members.fetch(arg).catch(() => null);
+        if (!member) {
+          await interaction.reply({ content: `No user with ID \`${arg}\` in this server.`, ephemeral: true });
+          return;
+        }
+        manualFocusList.add(arg);
+        const names = await Promise.all([...manualFocusList].map((id) => resolveUserName(guild, id)));
+        await interaction.reply(`Now only listening to: **${names.join(', ')}**`);
+        return;
+      }
+      case 'unfocus': {
+        if (!manualFocusList.delete(arg)) {
+          await interaction.reply({ content: `\`${arg}\` was not on the focus list.`, ephemeral: true });
+          return;
+        }
+        const names = manualFocusList.size
+          ? await Promise.all([...manualFocusList].map((id) => resolveUserName(guild, id)))
+          : [];
+        await interaction.reply(
+          manualFocusList.size
+            ? `Removed. Still listening to: **${names.join(', ')}**`
+            : 'Removed. Manual focus is off — I listen to everyone again.',
+        );
+        return;
+      }
+      case 'focuslist': {
+        if (manualFocusList.size === 0) {
+          await interaction.reply('Manual focus is off — I listen to everyone. Use `/focus user_id` to restrict it.');
+          return;
+        }
+        const names = await Promise.all([...manualFocusList].map((id) => resolveUserName(guild, id)));
+        await interaction.reply(`Listening only to: **${names.join(', ')}**`);
+        return;
+      }
+    }
+  } catch (error) {
+    console.error('[SLASH] Command failed:', error.message);
+    if (!interaction.replied) {
+      await interaction.reply({ content: 'Something went wrong running that command.', ephemeral: true }).catch(() => {});
+    }
   }
 });
 
