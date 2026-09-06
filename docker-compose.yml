@@ -38,11 +38,6 @@ services:
     volumes:
       - chroma-data:/chroma/chroma
 
-  # Local English TTS (Kokoro-82M, CPU). The API routes: Japanese -> voicevox,
-  # English -> kokoro. OpenAI-compatible endpoint at http://kokoro:8880.
-  kokoro:
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
-    restart: unless-stopped
 
   # Optional: local TTS engine. Enable with: docker compose --profile voice up -d
   # and set TSUKI_VOICEVOX_BASE_URL=http://voicevox:50021 (compose sets it already).
