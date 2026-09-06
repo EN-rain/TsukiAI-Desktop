@@ -117,8 +117,6 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IWhisperService>(sp => sp.GetRequiredService<WhisperService>());
         services.AddSingleton<AudioRecordingService>();
         services.AddSingleton<AudioProcessingService>();
-        services.AddSingleton<DiscordVoiceService>();
-        services.AddSingleton<DiscordBotService>();
         services.AddSingleton<TranslationService>();
         services.AddSingleton<VoiceApiController>();
 
@@ -229,10 +227,9 @@ public partial class App : System.Windows.Application
             }
         }
 
-        // Start local mic capture for VRChat and Other platform modes
-        // (Discord mode uses the Node bridge instead)
-        if (settings.VoiceRuntimeV2Enabled &&
-            settings.VoicePlatform != VoiceIntegrationPlatform.Discord)
+        // Start local mic capture for the voice runtime (desktop app is a
+        // purely local mic + local speakers app; Discord runs on the VPS bridge).
+        if (settings.VoiceRuntimeV2Enabled)
         {
             RunBackground("mic_capture_start", async () =>
             {
@@ -272,9 +269,6 @@ public partial class App : System.Windows.Application
         
         // Flush any pending history saves immediately
         ConversationHistoryService.FlushAllPending();
-        
-        // Ensure Discord bridge is terminated even if MainWindow cleanup was skipped.
-        TsukiAI.VoiceChat.Views.MainWindow.StopBridgeProcessesOnShutdown();
 
         (_serviceProvider?.GetService<IInferenceClient>())?.Dispose();
         try
@@ -379,7 +373,7 @@ public partial class App : System.Windows.Application
             if (payload is null || string.IsNullOrWhiteSpace(payload.Text))
                 return Results.BadRequest(new { error = "text is required" });
 
-            await service.AddMemoryAsync(payload.Text, payload.Source ?? "voicechat", ctx.RequestAborted);
+            await service.AddMemoryAsync(payload.Text, payload.Source ?? "voicechat", ct: ctx.RequestAborted);
             return Results.Ok(new { status = "ok" });
         });
 
@@ -392,7 +386,7 @@ public partial class App : System.Windows.Application
                 return Results.BadRequest(new { error = "q is required" });
 
             var service = _serviceProvider.GetRequiredService<ISemanticMemoryService>();
-            var hits = await service.SearchAsync(q, k ?? 5, ctx.RequestAborted);
+            var hits = await service.SearchAsync(q, k ?? 5, ct: ctx.RequestAborted);
             return Results.Ok(hits);
         });
         

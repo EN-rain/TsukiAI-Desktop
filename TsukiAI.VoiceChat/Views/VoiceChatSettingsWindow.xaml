@@ -297,7 +297,7 @@
                     <StackPanel Style="{StaticResource SectionPanel}">
                             <TextBlock Style="{StaticResource SectionHeader}" Text="Voice Platform"/>
                             <TextBlock Style="{StaticResource FieldHint}"
-                                       Text="Discord uses the Node bridge. VRChat voice uses your local microphone path and a virtual audio cable or routed output device."
+                                       Text="VRChat voice uses your local microphone path and a virtual audio cable or routed output device."
                                        TextWrapping="Wrap"
                                        Margin="0,0,0,10"/>
 
@@ -305,65 +305,8 @@
                                 <TextBlock Style="{StaticResource FieldLabel}" Text="Target Platform"/>
                                 <ComboBox Style="{StaticResource SettingsComboBox}"
                                           SelectedIndex="{Binding VoicePlatformIndex, Mode=TwoWay}">
-                                    <ComboBoxItem Content="Discord"/>
                                     <ComboBoxItem Content="VRChat"/>
                                     <ComboBoxItem Content="Other (No Integration)"/>
-                                </ComboBox>
-                            </StackPanel>
-                    </StackPanel>
-
-                    <StackPanel Style="{StaticResource SectionPanel}"
-                                Visibility="{Binding IsDiscordPlatform, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <TextBlock Style="{StaticResource SectionHeader}" Text="Discord Voice Integration"/>
-                            <TextBlock Style="{StaticResource FieldHint}"
-                                       Text="Discord token / guild / channel IDs are handled from discord-voice-bridge/.env"
-                                       TextWrapping="Wrap"
-                                       Margin="0,0,0,10"/>
-                            <Button Style="{StaticResource SettingsButton}"
-                                    Content="Open discord-voice-bridge/.env"
-                                    HorizontalAlignment="Left"
-                                    Padding="12,6"
-                                    Margin="0,0,0,10"
-                                    IsEnabled="{Binding IsDiscordPlatform}"
-                                    Click="OpenDiscordEnv_Click"/>
-
-                            <StackPanel>
-                                <TextBlock Style="{StaticResource FieldLabel}" Text="STT Mode"/>
-                                <TextBlock Style="{StaticResource FieldHint}" Text="Choose the speech-to-text provider used by the Discord bridge."/>
-                                <ComboBox Style="{StaticResource SettingsComboBox}"
-                                          IsEnabled="{Binding IsDiscordPlatform}"
-                                          SelectedIndex="{Binding SttModeIndex, Mode=TwoWay}">
-                                    <ComboBoxItem Content="AssemblyAI (Accurate, Slower)"/>
-                                    <ComboBoxItem Content="Groq Whisper (Fast, Lower Latency)"/>
-                                </ComboBox>
-                            </StackPanel>
-
-                            <StackPanel Margin="0,8,0,0">
-                                <TextBlock Style="{StaticResource FieldLabel}" Text="STT Language"/>
-                                <ComboBox Style="{StaticResource SettingsComboBox}"
-                                          IsEnabled="{Binding IsDiscordPlatform}"
-                                          SelectedValuePath="Tag"
-                                          SelectedValue="{Binding SttLanguageCode, Mode=TwoWay}">
-                                    <ComboBoxItem Content="Auto-detect" Tag="auto"/>
-                                    <ComboBoxItem Content="English" Tag="en"/>
-                                    <ComboBoxItem Content="Japanese" Tag="ja"/>
-                                    <ComboBoxItem Content="Chinese" Tag="zh"/>
-                                    <ComboBoxItem Content="Korean" Tag="ko"/>
-                                    <ComboBoxItem Content="Spanish" Tag="es"/>
-                                    <ComboBoxItem Content="French" Tag="fr"/>
-                                    <ComboBoxItem Content="German" Tag="de"/>
-                                </ComboBox>
-                            </StackPanel>
-
-                            <StackPanel Margin="0,8,0,0">
-                                <TextBlock Style="{StaticResource FieldLabel}" Text="Translation Strategy"/>
-                                <ComboBox x:Name="CmbDiscordTranslationStrategy"
-                                          Style="{StaticResource SettingsComboBox}"
-                                          IsEnabled="{Binding IsDiscordPlatform}"
-                                          SelectedIndex="{Binding DiscordTranslationStrategyIndex, Mode=TwoWay}">
-                                    <ComboBoxItem Content="Translate Input to Japanese"/>
-                                    <ComboBoxItem Content="Translate Response to Japanese"/>
-                                    <ComboBoxItem Content="Bilingual - No Translation"/>
                                 </ComboBox>
                             </StackPanel>
                     </StackPanel>
@@ -403,22 +346,11 @@
                                        Text="For VRChat, keep this enabled and route Tsuki's output to a virtual microphone or cable device that VRChat listens to."
                                        TextWrapping="Wrap"
                                        Margin="0,0,0,10"/>
-                            <StackPanel Margin="0,0,0,12">
-                                <CheckBox x:Name="UseMicrophoneToggle"
-                                          Style="{StaticResource SettingsCheckBox}"
-                                          Content="Use Local Microphone (instead of Discord)"
-                                          IsChecked="{Binding UseMicrophoneInput}"
-                                          IsEnabled="{Binding IsDiscordPlatform}"
-                                          Visibility="{Binding IsDiscordPlatform, Converter={StaticResource BoolToVisibilityConverter}}"
-                                          Margin="0,0,0,8"/>
-                            </StackPanel>
-
                             <StackPanel Margin="0,0,0,8">
                                 <TextBlock Style="{StaticResource FieldLabel}" Text="Microphone Device"/>
                                 <ComboBox x:Name="CmbMicrophoneDevice"
                                           Style="{StaticResource SettingsComboBox}"
-                                          SelectedIndex="0"
-                                          IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}">
+                                          SelectedIndex="0">
                                     <ComboBoxItem Content="Default Microphone"/>
                                 </ComboBox>
                             </StackPanel>
@@ -428,7 +360,6 @@
                                           Style="{StaticResource SettingsCheckBox}"
                                           Content="Push-to-Talk Mode"
                                           IsChecked="{Binding MicrophonePushToTalk}"
-                                          IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"
                                           Margin="0,0,0,4"/>
                             </StackPanel>
 
@@ -438,7 +369,6 @@
                                     Content="Test Microphone"
                                     MinHeight="36"
                                     Padding="12,0"
-                                    IsEnabled="{Binding ElementName=UseMicrophoneToggle, Path=IsChecked}"
                                     Margin="0,4,0,0"/>
 
                             <StackPanel Margin="0,12,0,0">

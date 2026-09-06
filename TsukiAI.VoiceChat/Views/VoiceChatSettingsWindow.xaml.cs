@@ -1,12 +1,8 @@
 using System.ComponentModel;
-using System.Diagnostics;
-using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
-using System.Net.Sockets;
 using NAudio.Wave;
 using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
@@ -32,7 +28,7 @@ public partial class VoiceChatSettingsWindow : Window
             VoiceChatOutputDeviceNumber = _initialSettings.VoiceChatOutputDeviceNumber,
             InputDevices                = GetInputDevices(),
             OutputDevices               = GetOutputDevices(),
-            VoicePlatformIndex          = (int)_initialSettings.VoicePlatform,
+            VoicePlatformIndex          = _initialSettings.VoicePlatform == VoiceIntegrationPlatform.VrChat ? 0 : 1,
             SttModeIndex                = (int)_initialSettings.SttMode,
             SttLanguageCode             = NormalizeSttLanguageCode(_initialSettings.SttLanguageCode),
             DiscordTranslationStrategyIndex = (int)_initialSettings.DiscordTranslationStrategy,
@@ -104,7 +100,7 @@ public partial class VoiceChatSettingsWindow : Window
         {
             SttMode                     = (SttMode)_viewModel.SttModeIndex,
             SttLanguageCode             = NormalizeSttLanguageCode(_viewModel.SttLanguageCode),
-            VoicePlatform               = (VoiceIntegrationPlatform)_viewModel.VoicePlatformIndex,
+            VoicePlatform               = _viewModel.VoicePlatformIndex == 0 ? VoiceIntegrationPlatform.VrChat : VoiceIntegrationPlatform.Other,
             DiscordTranslationStrategy  = (TranslationStrategy)_viewModel.DiscordTranslationStrategyIndex,
             VoiceChatInputDeviceNumber  = _viewModel.VoiceChatInputDeviceNumber,
             VoiceChatOutputDeviceNumber = _viewModel.VoiceChatOutputDeviceNumber,
@@ -120,7 +116,6 @@ public partial class VoiceChatSettingsWindow : Window
         };
 
         SettingsService.Save(Result);
-        UpdateDiscordBridgeEnv(Result.SttMode, Result.GroqApiKey, Result.SttLanguageCode);
         DialogResult = true;
         Close();
     }
@@ -180,171 +175,6 @@ public partial class VoiceChatSettingsWindow : Window
         if (e.ChangedButton == MouseButton.Left)
         {
             DragMove();
-        }
-    }
-
-    private void OpenDiscordEnv_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var envPath = FindDiscordBridgeEnvPath();
-            if (envPath is null)
-            {
-                MessageBox.Show(this, "Could not find discord-voice-bridge folder.", "Open .env",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            var envDir = Path.GetDirectoryName(envPath)!;
-            if (!File.Exists(envPath))
-            {
-                var examplePath = Path.Combine(envDir, ".env.example");
-                if (File.Exists(examplePath))
-                    File.Copy(examplePath, envPath);
-                else
-                    File.WriteAllText(envPath, string.Empty);
-            }
-
-            Process.Start(new ProcessStartInfo { FileName = envPath, UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, $"Failed to open .env:\n{ex.Message}", "Open .env",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private static string? FindDiscordBridgeEnvPath()
-    {
-        var candidates = new[]
-        {
-            Path.Combine(Directory.GetCurrentDirectory(), "discord-voice-bridge", ".env"),
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "discord-voice-bridge", ".env")),
-            Path.Combine(AppContext.BaseDirectory, "discord-voice-bridge", ".env")
-        };
-
-        foreach (var candidate in candidates)
-        {
-            var bridgeDir = Path.GetDirectoryName(candidate);
-            if (!string.IsNullOrWhiteSpace(bridgeDir) && Directory.Exists(bridgeDir))
-                return candidate;
-        }
-
-        return null;
-    }
-
-    private static void UpdateDiscordBridgeEnv(SttMode sttMode, string groqApiKey, string sttLanguageCode)
-    {
-        var bridgeWasRunning = IsBridgeServerRunning();
-
-        try
-        {
-            var envPath = FindDiscordBridgeEnvPath();
-            if (envPath is null || !File.Exists(envPath))
-            {
-                DevLog.WriteLine("VoiceChatSettingsWindow: .env file not found");
-                return;
-            }
-
-            var lines = File.ReadAllLines(envPath).ToList();
-            var sttModeValue = sttMode == SttMode.CloudGroqWhisper ? "groq" : "assemblyai";
-
-            var sttModeIndex = lines.FindIndex(l => l.StartsWith("STT_MODE="));
-            if (sttModeIndex >= 0)
-                lines[sttModeIndex] = $"STT_MODE={sttModeValue}";
-            else
-                lines.Insert(0, $"STT_MODE={sttModeValue}");
-
-            if (sttMode == SttMode.CloudGroqWhisper && !string.IsNullOrWhiteSpace(groqApiKey))
-            {
-                var groqKeyIndex = lines.FindIndex(l => l.StartsWith("GROQ_API_KEY="));
-                if (groqKeyIndex >= 0)
-                    lines[groqKeyIndex] = $"GROQ_API_KEY={groqApiKey}";
-                else
-                    lines.Add($"GROQ_API_KEY={groqApiKey}");
-            }
-
-            var languageCode = NormalizeSttLanguageCode(sttLanguageCode);
-            var sttLangIndex = lines.FindIndex(l => l.StartsWith("STT_LANGUAGE="));
-            if (sttLangIndex >= 0)
-                lines[sttLangIndex] = $"STT_LANGUAGE={languageCode}";
-            else
-                lines.Add($"STT_LANGUAGE={languageCode}");
-
-            File.WriteAllLines(envPath, lines);
-            DevLog.WriteLine($"VoiceChatSettingsWindow: Updated STT_MODE to {sttModeValue}, STT_LANGUAGE to {languageCode}");
-            RestartBridgeIfNeeded(bridgeWasRunning, envPath);
-        }
-        catch (Exception ex)
-        {
-            DevLog.WriteLine($"VoiceChatSettingsWindow: Failed to update .env: {ex.Message}");
-        }
-    }
-
-    private static bool IsBridgeServerRunning()
-    {
-        try
-        {
-            using var client = new TcpClient();
-            var connectTask = client.ConnectAsync("127.0.0.1", 3001);
-            return connectTask.Wait(300) && client.Connected;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static void RestartBridgeIfNeeded(bool bridgeWasRunning, string envPath)
-    {
-        if (!bridgeWasRunning)
-        {
-            return;
-        }
-
-        try
-        {
-            MainWindow.StopBridgeProcessesOnShutdown();
-            var bridgeDir = Path.GetDirectoryName(envPath);
-            if (string.IsNullOrWhiteSpace(bridgeDir) || !Directory.Exists(bridgeDir))
-            {
-                return;
-            }
-
-            var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = "/c npm start",
-                WorkingDirectory = bridgeDir,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            });
-
-            if (process is null)
-            {
-                DevLog.WriteLine("VoiceChatSettingsWindow: Failed to restart bridge process");
-                return;
-            }
-
-            process.OutputDataReceived += (_, e) =>
-            {
-                if (!string.IsNullOrWhiteSpace(e.Data))
-                    DevLog.WriteLine("[Bridge] " + e.Data);
-            };
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (!string.IsNullOrWhiteSpace(e.Data))
-                    DevLog.WriteLine("[Bridge:ERR] " + e.Data);
-            };
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-            DevLog.WriteLine("VoiceChatSettingsWindow: Restarted bridge to apply new STT mode");
-        }
-        catch (Exception ex)
-        {
-            DevLog.WriteLine($"VoiceChatSettingsWindow: Bridge restart failed: {ex.Message}");
         }
     }
 
@@ -411,16 +241,14 @@ public class SettingsVm : INotifyPropertyChanged
             if (_voicePlatformIndex == value) return;
             _voicePlatformIndex = value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(IsDiscordPlatform));
             OnPropertyChanged(nameof(IsVrChatPlatform));
             OnPropertyChanged(nameof(IsOtherPlatform));
             ApplyPlatformDefaults();
         }
     }
 
-    public bool IsDiscordPlatform => VoicePlatformIndex == (int)VoiceIntegrationPlatform.Discord;
-    public bool IsVrChatPlatform => VoicePlatformIndex == (int)VoiceIntegrationPlatform.VrChat;
-    public bool IsOtherPlatform => VoicePlatformIndex == (int)VoiceIntegrationPlatform.Other;
+    public bool IsVrChatPlatform => VoicePlatformIndex == 0;
+    public bool IsOtherPlatform => VoicePlatformIndex == 1;
 
     public bool UseMicrophoneInput
     {

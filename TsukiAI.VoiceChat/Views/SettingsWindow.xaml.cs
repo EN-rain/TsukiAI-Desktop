@@ -85,10 +85,7 @@ public partial class SettingsWindow : Window
             MultiAiProvidersCsv = Result.MultiAiProvidersCsv ?? string.Empty,
 
             // Voice Chat Settings
-            VoicePlatformIndex = (int)Result.VoicePlatform,
-            SttModeIndex = (int)Result.SttMode,
-            SttLanguageCode = Result.SttLanguageCode,
-            DiscordTranslationStrategyIndex = (int)Result.DiscordTranslationStrategy,
+            VoicePlatformIndex = Result.VoicePlatform == VoiceIntegrationPlatform.VrChat ? 0 : 1,
             VoiceChatInputDeviceNumber = Result.VoiceChatInputDeviceNumber,
             VoiceChatOutputDeviceNumber = Result.VoiceChatOutputDeviceNumber,
             UseMicrophoneInput = Result.UseMicrophoneInput,
@@ -417,10 +414,7 @@ public partial class SettingsWindow : Window
             MistralApiKey = updatedMistralApiKey,
 
             // Voice Chat Settings
-            VoicePlatform = (VoiceIntegrationPlatform)vm.VoicePlatformIndex,
-            SttMode = (SttMode)vm.SttModeIndex,
-            SttLanguageCode = vm.SttLanguageCode,
-            DiscordTranslationStrategy = (TranslationStrategy)vm.DiscordTranslationStrategyIndex,
+            VoicePlatform = vm.VoicePlatformIndex == 0 ? VoiceIntegrationPlatform.VrChat : VoiceIntegrationPlatform.Other,
             VoiceChatInputDeviceNumber = vm.VoiceChatInputDeviceNumber,
             VoiceChatOutputDeviceNumber = vm.VoiceChatOutputDeviceNumber,
             UseMicrophoneInput = vm.UseMicrophoneInput,
@@ -481,28 +475,6 @@ public partial class SettingsWindow : Window
                 "TsukiAI Voice Chat",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
-        }
-    }
-
-    private void OpenDiscordEnv_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var envPath = System.IO.Path.Combine(AppContext.BaseDirectory, "discord-voice-bridge", ".env");
-            if (!System.IO.File.Exists(envPath))
-            {
-                MessageBox.Show(this, $"Discord bridge .env file not found at:\n{envPath}", "File Not Found", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = envPath,
-                UseShellExecute = true
-            });
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, $"Could not open .env file: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -1459,12 +1431,8 @@ public partial class SettingsWindow : Window
 
         // Voice Chat Settings
         public int VoicePlatformIndex { get; set; }
-        public bool IsDiscordPlatform => VoicePlatformIndex == 0;
-        public bool IsVrChatPlatform => VoicePlatformIndex == 1;
-        public bool IsOtherPlatform => VoicePlatformIndex == 2;
-        public int SttModeIndex { get; set; }
-        public string SttLanguageCode { get; set; } = "auto";
-        public int DiscordTranslationStrategyIndex { get; set; }
+        public bool IsVrChatPlatform => VoicePlatformIndex == 0;
+        public bool IsOtherPlatform => VoicePlatformIndex == 1;
         public int VoiceChatInputDeviceNumber { get; set; } = -1;
         public int VoiceChatOutputDeviceNumber { get; set; } = -1;
         public List<AudioDeviceItem> InputDevices { get; set; } = new();

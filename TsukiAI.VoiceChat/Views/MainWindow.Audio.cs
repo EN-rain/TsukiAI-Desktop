@@ -1,6 +1,5 @@
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using TsukiAI.Core.Models;
@@ -66,7 +65,7 @@ public partial class MainWindow
         await PlayVoicePreviewAsync(text, deviceNumber);
     }
 
-    private async void TtsTestPlayInDiscord_Click(object sender, RoutedEventArgs e)
+    private async void PlatformPlaybackButton_Click(object sender, RoutedEventArgs e)
     {
         var text = TtsTestInput.Text?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(text) || text == TtsPlaceholder)
@@ -80,65 +79,9 @@ public partial class MainWindow
             vm.NotifyManualTtsQueued(text);
         }
 
-        var playInDiscordButton = sender as System.Windows.Controls.Button;
-        if (playInDiscordButton is not null)
-        {
-            playInDiscordButton.IsEnabled = false;
-        }
-
-        try
-        {
-            if (_settings.VoicePlatform == VoiceIntegrationPlatform.VrChat)
-            {
-                await PlayVoicePreviewAsync(text, _settings.VoiceChatOutputDeviceNumber);
-                return;
-            }
-
-            if (_serverProcess is not { HasExited: false })
-            {
-                var started = TryStartBridgeServer(showSuccessMessage: false);
-                if (!started)
-                {
-                    MessageBox.Show(this, "Bridge server is not running.", "TsukiAI Voice Chat", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-            }
-
-            var payload = JsonSerializer.Serialize(new { text });
-            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-            using var response = await BridgePlaybackClient.PostAsync("http://127.0.0.1:3001/play-tts", content);
-            var responseBody = await response.Content.ReadAsStringAsync();
-
-            if (response.IsSuccessStatusCode)
-            {
-                DevLog.WriteLine("[Bridge HTTP] Play-in-Discord succeeded");
-                return;
-            }
-
-            var error = ExtractErrorMessage(responseBody);
-            MessageBox.Show(
-                this,
-                $"Play in Discord failed ({(int)response.StatusCode}): {error}",
-                "TsukiAI Voice Chat",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                this,
-                $"Play in Discord failed: {ex.Message}",
-                "TsukiAI Voice Chat",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-        }
-        finally
-        {
-            if (playInDiscordButton is not null)
-            {
-                playInDiscordButton.IsEnabled = true;
-            }
-        }
+        // Local playback only: VRChat routes through the voice-chat output device,
+        // Other platforms test the selected voice output device.
+        await PlayVoicePreviewAsync(text, _settings.VoiceChatOutputDeviceNumber);
     }
 
     private async Task PlayVoicePreviewAsync(string text, int outputDeviceNumber)
@@ -235,28 +178,6 @@ public partial class MainWindow
 
         using var voicevox = new VoicevoxClient(_settings.VoicevoxBaseUrl);
         return await voicevox.SynthesizeWavAsync(text, _settings.VoicevoxSpeakerStyleId, ct);
-    }
-
-    private static string ExtractErrorMessage(string body)
-    {
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            return "No response body";
-        }
-
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            if (doc.RootElement.TryGetProperty("error", out var errorProp) && errorProp.ValueKind == JsonValueKind.String)
-            {
-                return errorProp.GetString() ?? body;
-            }
-        }
-        catch
-        {
-        }
-
-        return body.Length > 220 ? body[..220] + "..." : body;
     }
 
     private void LoadVoiceReceptionSettings()

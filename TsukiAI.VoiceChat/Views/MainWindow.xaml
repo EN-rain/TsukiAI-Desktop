@@ -396,47 +396,6 @@
                                           HorizontalScrollBarVisibility="Disabled"
                                           Padding="16">
                                 <StackPanel x:Name="SidebarContentPanel">
-                                    <Border Background="#231D33" 
-                                            CornerRadius="10" 
-                                            BorderBrush="#2D2540"
-                                            BorderThickness="1"
-                                            Padding="14"
-                                            Margin="0,0,0,12"
-                                            Visibility="Collapsed">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <Grid Grid.Column="0" Width="32" Height="32" VerticalAlignment="Center">
-                                                <Ellipse Width="32" Height="32" Fill="#2D2540"/>
-                                                <Path Width="16" Height="16"
-                                                      Stretch="Uniform"
-                                                      Fill="#9B7BFF"
-                                                      HorizontalAlignment="Center"
-                                                      VerticalAlignment="Center"
-                                                      Data="M 4,4 L 4,20 L 20,20 L 20,6 L 12,6 L 12,4 L 4,4 M 6,8 L 18,8 L 18,18 L 6,18 L 6,8 M 8,10 L 8,12 L 16,12 L 16,10 L 8,10"/>
-                                            </Grid>
-                                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-                                                <TextBlock Text="Voice Bridge"
-                                                           Foreground="#FFFFFF"
-                                                           FontSize="12"
-                                                           FontWeight="Medium"/>
-                                                <TextBlock x:Name="ServerStatusText"
-                                                           Text="Stopped"
-                                                           Foreground="#E74C3C"
-                                                           FontSize="11"/>
-                                            </StackPanel>
-                                            <ToggleButton x:Name="ServerStatusToggle"
-                                                          Grid.Column="2"
-                                                          VerticalAlignment="Center"
-                                                          Style="{StaticResource ModernToggleSwitch}"
-                                                          Checked="ServerStatusToggle_Checked"
-                                                          Unchecked="ServerStatusToggle_Unchecked"/>
-                                        </Grid>
-                                    </Border>
-
                                     <TextBlock Text="FOCUS MODE" 
                                                FontSize="10" 
                                                FontWeight="Bold"
@@ -605,7 +564,7 @@
                                                   Data="M 11,7 L 11,13 L 13,13 L 13,7 L 11,7 M 12,2 C 6.5,2 2,6.5 2,12 C 2,17.5 6.5,22 12,22 C 17.5,22 22,17.5 22,12 C 22,6.5 17.5,2 12,2 M 12,20 C 7.6,20 4,16.4 4,12 C 4,7.6 7.6,4 12,4 C 16.4,4 20,7.6 20,12 C 20,16.4 16.4,20 12,20 M 11,15 L 11,17 L 13,17 L 13,15 L 11,15"/>
                                             <TextBlock x:Name="PlatformTipText"
                                                        Grid.Column="1"
-                                                       Text="Right-click user in Discord and select Copy ID to focus on a specific user"
+                                                       Text="Tip: for VRChat, use a virtual cable for Tsuki output and keep local microphone mode enabled."
                                                        FontSize="10"
                                                        Foreground="#6B5F7D"
                                                        TextWrapping="Wrap"/>
@@ -712,7 +671,7 @@
                         </Border>
 
                         <Button Grid.Column="2" x:Name="PlayHereButton" Content="Play Here" Style="{StaticResource ModernButton}" Background="#3498DB" Foreground="White" Padding="24,10" FontWeight="SemiBold" Click="TtsTestPlayHere_Click"/>
-                        <Button Grid.Column="4" x:Name="PlatformPlaybackButton" Content="Play in Discord" Style="{StaticResource ModernButton}" Background="#27AE60" Foreground="White" Padding="24,10" FontWeight="SemiBold" Click="TtsTestPlayInDiscord_Click"/>
+                        <Button Grid.Column="4" x:Name="PlatformPlaybackButton" Content="Play to VRChat Output" Style="{StaticResource ModernButton}" Background="#27AE60" Foreground="White" Padding="24,10" FontWeight="SemiBold" Click="PlatformPlaybackButton_Click"/>
                     </Grid>
                 </Grid>
             </Grid>

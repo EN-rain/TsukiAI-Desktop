@@ -1,7 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
-using System.IO;
-using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
 using TsukiAI.Core.Models;
@@ -14,43 +10,17 @@ public partial class MainWindow : Window
     private const string TtsPlaceholder = "Type text to test TTS...";
     private const double ExpandedSidebarWidth = 280;
     private const double CollapsedSidebarWidth = 26;
-    private static readonly string BridgePath = ResolveBridgePath();
-    private static readonly string BridgePidFilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "TsukiAI",
-        "discord-bridge.pid");
-    private static readonly HttpClient BridgePlaybackClient = new() { Timeout = TimeSpan.FromSeconds(45) };
-
-    private Process? _serverProcess;
     private TsukiAI.Core.Models.AppSettings _settings = TsukiAI.Core.Models.AppSettings.Default;
     private Key _voiceReceptionToggleKey = Key.F8;
-    private bool _isUpdatingServerStatusToggle;
     private bool _isSidebarCollapsed;
 
     public MainWindow()
     {
         InitializeComponent();
-        Closing += MainWindow_Closing;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
         LoadVoiceReceptionSettings();
         ApplyPlatformUiState();
         ApplySidebarState();
-        UpdateServerStatusUi(false);
-
-        // Auto-start bridge server on app open (only for Discord platform)
-        Loaded += async (_, _) =>
-        {
-            if (_settings.VoicePlatform == VoiceIntegrationPlatform.Discord)
-            {
-                await Task.Delay(1000); // Brief delay to let UI settle
-                TryStartBridgeServer(showSuccessMessage: false);
-            }
-        };
-    }
-
-    private void MainWindow_Closing(object? sender, CancelEventArgs e)
-    {
-        StopBridgeServerProcess();
     }
 
     private void OpenMainSettings_Click(object sender, RoutedEventArgs e)
@@ -150,7 +120,7 @@ public partial class MainWindow : Window
             return;
 
         FocusStatusTitle.Text = "Specific User Mode";
-        FocusStatusDescription.Text = "Waiting · Enter a Discord user ID and click Apply.";
+        FocusStatusDescription.Text = "Waiting · Enter a user ID and click Apply.";
         if (SpecificUserPanel != null)
             SpecificUserPanel.Visibility = Visibility.Visible;
     }
@@ -160,7 +130,7 @@ public partial class MainWindow : Window
         var userId = FocusedUserIdInput.Text?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(userId))
         {
-            MessageBox.Show(this, "Enter a Discord user ID first.", "TsukiAI Voice Chat", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "Enter a user ID first.", "TsukiAI Voice Chat", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -199,7 +169,6 @@ public partial class MainWindow : Window
 
     private void Close_Click(object sender, RoutedEventArgs e)
     {
-        StopBridgeServerProcess();
         System.Windows.Application.Current.Shutdown();
     }
 
@@ -276,16 +245,7 @@ public partial class MainWindow : Window
 
         if (VoiceChatTitleText != null)
         {
-            VoiceChatTitleText.Text = isVrChat ? "🎤 Voice Chat · VRChat" : (isOther ? "🎤 Voice Chat" : "🎤 Voice Chat · Discord");
-        }
-
-        if (ServerStatusText != null)
-        {
-            var serverStatusParent = ServerStatusText.Parent as FrameworkElement;
-            if (serverStatusParent != null)
-            {
-                serverStatusParent.Visibility = (isVrChat || isOther) ? Visibility.Collapsed : Visibility.Visible;
-            }
+            VoiceChatTitleText.Text = isVrChat ? "🎤 Voice Chat · VRChat" : "🎤 Voice Chat";
         }
 
         if (AllUsersFocusRadio != null)
@@ -328,13 +288,12 @@ public partial class MainWindow : Window
         {
             PlatformTipText.Text = isVrChat
                 ? "Tip: for VRChat, use a virtual cable for Tsuki output and keep local microphone mode enabled."
-                : (isOther ? "Standalone mode: Voice output to selected audio device only."
-                    : "Tip: Right-click user in Discord -> Copy ID");
+                : "Standalone mode: Voice output to selected audio device only.";
         }
 
         if (PlatformPlaybackButton != null)
         {
-            PlatformPlaybackButton.Content = isVrChat ? "Play to VRChat Output" : (isOther ? "Test Output" : "Play in Discord");
+            PlatformPlaybackButton.Content = isVrChat ? "Play to VRChat Output" : "Test Output";
         }
     }
 }
