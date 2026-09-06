@@ -143,8 +143,9 @@ public static class VoiceToneEngine
                 {
                     foreach (var mora in moras.AsArray())
                     {
-                        total += mora?["consonantLength"]?.GetValue<double>() ?? 0;
-                        total += mora?["vowelLength"]?.GetValue<double>() ?? 0;
+                        // VOICEVOX uses snake_case in the audio query JSON.
+                        total += mora?["consonant_length"]?.GetValue<double>() ?? 0;
+                        total += mora?["vowel_length"]?.GetValue<double>() ?? 0;
                     }
                 }
                 total += phrase?["pauseLength"]?.GetValue<double>() ?? 0;
