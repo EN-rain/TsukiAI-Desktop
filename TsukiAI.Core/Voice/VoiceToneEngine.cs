@@ -15,8 +15,10 @@ public static class VoiceToneEngine
 {
     public static readonly string[] KnownTones = ["normal", "happy", "sad", "angry", "calm"];
 
-    // Natural Japanese speaking pace, morae per second (VOICEVOX default ~7).
-    private const double MoraRate = 4.5;
+    private static double GetEnvDouble(string key, double defaultValue)
+    {
+        return double.TryParse(Environment.GetEnvironmentVariable(key), out var parsed) ? parsed : defaultValue;
+    }
 
     private static int CountMoras(string queryJson)
     {
@@ -188,23 +190,11 @@ public static class VoiceToneEngine
             tone = "normal";
 
         var queryJson = await voicevox.AudioQueryAsync(text, styleId, ct, correlationId);
-        double speedFactor = 1.0;
-        if (softened)
-        {
-            // Tuned katakana adds morae, slowing the read. Normalize to a fixed
-            // speaking rate (~7.5 morae/s, natural Japanese pace) instead of
-            // measuring the raw reading — OpenJTalk's pause insertion on English
-            // words made raw-text duration comparisons unreliable.
-            var softDuration = EstimateDurationSeconds(queryJson);
-            var moraCount = CountMoras(queryJson);
-            if (softDuration > 0 && moraCount > 0)
-            {
-                var targetDuration = moraCount / MoraRate;
-                // High speedScale values make VOICEVOX produce harsh artifacts —
-                // cap the correction and accept a slightly slower read.
-                speedFactor = Math.Clamp(softDuration / targetDuration, 0.9, 1.6);
-            }
-        }
+        // Softened English: empirical fixed pace (duration-based normalization
+        // misjudges the implicit space pauses; 1.25x measured clean).
+        double speedFactor = softened
+            ? Math.Clamp(GetEnvDouble("TSUKI_VOICE_SOFT_EN_SPEED", 1.25), 0.9, 1.6)
+            : 1.0;
         if (string.IsNullOrWhiteSpace(queryJson))
             return Array.Empty<byte>();
 
