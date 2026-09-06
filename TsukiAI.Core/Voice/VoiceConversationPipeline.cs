@@ -248,6 +248,9 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
                 && !LooksPrimarilyJapanese(ttsText)
                 && runtimeSettings.TtsMode == TtsMode.LocalVoiceVox;
 
+            // Accent softening: common English words -> tuned katakana.
+            ttsText = EnglishKanaSoftener.Apply(ttsText);
+
             // Emotion-aware tone: pick VOICEVOX style + prosody from the reply's
             // emotion (LLM hint) and text heuristics.
             var tone = VoiceToneEngine.ClassifyTone(ttsText, emotionHint);
@@ -443,6 +446,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
     {
         var runtimeSettings = GetRuntimeSettings();
         tone ??= VoiceToneEngine.ClassifyTone(text);
+        text = EnglishKanaSoftener.Apply(text);
 
         // Auto-fallback: if CloudRemote is selected but no URL is configured, use local VOICEVOX
         if (runtimeSettings.TtsMode == TtsMode.CloudRemote && string.IsNullOrWhiteSpace(runtimeSettings.CloudTtsUrl))

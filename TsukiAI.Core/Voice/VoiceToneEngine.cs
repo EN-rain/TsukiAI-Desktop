@@ -112,6 +112,9 @@ public static class VoiceToneEngine
         var tone = ClassifyTone(text, emotionHint);
         var styleId = StyleFor(tone);
 
+        // Pre-convert common English words to tuned katakana (accent softening).
+        text = EnglishKanaSoftener.Apply(text);
+
         var queryJson = await voicevox.AudioQueryAsync(text, styleId, ct, correlationId);
         if (string.IsNullOrWhiteSpace(queryJson))
             return Array.Empty<byte>();
