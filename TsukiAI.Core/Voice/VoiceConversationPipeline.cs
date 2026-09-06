@@ -446,7 +446,8 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
     {
         var runtimeSettings = GetRuntimeSettings();
         tone ??= VoiceToneEngine.ClassifyTone(text);
-        text = EnglishKanaSoftener.Apply(text);
+        // NOTE: English accent softening happens inside VoiceToneEngine
+        // (it needs to see the original text to pace-normalize).
 
         // Auto-fallback: if CloudRemote is selected but no URL is configured, use local VOICEVOX
         if (runtimeSettings.TtsMode == TtsMode.CloudRemote && string.IsNullOrWhiteSpace(runtimeSettings.CloudTtsUrl))
