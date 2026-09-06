@@ -1013,11 +1013,9 @@ client.on('messageCreate', async (message) => {
 
       const reply = response?.data?.text;
       if (reply) {
-        // Discord hard-caps messages at 2000 chars.
-        await message.reply(String(reply).slice(0, 1900));
-        console.log(`[TEXT] Replied to ${message.author.tag} (${reply.length} chars)`);
-
-        // Follow up with her actual voice as a Discord voice message.
+        // Voice replies replace the text entirely (user preference); text is
+        // the fallback when synthesis/conversion fails.
+        let voiceSent = false;
         if (wantVoice && response?.data?.audio) {
           try {
             const pcm = Buffer.from(response.data.audio, 'base64');
@@ -1025,6 +1023,9 @@ client.on('messageCreate', async (message) => {
             const ogg = await pcmToOggOpus(pcm);
             if (ogg.length > 0) {
               // Raw REST: discord.js cannot send waveform/duration metadata.
+              // NOTE: @discordjs/rest expects the buffer under `file`, not
+              // `attachment` (that key left the upload as the string
+              // "undefined", producing a 9-byte unplayable file).
               await client.rest.post(Routes.channelMessages(message.channel.id), {
                 body: {
                   flags: MessageFlags.IsVoiceMessage,
@@ -1032,20 +1033,27 @@ client.on('messageCreate', async (message) => {
                     {
                       id: 0,
                       filename: 'voice-message.ogg',
-                      description: `Voice message from ${CONFIG.CSHARP_API_URL ? 'Tsuki' : 'Tsuki'}`,
+                      description: 'Voice message from Tsuki',
                       duration_secs: durationSecs,
                       waveform,
                     },
                   ],
                 },
-                files: [{ name: 'voice-message.ogg', attachment: ogg }],
+                files: [{ name: 'voice-message.ogg', file: ogg }],
                 auth: true,
               });
+              voiceSent = true;
               console.log(`[TEXT] Sent voice message (${ogg.length} bytes, ${durationSecs}s)`);
             }
           } catch (voiceError) {
             console.error('[TEXT] Voice message failed:', voiceError?.response?.status, voiceError?.message);
           }
+        }
+
+        if (!voiceSent) {
+          // Discord hard-caps messages at 2000 chars.
+          await message.reply(String(reply).slice(0, 1900));
+          console.log(`[TEXT] Replied to ${message.author.tag} with text (${reply.length} chars)`);
         }
       } else {
         console.log('[TEXT] Empty response, not replying');
