@@ -1023,8 +1023,8 @@ client.on('messageCreate', async (message) => {
             const ogg = await pcmToOggOpus(pcm);
             if (ogg.length > 0) {
               // Raw REST: discord.js cannot send waveform/duration metadata.
-              // NOTE: @discordjs/rest expects the buffer under `file`, not
-              // `attachment` (that key left the upload as the string
+              // NOTE: @discordjs/rest expects the buffer under `data`
+              // (older `attachment`/`file` keys left the upload as the string
               // "undefined", producing a 9-byte unplayable file).
               await client.rest.post(Routes.channelMessages(message.channel.id), {
                 body: {
@@ -1039,7 +1039,7 @@ client.on('messageCreate', async (message) => {
                     },
                   ],
                 },
-                files: [{ name: 'voice-message.ogg', file: ogg }],
+                files: [{ name: 'voice-message.ogg', data: ogg, contentType: 'audio/ogg' }],
                 auth: true,
               });
               voiceSent = true;
