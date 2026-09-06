@@ -355,6 +355,12 @@ app.MapDelete("/api/history", () =>
 // Per-user Discord text chat: own history, own memories, speaker names.
 // voice=true also synthesizes her reply so the bridge can send it as a
 // Discord voice message.
+
+// Local English TTS (Kokoro container) — voice/speed tunable via env.
+var kokoroHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+var kokoroVoice = Environment.GetEnvironmentVariable("TSUKI_KOKORO_VOICE") is { Length: > 0 } kv ? kv.Trim() : "af_heart";
+var kokoroSpeed = float.TryParse(Environment.GetEnvironmentVariable("TSUKI_KOKORO_SPEED"), out var ks) ? ks : 1.0f;
+
 app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textChat, VoicevoxClient voicevox, TranslationService translation, AppSettings settings) =>
 {
     using var sr = new StreamReader(ctx.Request.Body);
@@ -372,12 +378,13 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
     double? durationSecs = null;
     string? waveform = null;
     string? ttsTextOut = null;
+    string? engineUsed = null;
     if (payload.Voice)
     {
         try
         {
             // Guardrail: cap synthesis length — very long replies would produce
-            // huge voice messages and stall VOICEVOX on the small instance.
+            // huge voice messages and stall the TTS engines on the small instance.
             var ttsText = reply;
             const int MaxTtsChars = 280;
             if (ttsText.Length > MaxTtsChars)
@@ -386,23 +393,52 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
                 ttsText = cut > 0 ? ttsText[..cut] + "…" : ttsText[..MaxTtsChars];
             }
 
-            // Japanese voice is opt-in per message: only translate when the
-            // user's message asks for it (e.g. contains "japanese"/"日本語").
-            if (settings.VoiceTranslateToJapanese && translation.IsEnabled && MentionsJapanese(payload.Text))
+            // Language routing: Japanese keyword -> DeepL + VOICEVOX (emotion
+            // tones); otherwise English -> local Kokoro. Falls back to VOICEVOX
+            // if Kokoro is unreachable.
+            var useJapanese = MentionsJapanese(payload.Text);
+            byte[] wav;
+            if (useJapanese && settings.VoiceTranslateToJapanese && translation.IsEnabled)
             {
                 var ja = await translation.TranslateToJapaneseAsync(ttsText, ctx.RequestAborted);
                 if (!string.IsNullOrWhiteSpace(ja))
                     ttsText = ja.Trim();
+
+                wav = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, ctx.RequestAborted);
+                engineUsed = "voicevox";
+            }
+            else
+            {
+                try
+                {
+                    var speech = new
+                    {
+                        model = "kokoro",
+                        input = ttsText,
+                        voice = kokoroVoice,
+                        speed = kokoroSpeed,
+                        response_format = "wav"
+                    };
+                    using var resp = await kokoroHttp.PostAsJsonAsync(
+                        "http://kokoro:8880/v1/audio/speech", speech, ctx.RequestAborted);
+                    resp.EnsureSuccessStatusCode();
+                    wav = await resp.Content.ReadAsByteArrayAsync(ctx.RequestAborted);
+                    engineUsed = "kokoro";
+                }
+                catch (Exception kokoroEx)
+                {
+                    DevLog.WriteLine("Api: kokoro synthesis failed ({0}), falling back to VOICEVOX", kokoroEx.Message);
+                    wav = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, ctx.RequestAborted);
+                    engineUsed = "voicevox-fallback";
+                }
             }
 
-            // Ship the raw VOICEVOX WAV — the bridge lets ffmpeg resample with
-            // high quality (the custom 24k->48k converter was distorting).
-            var wav = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, ctx.RequestAborted);
             if (wav.Length > 0)
             {
                 audio = Convert.ToBase64String(wav);
                 (durationSecs, waveform) = AnalyzeVoiceWav(wav);
                 ttsTextOut = ttsText;
+                DevLog.WriteLine("Api: discord chat voice via {0} ({1} bytes)", engineUsed, wav.Length);
             }
         }
         catch (Exception ex)
