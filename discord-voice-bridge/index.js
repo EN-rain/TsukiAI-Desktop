@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import http from 'http';
 import https from 'https';
-import { Client, GatewayIntentBits, MessageFlags } from 'discord.js';
+import { Client, GatewayIntentBits, MessageFlags, Routes } from 'discord.js';
 import {
   joinVoiceChannel,
   createAudioPlayer,
@@ -909,6 +909,30 @@ function wantsVoiceReply(text) {
 let textTurnInFlight = false;
 const lastTextTurnAt = new Map(); // userId -> epoch ms
 
+// Discord voice-message attachments require duration + waveform metadata
+// (base64 amplitude samples). discord.js can parse these but cannot send them,
+// so the bridge posts the message through the raw REST API.
+function buildVoiceMetadata(pcmBuffer) {
+  const frameCount = Math.floor(pcmBuffer.length / 4); // 16-bit stereo = 4 bytes/frame
+  const durationSecs = Math.max(1, Math.round((frameCount / 48000) * 10) / 10);
+  const bins = 64;
+  const step = Math.max(1, Math.floor(frameCount / bins));
+  const amps = [];
+  for (let b = 0; b < bins; b++) {
+    let peak = 0;
+    const start = b * step;
+    const end = Math.min(frameCount, start + step);
+    for (let i = start; i < end; i++) {
+      const v = Math.abs(pcmBuffer.readInt16LE(i * 4)); // left channel
+      if (v > peak) peak = v;
+    }
+    amps.push(peak);
+  }
+  const max = Math.max(...amps, 1);
+  const bytes = Buffer.from(amps.map((a) => Math.round((a / max) * 255)));
+  return { durationSecs, waveform: bytes.toString('base64') };
+}
+
 // Convert 48kHz stereo s16le PCM (the API's TTS format) to ogg/opus for
 // Discord voice messages. Spawns the bundled ffmpeg-static directly —
 // prism-media's FFmpeg helper failed to locate the binary in the container.
@@ -994,16 +1018,30 @@ client.on('messageCreate', async (message) => {
         if (wantVoice && response?.data?.audio) {
           try {
             const pcm = Buffer.from(response.data.audio, 'base64');
+            const { durationSecs, waveform } = buildVoiceMetadata(pcm);
             const ogg = await pcmToOggOpus(pcm);
             if (ogg.length > 0) {
-              await message.channel.send({
-                files: [{ attachment: ogg, name: 'voice-message.ogg' }],
-                flags: MessageFlags.IsVoiceMessage,
+              // Raw REST: discord.js cannot send waveform/duration metadata.
+              await client.rest.post(Routes.channelMessages(message.channel.id), {
+                body: {
+                  flags: MessageFlags.IsVoiceMessage,
+                  attachments: [
+                    {
+                      id: 0,
+                      filename: 'voice-message.ogg',
+                      description: `Voice message from ${CONFIG.CSHARP_API_URL ? 'Tsuki' : 'Tsuki'}`,
+                      duration_secs: durationSecs,
+                      waveform,
+                    },
+                  ],
+                },
+                files: [{ name: 'voice-message.ogg', attachment: ogg }],
+                auth: true,
               });
-              console.log(`[TEXT] Sent voice message (${ogg.length} bytes)`);
+              console.log(`[TEXT] Sent voice message (${ogg.length} bytes, ${durationSecs}s)`);
             }
           } catch (voiceError) {
-            console.error('[TEXT] Voice message failed:', voiceError?.message);
+            console.error('[TEXT] Voice message failed:', voiceError?.response?.status, voiceError?.message);
           }
         }
       } else {
