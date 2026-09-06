@@ -13,6 +13,11 @@ RUN apt-get update \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
+# Known-good static ffmpeg (ffmpeg-static's opus encoder produces static
+# artifacts in this container). FFMPEG_PATH points the bridge at it.
+COPY --from=mwader/static-ffmpeg:6.1 /ffmpeg /usr/local/bin/ffmpeg
+ENV FFMPEG_PATH=/usr/local/bin/ffmpeg
+
 COPY . .
 
 # Secrets come from the compose env_file, never from the image.

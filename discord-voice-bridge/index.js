@@ -1129,12 +1129,15 @@ function voiceMetadataFromWav(wavBuffer, fallbackDuration) {
 // goes in raw (ffmpeg probes it and resamples 24k->48k mono with high quality).
 function wavToOggOpus(wavBuffer) {
   return new Promise((resolve, reject) => {
-    if (!ffmpegPath) {
-      reject(new Error("ffmpeg-static binary not found"));
+    // FFMPEG_PATH preferred: the mwader/static-ffmpeg build is used in Docker
+    // because ffmpeg-static's opus encoder produced full-static output.
+    const bin = process.env.FFMPEG_PATH || ffmpegPath;
+    if (!bin) {
+      reject(new Error("ffmpeg binary not found"));
       return;
     }
 
-    const proc = spawnProcess(ffmpegPath, [
+    const proc = spawnProcess(bin, [
       "-loglevel", "error",
       "-i", "pipe:0",
       "-af", "volume=9dB",
