@@ -967,6 +967,7 @@ function wavToOggOpus(wavBuffer) {
     const proc = spawnProcess(ffmpegPath, [
       "-loglevel", "error",
       "-i", "pipe:0",
+      "-af", "volume=9dB",
       "-c:a", "libopus", "-b:a", "64k", "-application", "voip",
       "-ar", "48000", "-ac", "1",
       "-f", "ogg", "pipe:1",
