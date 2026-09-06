@@ -98,12 +98,13 @@ public static class VoiceToneEngine
 
     /// <summary>
     /// Full tone-aware synthesis: audio_query on the emotion style, prosody patch,
-    /// synthesis, convert to 48kHz stereo PCM for Discord.
+    /// synthesis. Returns the raw VOICEVOX WAV (24kHz mono) — callers convert to
+    /// their target format themselves so the web path can let ffmpeg resample
+    /// with high quality instead of the rough custom converter.
     /// </summary>
     public static async Task<byte[]> SynthesizeAsync(
         string text,
         VoicevoxClient voicevox,
-        AudioProcessingService audioProcessing,
         CancellationToken ct,
         string? emotionHint = null,
         string? correlationId = null)
@@ -117,7 +118,6 @@ public static class VoiceToneEngine
 
         queryJson = PatchQuery(queryJson, tone);
 
-        var wav = await voicevox.SynthesizeFromQueryAsync(queryJson, styleId, ct, correlationId);
-        return wav.Length == 0 ? Array.Empty<byte>() : audioProcessing.ConvertVoiceVoxWavToDiscordPcm(wav);
+        return await voicevox.SynthesizeFromQueryAsync(queryJson, styleId, ct, correlationId);
     }
 }

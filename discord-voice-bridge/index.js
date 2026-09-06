@@ -910,63 +910,82 @@ let textTurnInFlight = false;
 const lastTextTurnAt = new Map(); // userId -> epoch ms
 
 // Discord voice-message attachments require duration + waveform metadata
-// (base64 amplitude samples). discord.js can parse these but cannot send them,
-// so the bridge posts the message through the raw REST API.
-function buildVoiceMetadata(pcmBuffer) {
-  const frameCount = Math.floor(pcmBuffer.length / 4); // 16-bit stereo = 4 bytes/frame
-  const durationSecs = Math.max(1, Math.round((frameCount / 48000) * 10) / 10);
+// (base64 amplitude samples). The API computes both from the synthesized WAV.
+function voiceMetadataFromWav(wavBuffer, fallbackDuration) {
+  let duration = fallbackDuration || 1;
+  let sampleRate = 24000;
+  try {
+    duration = wavBuffer.readDoubleLE ? duration : duration; // noop guard
+    sampleRate = wavBuffer.readUInt32LE(24);
+    const byteRate = wavBuffer.readUInt32LE(28);
+    // locate the data chunk (standard 44-byte layout, scan to be safe)
+    let pos = 12;
+    while (pos + 8 <= wavBuffer.length) {
+      const id = wavBuffer.toString("ascii", pos, pos + 4);
+      const size = wavBuffer.readUInt32LE(pos + 4);
+      if (id === "data") {
+        duration = Math.max(0.5, Math.round((size / byteRate) * 10) / 10);
+        break;
+      }
+      pos += 8 + size + (size % 2);
+    }
+  } catch { /* keep fallback */ }
+
+  // waveform: peak amplitude per bin over 16-bit samples (skip 44-byte header)
   const bins = 64;
-  const step = Math.max(1, Math.floor(frameCount / bins));
+  const dataStart = 44;
+  const bytesPerSample = 2;
+  const sampleCount = Math.floor((wavBuffer.length - dataStart) / bytesPerSample);
+  const step = Math.max(1, Math.floor(sampleCount / bins));
   const amps = [];
+  let max = 1;
   for (let b = 0; b < bins; b++) {
     let peak = 0;
-    const start = b * step;
-    const end = Math.min(frameCount, start + step);
-    for (let i = start; i < end; i++) {
-      const v = Math.abs(pcmBuffer.readInt16LE(i * 4)); // left channel
+    const s0 = dataStart + b * step * bytesPerSample;
+    for (let i = 0; i < step; i++) {
+      const off = s0 + i * bytesPerSample;
+      if (off + 1 >= wavBuffer.length) break;
+      const v = Math.abs(wavBuffer.readInt16LE(off));
       if (v > peak) peak = v;
     }
     amps.push(peak);
+    if (peak > max) max = peak;
   }
-  const max = Math.max(...amps, 1);
-  const bytes = Buffer.from(amps.map((a) => Math.round((a / max) * 255)));
-  return { durationSecs, waveform: bytes.toString('base64') };
+  const waveform = Buffer.from(amps.map((a) => Math.round((a / max) * 255))).toString("base64");
+  return { durationSecs: duration, waveform };
 }
 
-// Convert 48kHz stereo s16le PCM (the API's TTS format) to ogg/opus for
-// Discord voice messages. Spawns the bundled ffmpeg-static directly —
-// prism-media's FFmpeg helper failed to locate the binary in the container.
-function pcmToOggOpus(pcmBuffer) {
+// Convert the synthesized WAV to ogg/opus for Discord voice messages. The WAV
+// goes in raw (ffmpeg probes it and resamples 24k->48k mono with high quality).
+function wavToOggOpus(wavBuffer) {
   return new Promise((resolve, reject) => {
     if (!ffmpegPath) {
-      reject(new Error('ffmpeg-static binary not found'));
+      reject(new Error("ffmpeg-static binary not found"));
       return;
     }
 
-    // Discord voice messages must be MONO 48kHz opus. The API's PCM is 48kHz
-    // STEREO s16le, so the input is declared stereo and ffmpeg downmixes to
-    // mono on output — declaring the input mono garbles the audio.
     const proc = spawnProcess(ffmpegPath, [
-      '-loglevel', 'error',
-      '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0',
-      '-c:a', 'libopus', '-b:a', '64k', '-application', 'voip',
-      '-ac', '1', '-f', 'ogg', 'pipe:1',
+      "-loglevel", "error",
+      "-i", "pipe:0",
+      "-c:a", "libopus", "-b:a", "64k", "-application", "voip",
+      "-ar", "48000", "-ac", "1",
+      "-f", "ogg", "pipe:1",
     ]);
 
     const chunks = [];
-    proc.stdout.on('data', (c) => chunks.push(c));
-    let stderr = '';
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
-    proc.on('error', reject);
-    proc.on('close', (code) => {
+    proc.stdout.on("data", (c) => chunks.push(c));
+    let stderr = "";
+    proc.stderr.on("data", (d) => { stderr += d.toString(); });
+    proc.on("error", reject);
+    proc.on("close", (code) => {
       if (code === 0) {
         resolve(Buffer.concat(chunks));
       } else {
         reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(0, 200)}`));
       }
     });
-    proc.stdin.on('error', reject);
-    proc.stdin.write(pcmBuffer);
+    proc.stdin.on("error", reject);
+    proc.stdin.write(wavBuffer);
     proc.stdin.end();
   });
 }
@@ -1018,9 +1037,10 @@ client.on('messageCreate', async (message) => {
         let voiceSent = false;
         if (wantVoice && response?.data?.audio) {
           try {
-            const pcm = Buffer.from(response.data.audio, 'base64');
-            const { durationSecs, waveform } = buildVoiceMetadata(pcm);
-            const ogg = await pcmToOggOpus(pcm);
+            const wav = Buffer.from(response.data.audio, 'base64');
+            const durationSecs = response.data.duration_secs || 1;
+            const waveform = response.data.waveform;
+            const ogg = await wavToOggOpus(wav);
             if (ogg.length > 0) {
               // Raw REST: discord.js cannot send waveform/duration metadata.
               // NOTE: @discordjs/rest expects the buffer under `data`

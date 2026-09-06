@@ -450,9 +450,9 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
             DevLog.WriteLine("[VoiceFlow][CloudTTS] CloudTtsUrl is empty, falling back to local VOICEVOX");
             try
             {
-                var toned = await VoiceToneEngine.SynthesizeAsync(text, _voicevoxClient, _audioProcessingService, ct, correlationId: correlationId);
-                if (toned.Length > 0)
-                    return toned;
+                var tonedWav = await VoiceToneEngine.SynthesizeAsync(text, _voicevoxClient, ct, correlationId: correlationId);
+                if (tonedWav.Length > 0)
+                    return _audioProcessingService.ConvertVoiceVoxWavToDiscordPcm(tonedWav);
             }
             catch (Exception ex)
             {
@@ -512,9 +512,9 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
 
         try
         {
-            var toned = await VoiceToneEngine.SynthesizeAsync(text, _voicevoxClient, _audioProcessingService, ct, correlationId: correlationId);
-            if (toned.Length > 0)
-                return toned;
+            var tonedWav = await VoiceToneEngine.SynthesizeAsync(text, _voicevoxClient, ct, correlationId: correlationId);
+            if (tonedWav.Length > 0)
+                return _audioProcessingService.ConvertVoiceVoxWavToDiscordPcm(tonedWav);
         }
         catch (Exception ex)
         {

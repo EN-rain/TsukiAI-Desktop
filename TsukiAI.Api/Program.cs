@@ -369,6 +369,8 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
     var reply = await textChat.ReplyAsync(payload.UserId, payload.UserName ?? "someone", payload.Text, ctx.RequestAborted);
 
     string? audio = null;
+    double? durationSecs = null;
+    string? waveform = null;
     if (payload.Voice)
     {
         try
@@ -383,8 +385,14 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
                 ttsText = cut > 0 ? ttsText[..cut] + "…" : ttsText[..MaxTtsChars];
             }
 
-            var pcm = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, audioProcessing, ctx.RequestAborted);
-            audio = pcm.Length > 0 ? Convert.ToBase64String(pcm) : null;
+            // Ship the raw VOICEVOX WAV — the bridge lets ffmpeg resample with
+            // high quality (the custom 24k->48k converter was distorting).
+            var wav = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, ctx.RequestAborted);
+            if (wav.Length > 0)
+            {
+                audio = Convert.ToBase64String(wav);
+                (durationSecs, waveform) = AnalyzeVoiceWav(wav);
+            }
         }
         catch (Exception ex)
         {
@@ -392,7 +400,7 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
         }
     }
 
-    return Results.Ok(new { text = reply, audio });
+    return Results.Ok(new { text = reply, audio, duration_secs = durationSecs, waveform });
 });
 
 // Health lives outside the auth fallback via [AllowAnonymous] on the controller action.
@@ -402,6 +410,56 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
 app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
+
+static (double DurationSecs, string Waveform) AnalyzeVoiceWav(byte[] wav)
+{
+    // Standard 44-byte WAV header: sampleRate @24, byteRate @28, "data" @36.
+    int FindChunk(string id, int start)
+    {
+        int pos = start;
+        while (pos + 8 <= wav.Length)
+        {
+            var chunkId = System.Text.Encoding.ASCII.GetString(wav, pos, 4);
+            var size = BitConverter.ToInt32(wav, pos + 4);
+            if (chunkId == id) return pos;
+            pos += 8 + size + (size % 2);
+        }
+        return -1;
+    }
+
+    var dataPos = FindChunk("data", 12);
+    if (dataPos < 0) return (0, string.Empty);
+    var dataSize = BitConverter.ToInt32(wav, dataPos + 4);
+    var sampleRate = BitConverter.ToInt32(wav, 24);
+    var byteRate = BitConverter.ToInt32(wav, 28);
+    if (sampleRate <= 0 || byteRate <= 0) return (0, string.Empty);
+
+    var duration = Math.Round(dataSize / (double)byteRate, 2);
+    var bytesPerSample = byteRate / sampleRate / 1; // mono 16-bit
+    var sampleCount = dataSize / Math.Max(1, bytesPerSample);
+
+    const int bins = 64;
+    var step = Math.Max(1, sampleCount / bins);
+    var amps = new byte[bins];
+    var max = 1;
+    for (var b = 0; b < bins; b++)
+    {
+        byte peak = 0;
+        var s0 = b * step;
+        for (var i = s0; i < s0 + step && i < sampleCount; i++)
+        {
+            var off = dataPos + 8 + i * bytesPerSample;
+            if (off + 1 >= wav.Length) break;
+            var v = (byte)(Math.Abs(BitConverter.ToInt16(wav, off)) >> 8);
+            if (v > peak) peak = v;
+            if (v > max) max = v;
+        }
+        amps[b] = peak;
+    }
+
+    var waveform = Convert.ToBase64String(amps.Select(a => (byte)(a * 255 / max)).ToArray());
+    return (duration, waveform);
+}
 
 sealed class AddMemoryRequest
 {
