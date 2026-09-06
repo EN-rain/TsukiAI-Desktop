@@ -1212,8 +1212,15 @@ client.on('messageCreate', async (message) => {
         if (wantVoice && response?.data?.audio) {
           try {
             const wav = Buffer.from(response.data.audio, 'base64');
-            const durationSecs = response.data.duration_secs || 1;
-            const waveform = response.data.waveform;
+            // Some engines (Kokoro) return WAV variants the API's analyzer
+            // can't parse — compute metadata from the audio itself as fallback.
+            let durationSecs = response.data.duration_secs || 0;
+            let waveform = response.data.waveform;
+            if (!durationSecs || !waveform) {
+              const meta = voiceMetadataFromWav(wav, 1);
+              if (!durationSecs) durationSecs = meta.durationSecs;
+              if (!waveform) waveform = meta.waveform;
+            }
             const ogg = await wavToOggOpus(wav);
             if (ogg.length > 0) {
               // Raw REST: discord.js cannot send waveform/duration metadata.
