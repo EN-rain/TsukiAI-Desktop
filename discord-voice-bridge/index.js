@@ -23,7 +23,10 @@ import {
   createPcm48StereoTo16Mono,
   transcribeAudio as transcribeAssemblyAudio,
 } from './assemblyai-realtime.js';
-import { countHumanVoiceMembers, shouldEnableAssemblyRealtime } from './voice-presence.js';
+import {
+  countEligibleHumanVoiceMembers,
+  shouldEnableAssemblyRealtime,
+} from './voice-presence.js';
 import { shouldAcceptVoiceStart } from './voice-focus.js';
 
 const DEBUG_MODE = (process.env.DEBUG || 'false').toLowerCase() === 'true';
@@ -310,19 +313,37 @@ function getCurrentVoiceChannel() {
 }
 
 function getCurrentHumanMemberCount() {
-  return countHumanVoiceMembers(getCurrentVoiceChannel()?.members);
+  return countEligibleHumanVoiceMembers(
+    getCurrentVoiceChannel()?.members,
+    manualFocusList,
+  );
+}
+
+function stopAssemblyRealtimeCapture(capture, reason) {
+  if (capture.aborted) return;
+  capture.aborted = true;
+  try {
+    capture.audioStream?.destroy();
+    capture.decoder?.destroy();
+  } catch {
+    // The stream may already be closed.
+  }
+  void capture.finish?.(reason);
 }
 
 function stopAssemblyRealtimeCaptures(reason) {
   for (const capture of activeAssemblyCaptures.values()) {
-    capture.aborted = true;
-    try {
-      capture.audioStream?.destroy();
-      capture.decoder?.destroy();
-    } catch {
-      // The stream may already be closed.
+    stopAssemblyRealtimeCapture(capture, reason);
+  }
+}
+
+function stopUnfocusedAssemblyRealtimeCaptures(reason) {
+  if (manualFocusList.size === 0) return;
+
+  for (const [userId, capture] of activeAssemblyCaptures.entries()) {
+    if (!manualFocusList.has(userId)) {
+      stopAssemblyRealtimeCapture(capture, reason);
     }
-    void capture.finish?.(reason);
   }
 }
 
@@ -335,6 +356,8 @@ function syncAssemblyRealtimePresence(reason) {
     hasVoiceConnection: Boolean(currentConnection?.joinConfig?.channelId),
     humanMemberCount,
   });
+
+  stopUnfocusedAssemblyRealtimeCaptures('user is no longer on the manual focus list');
 
   if (enabled === assemblyRealtimeEnabled) return;
   assemblyRealtimeEnabled = enabled;
@@ -1467,6 +1490,7 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
         manualFocusList.add(arg);
+        syncAssemblyRealtimePresence('manual focus list changed');
         const names = await Promise.all([...manualFocusList].map((id) => resolveUserName(guild, id)));
         await interaction.reply(`Now only listening to: **${names.join(', ')}**`);
         return;
@@ -1476,6 +1500,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: `\`${arg}\` was not on the focus list.`, ephemeral: true });
           return;
         }
+        syncAssemblyRealtimePresence('manual focus list changed');
         const names = manualFocusList.size
           ? await Promise.all([...manualFocusList].map((id) => resolveUserName(guild, id)))
           : [];

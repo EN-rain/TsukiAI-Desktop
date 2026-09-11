@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   countHumanVoiceMembers,
+  countEligibleHumanVoiceMembers,
   shouldEnableAssemblyRealtime,
 } from '../voice-presence.js';
 
@@ -13,6 +14,16 @@ test('counts only human members in a voice channel', () => {
   ]);
 
   assert.equal(countHumanVoiceMembers(members), 2);
+});
+
+test('when manual focus is active, only focused human members enable realtime', () => {
+  const members = new Map([
+    ['bot', { id: 'bot', user: { bot: true } }],
+    ['focused-human', { id: 'focused-human', user: { bot: false } }],
+    ['unfocused-human', { id: 'unfocused-human', user: { bot: false } }],
+  ]);
+
+  assert.equal(countEligibleHumanVoiceMembers(members, new Set(['focused-human'])), 1);
 });
 
 test('AssemblyAI realtime is disabled when the bot is alone', () => {
