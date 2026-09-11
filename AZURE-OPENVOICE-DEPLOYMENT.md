@@ -28,8 +28,13 @@ service through `host.docker.internal`; no public TTS port is opened.
 
 The reference file is normalized once to
 `/opt/openvoice/voices/references/tsuki.wav`, and the target embedding is saved
-to `/opt/openvoice/voices/embeddings/tsuki_se.pth`. Requests never upload the
-reference audio.
+to `/opt/openvoice/voices/embeddings/tsuki_se.pth` using the official VAD-aware
+OpenVoice extractor. Requests never upload the reference audio.
+
+The runtime uses the official V2 MeloTTS source embeddings at
+`/opt/openvoice/models/checkpoints_v2/base_speakers/ses/en-au.pth` and
+`jp.pth`. Startup fails if either artifact is absent; it does not synthesize a
+replacement embedding from an arbitrary sentence.
 
 ## Required environment
 
@@ -60,3 +65,4 @@ benchmarked.
 - [OpenVoice usage instructions](https://github.com/myshell-ai/OpenVoice/blob/main/docs/USAGE.md)
 - [MeloTTS](https://github.com/myshell-ai/MeloTTS)
 - [OpenVoice V2 converter model](https://huggingface.co/myshell-ai/OpenVoiceV2)
+- [OpenVoice V2 base-speaker embeddings](https://huggingface.co/myshell-ai/OpenVoiceV2/tree/main/base_speakers/ses)

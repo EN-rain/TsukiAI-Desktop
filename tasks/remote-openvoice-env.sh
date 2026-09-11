@@ -7,6 +7,7 @@ install -o azureuser -g azureuser -m 600 /dev/null /opt/openvoice/openvoice.env
 install -d -o azureuser -g azureuser -m 750 \
   /opt/openvoice/cache/huggingface \
   /opt/openvoice/cache/nltk \
+  /opt/openvoice/models/checkpoints_v2/base_speakers/ses \
   /tmp/numba-cache
 printf '%s\n' \
   "OPENVOICE_API_KEY=${api_key}" \
@@ -15,6 +16,9 @@ printf '%s\n' \
   'OPENVOICE_VOICE_REGISTRY=/opt/openvoice/voice_registry.json' \
   'OPENVOICE_REFERENCE_WAV=/opt/openvoice/voices/references/tsuki.wav' \
   'OPENVOICE_EMBEDDING_DIR=/opt/openvoice/voices/embeddings' \
+  'OPENVOICE_BASE_SPEAKER_DIR=/opt/openvoice/models/checkpoints_v2/base_speakers/ses' \
+  'OPENVOICE_BASE_SPEAKER_EN=EN-AU' \
+  'OPENVOICE_BASE_SPEAKER_JA=JP' \
   'OPENVOICE_OUTPUT_DIR=/tmp/openvoice-output' \
   'OPENVOICE_VOICE_ID=tsuki' \
   'OPENVOICE_DEVICE=cpu' \

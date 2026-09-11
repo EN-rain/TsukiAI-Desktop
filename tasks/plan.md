@@ -9,7 +9,8 @@ Make OpenVoice V2 the only TTS backend for the existing TsukiAI application and 
 - Keep the VM private; bind the TTS service to `127.0.0.1:8000`.
 - Expose only text and language at runtime. Never accept a reference-audio path or file upload from the TTS API.
 - Require an API key for synthesis, cap text length, and serialize CPU inference initially.
-- Normalize and extract the target speaker embedding once, then load the saved embedding at service startup.
+- Normalize and extract the target speaker embedding once with the official VAD-aware extractor, then load the saved embedding at service startup.
+- Load the official OpenVoice V2 base-speaker embeddings for the configured MeloTTS speakers; never derive replacements from an arbitrary sentence.
 - Implement a single `/health` and `/tts` contract for OpenVoice and route the current application directly to it.
 - Remove provider selection/fallback logic and stale alternate-provider settings from the active application path. Preserve unrelated features and user changes.
 - Verify the official OpenVoice V2 converter/model files and CPU behavior on the VM before treating deployment as complete. The official repository's historical V2 checkpoint URL is not assumed to be live.
@@ -28,7 +29,7 @@ Make OpenVoice V2 the only TTS backend for the existing TsukiAI application and 
 ## Current risks
 
 - MeloTTS/OpenVoice CPU inference may exceed conversational latency on 4 vCPUs.
-- The official OpenVoice V2 usage notebook expects bundled base-speaker artifacts; if those artifacts cannot be fetched from an authoritative source, the service will derive and cache source embeddings from its base-TTS output instead.
+- The official OpenVoice V2 usage notebook expects bundled base-speaker artifacts. The service now fails startup when those artifacts are absent so a different base embedding cannot silently change the voice.
 - The 29 GiB OS disk leaves limited room for multiple model copies and caches; cleanup will be required.
 
 ## Verification record

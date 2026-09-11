@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import secrets
 import tempfile
 import time
@@ -27,6 +26,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.background import BackgroundTask
 
+from base_speakers import official_embedding_path
 from converter_factory import create_cpu_converter
 from validation import normalize_language, normalize_text, normalize_voice_id
 
@@ -51,6 +51,7 @@ class RuntimeConfig:
     registry_path: Path
     reference_wav: Path
     embedding_dir: Path
+    base_speaker_dir: Path
     output_dir: Path
     voice_id: str
     device: str
@@ -64,13 +65,17 @@ class RuntimeConfig:
     @classmethod
     def from_env(cls) -> "RuntimeConfig":
         root = Path(os.getenv("OPENVOICE_ROOT", "/opt/openvoice")).expanduser()
+        model_dir = Path(os.getenv("OPENVOICE_MODEL_DIR", root / "models" / "checkpoints_v2"))
         return cls(
             api_key=os.getenv("OPENVOICE_API_KEY", "").strip(),
             openvoice_root=root,
-            model_dir=Path(os.getenv("OPENVOICE_MODEL_DIR", root / "models" / "checkpoints_v2")),
+            model_dir=model_dir,
             registry_path=Path(os.getenv("OPENVOICE_VOICE_REGISTRY", root / "voice_registry.json")),
             reference_wav=Path(os.getenv("OPENVOICE_REFERENCE_WAV", root / "voices" / "references" / "tsuki.wav")),
             embedding_dir=Path(os.getenv("OPENVOICE_EMBEDDING_DIR", root / "voices" / "embeddings")),
+            base_speaker_dir=Path(
+                os.getenv("OPENVOICE_BASE_SPEAKER_DIR", model_dir / "base_speakers" / "ses")
+            ),
             output_dir=Path(os.getenv("OPENVOICE_OUTPUT_DIR", "/tmp/openvoice-output")),
             voice_id=os.getenv("OPENVOICE_VOICE_ID", "tsuki").strip(),
             device=os.getenv("OPENVOICE_DEVICE", "cpu").strip().lower() or "cpu",
@@ -179,29 +184,28 @@ class OpenVoiceEngine:
 
         requested_speaker = self.config.base_speaker_ja if language == "JA" else self.config.base_speaker_en
         speaker_names = {str(name): speaker_id for name, speaker_id in speaker_map.items()}
-        speaker_name = requested_speaker if requested_speaker in speaker_names else sorted(speaker_names)[0]
+        if requested_speaker:
+            if requested_speaker not in speaker_names:
+                raise RuntimeError(
+                    f"configured MeloTTS base speaker is unavailable for {language}: {requested_speaker}"
+                )
+            speaker_name = requested_speaker
+        else:
+            speaker_name = sorted(speaker_names)[0]
         speaker_id = speaker_names[speaker_name]
 
-        safe_speaker = re.sub(r"[^A-Za-z0-9_.-]+", "_", speaker_name)
-        source_embedding_path = self.config.embedding_dir / f"base_{language.lower()}_{safe_speaker}.pth"
+        source_embedding_path = official_embedding_path(self.config.base_speaker_dir, speaker_name)
         if not source_embedding_path.is_file():
-            self._create_source_embedding(model, speaker_id, source_embedding_path)
+            raise RuntimeError(
+                "official OpenVoice V2 base-speaker embedding is missing: "
+                f"{source_embedding_path}. Install the matching artifact from "
+                "myshell-ai/OpenVoiceV2 before starting the service."
+            )
 
         self._models[language] = model
         self._speaker_ids[language] = speaker_id
         self._source_se[language] = _load_tensor(self._torch, source_embedding_path, self.config.device)
         LOG.info("loaded base language=%s speaker=%s", language, speaker_name)
-
-    def _create_source_embedding(self, model: Any, speaker_id: Any, output_path: Path) -> None:
-        if self._converter is None:
-            raise RuntimeError("OpenVoice converter is not loaded")
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="openvoice-base-") as temp_dir:
-            base_wav = Path(temp_dir) / "base.wav"
-            model.tts_to_file("System ready.", speaker_id, str(base_wav), speed=1.0)
-            if not base_wav.is_file():
-                raise RuntimeError(f"MeloTTS did not create {base_wav}")
-            self._converter.extract_se([str(base_wav)], se_save_path=str(output_path))
 
     def synthesize(self, text: str, language: str, output_path: Path) -> None:
         if self._converter is None or self._target_se is None:
