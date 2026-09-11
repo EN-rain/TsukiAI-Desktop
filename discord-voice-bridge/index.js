@@ -17,6 +17,13 @@ import ffmpegPath from 'ffmpeg-static';
 import axiosRetry from 'axios-retry';
 import prism from 'prism-media';
 import { GroqKeyPool, loadGroqApiKeys } from './groq-key-pool.js';
+import { AssemblyKeyPool, loadAssemblyApiKeys } from './assembly-key-pool.js';
+import {
+  AssemblyRealtimeSession,
+  createPcm48StereoTo16Mono,
+  transcribeAudio as transcribeAssemblyAudio,
+} from './assemblyai-realtime.js';
+import { countHumanVoiceMembers, shouldEnableAssemblyRealtime } from './voice-presence.js';
 
 const DEBUG_MODE = (process.env.DEBUG || 'false').toLowerCase() === 'true';
 function debugLog(...args) {
@@ -60,6 +67,10 @@ const configuredGroqKeys = loadGroqApiKeys(
   (process.env.GROQ_API_KEYS_FILE || '').trim(),
   process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY,
 );
+const configuredAssemblyKeys = loadAssemblyApiKeys(
+  (process.env.ASSEMBLYAI_KEYS_FILE || '').trim(),
+  process.env.ASSEMBLYAI_API_KEYS || process.env.ASSEMBLYAI_API_KEY,
+);
 const CONFIG = {
   DISCORD_TOKEN: (process.env.DISCORD_TOKEN || 'YOUR_BOT_TOKEN').trim(),
   GUILD_ID: process.env.GUILD_ID || 'YOUR_GUILD_ID',
@@ -70,7 +81,9 @@ const CONFIG = {
   TEXT_REPLY_MODE: (process.env.TEXT_REPLY_MODE || 'mention').trim().toLowerCase(),
   CSHARP_API_URL: (process.env.CSHARP_API_URL || 'http://localhost:5000').trim(),
   CSHARP_API_KEY: (process.env.CSHARP_API_KEY || '').trim(),
-  ASSEMBLYAI_API_KEY: (process.env.ASSEMBLYAI_API_KEY || '').trim(),
+  ASSEMBLYAI_API_KEY: configuredAssemblyKeys[0] || '',
+  ASSEMBLYAI_API_KEYS: configuredAssemblyKeys,
+  ASSEMBLYAI_KEYS_FILE: (process.env.ASSEMBLYAI_KEYS_FILE || '').trim(),
   // GROQ_API_KEY remains the first-key compatibility value; runtime STT uses
   // the pool so a rejected or rate-limited key rotates to the next one.
   GROQ_API_KEY: configuredGroqKeys[0] || '',
@@ -88,6 +101,7 @@ const CONFIG = {
   FRAME_SIZE: 960, // 20ms at 48kHz
 };
 const GROQ_KEY_POOL = new GroqKeyPool(CONFIG.GROQ_API_KEYS);
+const ASSEMBLY_KEY_POOL = new AssemblyKeyPool(CONFIG.ASSEMBLYAI_API_KEYS);
 
 // USE_CLOUD_STT is the feature gate. A local setting must never silently turn
 // into a cloud request just because STT_MODE has a stale provider value.
@@ -95,6 +109,10 @@ if (!CONFIG.USE_CLOUD_STT) {
   CONFIG.STT_MODE = 'local';
   CONFIG.STT_FALLBACK_MODE = 'local';
 }
+
+const assemblyRealtimeRequested = CONFIG.USE_CLOUD_STT
+  && CONFIG.STT_MODE === 'assemblyai'
+  && ASSEMBLY_KEY_POOL.size > 0;
 
 if (HTTP_KEEPALIVE_ENABLED) {
   const httpAgent = new http.Agent({
@@ -127,16 +145,14 @@ if (CONFIG.STT_MODE === 'azure' && CONFIG.AZURE_SPEECH_KEY.length > 10 && CONFIG
   } catch (error) {
     console.error('[ERROR] Failed to load Azure Speech module:', error.message);
   }
-} else if (CONFIG.STT_MODE === 'assemblyai' && CONFIG.ASSEMBLYAI_API_KEY && CONFIG.ASSEMBLYAI_API_KEY.length > 10) {
+} else if (CONFIG.STT_MODE === 'assemblyai' && ASSEMBLY_KEY_POOL.size > 0) {
+  console.log(`[INFO] AssemblyAI realtime v3 enabled (${ASSEMBLY_KEY_POOL.size} keys)`);
+  sttModeName = 'AssemblyAI realtime v3';
+} else if (CONFIG.STT_MODE === 'assemblyai' && ASSEMBLY_KEY_POOL.size === 0) {
   console.log('[INFO] ✅ Cloud STT enabled (AssemblyAI)');
-  sttModeName = 'AssemblyAI';
-  try {
-    const assemblyModule = await import('./assemblyai-streaming.js');
-    transcribeAudio = assemblyModule.transcribeAudio;
-  } catch (error) {
-    console.error('[ERROR] Failed to load AssemblyAI module:', error.message);
-    process.exit(1);
-  }
+  console.error('[ERROR] AssemblyAI realtime requested but no API keys were loaded');
+  sttModeName = 'AssemblyAI unavailable';
+  transcribeAudio = transcribeAssemblyAudio;
 } else if (CONFIG.STT_MODE === 'groq' && GROQ_KEY_POOL.size > 0) {
   console.log(`[INFO] ✅ Cloud STT enabled (Groq Whisper, ${GROQ_KEY_POOL.size} keys)`);
   sttModeName = 'Groq Whisper';
@@ -167,11 +183,10 @@ if (CONFIG.STT_FALLBACK_MODE !== CONFIG.STT_MODE) {
       fallbackTranscriber = azureFallback.transcribeAudio;
       fallbackApiKey = CONFIG.AZURE_SPEECH_KEY;
       fallbackModeName = 'Azure Speech';
-    } else if (CONFIG.STT_FALLBACK_MODE === 'assemblyai' && CONFIG.ASSEMBLYAI_API_KEY.length > 10) {
-      const assemblyFallback = await import('./assemblyai-streaming.js');
-      fallbackTranscriber = assemblyFallback.transcribeAudio;
-      fallbackApiKey = CONFIG.ASSEMBLYAI_API_KEY;
-      fallbackModeName = 'AssemblyAI';
+    } else if (CONFIG.STT_FALLBACK_MODE === 'assemblyai' && ASSEMBLY_KEY_POOL.size > 0) {
+      fallbackTranscriber = transcribeAssemblyAudio;
+      fallbackApiKey = ASSEMBLY_KEY_POOL;
+      fallbackModeName = 'AssemblyAI realtime v3';
     } else if (CONFIG.STT_FALLBACK_MODE === 'groq' && GROQ_KEY_POOL.size > 0) {
       const groqFallback = await import('./groq-whisper.js');
       fallbackTranscriber = groqFallback.transcribeAudio;
@@ -243,6 +258,17 @@ const client = new Client({
   ],
 });
 
+client.on('voiceStateUpdate', (oldState, newState) => {
+  if (!assemblyRealtimeRequested) return;
+  const channelId = currentConnection?.joinConfig?.channelId;
+  if (!channelId || (oldState.channelId !== channelId && newState.channelId !== channelId)) return;
+
+  // Discord updates the channel member cache as part of the state event. A
+  // next-turn callback observes the post-event membership, including joins
+  // and leaves, before toggling AssemblyAI usage.
+  setTimeout(() => syncAssemblyRealtimePresence('voice membership changed'), 0);
+});
+
 // Audio player for TTS playback
 const audioPlayer = createAudioPlayer();
 const playbackQueue = [];
@@ -251,6 +277,10 @@ let playbackSequence = 0;
 
 // Track active voice connections
 let currentConnection = null;
+// AssemblyAI realtime is a presence-gated feature: no human in the bot's
+// channel means no realtime session and no provider usage.
+let assemblyRealtimeEnabled = false;
+const activeAssemblyCaptures = new Map();
 // Focus mode: track which user is currently being processed (ignore all others)
 let focusedUserId = null;
 // Persistent manual focus list (via /focus, cleared via /unfocus).
@@ -270,6 +300,51 @@ const userState = new Map();
 const knownBots = new Set();
 // Cache of known human user IDs to skip bot check entirely
 const knownHumans = new Set();
+
+function getCurrentVoiceChannel() {
+  const channelId = currentConnection?.joinConfig?.channelId;
+  if (!channelId) return null;
+  return client.guilds.cache.get(CONFIG.GUILD_ID)?.channels.cache.get(channelId) || null;
+}
+
+function getCurrentHumanMemberCount() {
+  return countHumanVoiceMembers(getCurrentVoiceChannel()?.members);
+}
+
+function stopAssemblyRealtimeCaptures(reason) {
+  for (const capture of activeAssemblyCaptures.values()) {
+    capture.aborted = true;
+    try {
+      capture.audioStream?.destroy();
+      capture.decoder?.destroy();
+    } catch {
+      // The stream may already be closed.
+    }
+    void capture.finish?.(reason);
+  }
+}
+
+function syncAssemblyRealtimePresence(reason) {
+  if (!assemblyRealtimeRequested) return;
+
+  const humanMemberCount = getCurrentHumanMemberCount();
+  const enabled = shouldEnableAssemblyRealtime({
+    isAssemblyMode: assemblyRealtimeRequested,
+    hasVoiceConnection: Boolean(currentConnection?.joinConfig?.channelId),
+    humanMemberCount,
+  });
+
+  if (enabled === assemblyRealtimeEnabled) return;
+  assemblyRealtimeEnabled = enabled;
+  console.log(`[ASSEMBLY] Realtime ${enabled ? 'enabled' : 'disabled'} (${humanMemberCount} human member(s), ${reason})`);
+
+  if (!enabled) {
+    stopAssemblyRealtimeCaptures('voice channel has no human listeners');
+    focusedUserId = null;
+    turnGateClosed = false;
+    userState.clear();
+  }
+}
 
 /**
  * Get or create per-user state
@@ -418,7 +493,7 @@ async function sendAudioForSTT(userId, audioBuffer) {
       const apiKey = activeSttMode === 'azure'
         ? CONFIG.AZURE_SPEECH_KEY
         : activeSttMode === 'assemblyai'
-          ? CONFIG.ASSEMBLYAI_API_KEY
+          ? ASSEMBLY_KEY_POOL
           : GROQ_KEY_POOL;
       let result;
       try {
@@ -703,11 +778,179 @@ function startBridgeHttpServer() {
   });
 }
 
+async function processRealtimeTranscript(userId, rawText) {
+  const text = String(rawText || '').trim();
+  if (!text) return;
+
+  const state = getUserState(userId);
+  if (state.processing) return;
+
+  state.processing = true;
+  turnGateClosed = true;
+  try {
+    console.log(`[STT] Final AssemblyAI transcript received for user ${userId}`);
+    await processWithLLM(userId, text);
+    state.lastResponseAt = Date.now();
+  } finally {
+    state.processing = false;
+    turnGateClosed = false;
+  }
+}
+
+/**
+ * Stream one Discord speech capture to AssemblyAI v3 in realtime.
+ * Discord's receiver emits Opus; prism decodes it to 48 kHz stereo PCM and the
+ * converter sends 16 kHz mono PCM16 frames to the WebSocket.
+ */
+function handleAssemblyRealtimeUserAudio(userId, audioStream) {
+  if (!assemblyRealtimeEnabled || audioPlayer.state.status === AudioPlayerStatus.Playing) {
+    audioStream.destroy();
+    return;
+  }
+
+  const convertToAssemblyPcm = createPcm48StereoTo16Mono();
+  const rawAudioChunks = [];
+  let rawAudioBytes = 0;
+  let finalHandled = false;
+  let finishPromise = null;
+  let capture = null;
+
+  const session = new AssemblyRealtimeSession({
+    keyPool: ASSEMBLY_KEY_POOL,
+    connectTimeoutMs: boundedInt(process.env.ASSEMBLYAI_CONNECT_TIMEOUT_MS, 12000, 1000, 60000),
+    closeTimeoutMs: boundedInt(process.env.ASSEMBLYAI_CLOSE_TIMEOUT_MS, 8000, 1000, 60000),
+    onPartial: (event) => {
+      debugLog(`[STT] AssemblyAI partial user=${userId}: ${event.transcript}`);
+    },
+    onFinal: (event) => {
+      if (finalHandled || capture?.aborted) return;
+      finalHandled = true;
+      debugLog(`[STT] AssemblyAI final user=${userId}: ${event.transcript}`);
+      void processRealtimeTranscript(userId, event.transcript);
+    },
+    onError: (error) => {
+      if (capture && !capture.connectionError) capture.connectionError = error;
+    },
+  });
+
+  capture = {
+    audioStream,
+    decoder: null,
+    session,
+    connectionError: null,
+    audioSendFailed: false,
+    aborted: false,
+    finish: null,
+  };
+  activeAssemblyCaptures.set(userId, capture);
+  activeAudioCaptures.add(userId);
+
+  const connectPromise = session.connect().catch((error) => {
+    capture.connectionError = error;
+    console.error('[STT] AssemblyAI realtime connection failed; rotating keys was exhausted:', error.message);
+    return null;
+  });
+
+  const finish = async () => {
+    if (finishPromise) return finishPromise;
+
+    finishPromise = (async () => {
+      await connectPromise;
+      let result = null;
+      try {
+        result = await session.close();
+      } catch (error) {
+        capture.connectionError ||= error;
+        console.error('[STT] AssemblyAI realtime close failed:', error.message);
+      }
+
+      if (!capture.aborted && !finalHandled && result?.text) {
+        finalHandled = true;
+        await processRealtimeTranscript(userId, result.text);
+      } else if (!capture.aborted && capture.connectionError && fallbackTranscriber && rawAudioBytes > 0) {
+        try {
+          console.warn(`[STT] AssemblyAI realtime failed; trying ${fallbackModeName}`);
+          const fallbackResult = await fallbackTranscriber(
+            fallbackApiKey,
+            Buffer.concat(rawAudioChunks),
+            CONFIG.SAMPLE_RATE,
+            CONFIG.STT_LANGUAGE,
+          );
+          if (fallbackResult?.text) {
+            finalHandled = true;
+            await processRealtimeTranscript(userId, fallbackResult.text);
+          }
+        } catch (error) {
+          console.error('[STT] Fallback transcription failed:', error.message);
+        }
+      }
+    })().finally(() => {
+      activeAssemblyCaptures.delete(userId);
+      activeAudioCaptures.delete(userId);
+    });
+
+    return finishPromise;
+  };
+  capture.finish = finish;
+
+  const decoder = new prism.opus.Decoder({
+    rate: CONFIG.SAMPLE_RATE,
+    channels: CONFIG.CHANNELS,
+    frameSize: CONFIG.FRAME_SIZE,
+  });
+  capture.decoder = decoder;
+  audioStream.setMaxListeners(20);
+  decoder.setMaxListeners(20);
+
+  const maxFallbackBytes = Math.floor(VAD.MAX_TURN_SEC * CONFIG.SAMPLE_RATE * CONFIG.CHANNELS * 2);
+  audioStream.on('error', (error) => {
+    capture.connectionError ||= error;
+    void finish();
+  });
+  decoder.on('error', (error) => {
+    capture.connectionError ||= error;
+    void finish();
+  });
+  audioStream.on('close', () => {
+    void finish();
+  });
+
+  audioStream
+    .pipe(decoder)
+    .on('data', (chunk) => {
+      if (rawAudioBytes < maxFallbackBytes) {
+        const remaining = maxFallbackBytes - rawAudioBytes;
+        const copy = Buffer.from(chunk.subarray(0, remaining));
+        rawAudioChunks.push(copy);
+        rawAudioBytes += copy.length;
+      }
+
+      if (capture.aborted || !assemblyRealtimeEnabled || capture.audioSendFailed) return;
+      try {
+        const pcm = convertToAssemblyPcm(chunk);
+        if (pcm.length > 0) session.sendAudio(pcm);
+      } catch (error) {
+        capture.audioSendFailed = true;
+        capture.connectionError ||= error;
+        console.error('[STT] AssemblyAI audio send failed:', error.message);
+      }
+    })
+    .on('end', () => {
+      void finish();
+    });
+}
+
 /**
  * Handle user speaking in voice channel.
- * Implements RMS-based VAD with silence cutoff, hard max segment length, and turn management.
+ * AssemblyAI uses its own realtime endpointing; other providers retain the
+ * existing local VAD/batch path.
  */
 function handleUserAudio(userId, audioStream) {
+  if (assemblyRealtimeRequested) {
+    handleAssemblyRealtimeUserAudio(userId, audioStream);
+    return;
+  }
+
   // Skip if bot is currently playing back (don't listen to ourselves)
   if (audioPlayer.state.status === AudioPlayerStatus.Playing) {
     audioStream.destroy(); // Clean up immediately
@@ -908,12 +1151,15 @@ async function joinVoice(guildId, channelId) {
       console.log('[VOICE] ✅ Connected and ready!');
     });
 
+    syncAssemblyRealtimePresence('voice connection ready');
     connection.on(VoiceConnectionStatus.Disconnected, () => {
       console.log('[VOICE] Disconnected');
       if (currentConnection === connection) {
         currentConnection = null;
       }
       audioPlayer.stop(true);
+      assemblyRealtimeEnabled = false;
+      stopAssemblyRealtimeCaptures('voice connection disconnected');
     });
 
     connection.on('error', (error) => {
@@ -926,6 +1172,10 @@ async function joinVoice(guildId, channelId) {
 
     // Listen to users speaking
     connection.receiver.speaking.on('start', async (userId) => {
+      if (assemblyRealtimeRequested && !assemblyRealtimeEnabled) {
+        return;
+      }
+
       // Check cache first - if we already know this is a bot, skip immediately
       if (knownBots.has(userId)) {
         return;
@@ -1000,6 +1250,7 @@ async function joinVoice(guildId, channelId) {
       }
     });
 
+    syncAssemblyRealtimePresence('joined voice channel');
     return connection;
   } catch (error) {
     console.error('[VOICE] Join error:', error.message);
@@ -1011,6 +1262,8 @@ async function joinVoice(guildId, channelId) {
  * Leave voice channel
  */
 function leaveVoice(guildId) {
+  assemblyRealtimeEnabled = false;
+  stopAssemblyRealtimeCaptures('voice channel left');
   const connection = getVoiceConnection(guildId);
   if (connection) {
     connection.destroy();
@@ -1026,6 +1279,9 @@ client.once('clientReady', async () => {
     console.log('[BOT] Mode: voice pipeline enabled (STT -> LLM -> TTS)');
   } else {
     console.log('[BOT] Mode: voice join only (C# integration disabled)');
+  }
+  if (assemblyRealtimeRequested) {
+    console.log('[BOT] AssemblyAI realtime waits for a human participant before opening a session');
   }
 
   // Auto-join only when a real default channel was configured. The slash
@@ -1118,6 +1374,9 @@ function validateStartupConfig() {
   }
   if (!isValidSnowflake(CONFIG.GUILD_ID)) {
     missing.push('GUILD_ID');
+  }
+  if (CONFIG.STT_MODE === 'assemblyai' && ASSEMBLY_KEY_POOL.size === 0) {
+    missing.push('ASSEMBLYAI_KEYS_FILE or ASSEMBLYAI_API_KEY');
   }
   if (hasCSharpIntegration) {
     try {

@@ -64,10 +64,16 @@ services:
       # mishandle long env_file values during container recreation.
       GROQ_API_KEYS: ${TSUKI_GROQ_API_KEYS:-}
       GROQ_API_KEYS_FILE: /run/secrets/tsuki-groq-keys
+      # AssemblyAI v3 realtime keys are mounted read-only from outside Git.
+      ASSEMBLYAI_KEYS_FILE: /run/secrets/assemblyai-keys
+      ASSEMBLYAI_API_KEYS: ${TSUKI_ASSEMBLYAI_API_KEYS:-}
     volumes:
       # The host-side file is created with mode 600 and is excluded from the
       # image build context. The container only receives a read-only mount.
       - ./discord-voice-bridge/groq.keys:/run/secrets/tsuki-groq-keys:ro
+      # Set ASSEMBLYAI_KEYS_HOST_PATH in the root .env to the host-side key
+      # file (for example C:/Users/.../assembly.txt). Never commit the file.
+      - ${ASSEMBLYAI_KEYS_HOST_PATH:-./discord-voice-bridge/assemblyai.keys}:/run/secrets/assemblyai-keys:ro
     depends_on:
       - api
 

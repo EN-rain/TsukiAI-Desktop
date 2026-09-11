@@ -66,6 +66,7 @@ bld/
 # Node modules (for discord-voice-bridge)
 node_modules/
 package-lock.json
+discord-voice-bridge/*.keys
 
 # Environment files
 .env

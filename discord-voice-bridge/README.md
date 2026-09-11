@@ -1,11 +1,23 @@
 # TsukiAI Discord Voice Bridge
 
-Node.js sidecar for Discord voice capture/playback. It forwards voice turns to the C# app for STT, LLM, and TTS, then plays the returned audio in Discord.
+Node.js sidecar for Discord voice capture/playback. In AssemblyAI mode the
+runtime path is:
+
+```text
+Discord user speaks
+  -> Discord.js receiver decodes PCM
+  -> AssemblyAI v3 realtime WebSocket
+  -> partial + final Turn events
+  -> TsukiAI C# API (LLM)
+  -> private OpenVoice V2 CPU service
+  -> Discord bot playback
+```
 
 ## What It Does
 
 - Joins a Discord voice channel as a bot
-- Captures user speech and segments turns with RMS VAD
+- Captures human speech; AssemblyAI v3 handles realtime endpointing in
+  `STT_MODE=assemblyai` (the other STT modes retain local RMS VAD)
 - Sends audio/text to TsukiAI C# API endpoints
 - Plays returned PCM audio back to Discord
 - Exposes a local bridge endpoint for manual TTS playback:
@@ -35,7 +47,7 @@ VOICE_CHANNEL_ID=your_voice_channel_id
 CSHARP_API_URL=http://localhost:5000
 
 # STT mode: azure | groq | assemblyai | local
-STT_MODE=azure
+STT_MODE=assemblyai
 STT_FALLBACK_MODE=groq
 AZURE_SPEECH_KEY=your-azure-speech-key
 AZURE_SPEECH_REGION=southeastasia
@@ -48,6 +60,10 @@ GROQ_API_KEYS=
 GROQ_API_KEYS_FILE=/run/secrets/tsuki-groq-keys
 # Legacy single-key fallback when GROQ_API_KEYS is empty.
 GROQ_API_KEY=
+# Newline-separated AssemblyAI v3 keys. Keep this file outside Git.
+ASSEMBLYAI_KEYS_FILE=C:\path\to\assembly.txt
+ASSEMBLYAI_API_KEYS=
+# Legacy single-key fallback when the file/list is empty.
 ASSEMBLYAI_API_KEY=
 
 # Optional bridge HTTP port
@@ -65,6 +81,18 @@ VAD_MIN_SEGMENT_BYTES=9600
 
 Important:
 - Set `CSHARP_API_URL` explicitly in `.env`. The bridge uses this to enable full STT->LLM->TTS mode.
+- `STT_MODE=assemblyai` streams 16 kHz mono PCM to AssemblyAI v3 and handles
+  partial and final `Turn` events. The AssemblyAI key file is read locally and
+  never sent to the C# API.
+- AssemblyAI realtime is presence-gated: it stays disabled when the bot is not
+  in voice, or when the bot is alone. It opens/accepts speech only after a
+  human member is present, and closes active sessions when the last human
+  leaves.
+- `ASSEMBLYAI_KEYS_FILE` accepts newline/comma-separated keys. Failed,
+  unauthorized, rate-limited, network, and timeout connections rotate to the
+  next key; rejected keys are temporarily cooled down.
+- The current provider contract is AssemblyAI Streaming v3; this bridge does
+  not use the legacy upload/poll endpoint.
 - `STT_MODE=azure` sends Discord PCM to Azure Speech. The bridge converts it to
   16 kHz mono WAV and never sends the Azure key to the C# API.
 - Set `AZURE_STT_LANGUAGE=ja-JP` for Japanese voice input or `en-US` for English.
@@ -72,13 +100,16 @@ Important:
   the setting that matches the current voice channel.
 - `STT_FALLBACK_MODE=groq` is attempted only if the primary cloud request fails.
 - `STT_MODE=local` uses C# Whisper via `/api/voice/stt`.
-- `STT_MODE=groq` or `assemblyai` uses cloud STT in Node, then sends text to C# for LLM/TTS.
+- `STT_MODE=groq` uses batch cloud STT in Node, then sends text to C# for LLM/TTS.
 - `GROQ_API_KEYS` accepts comma- or newline-separated keys. Groq Whisper tries
   the current key first and rotates to another key on authentication, rate-limit,
   network, timeout, or server errors. Rejected keys are temporarily cooled down.
 - For Docker deployments, `GROQ_API_KEYS_FILE` is preferred for long lists. The
   mounted key file is read at startup, excluded from the image, and mounted
   read-only.
+- For Docker deployments, set `ASSEMBLYAI_KEYS_HOST_PATH` in the root `.env` to
+  the host-side `assembly.txt`. Compose mounts it read-only at
+  `/run/secrets/assemblyai-keys`.
 
 ## Slash Commands
 

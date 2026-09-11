@@ -54,7 +54,7 @@ dotnet build TsukiAI.sln
 - Fill required values (examples):
   - `TSUKI_REMOTE_INFERENCE_URL`
   - `TSUKI_REMOTE_INFERENCE_API_KEY`
-  - `TSUKI_ASSEMBLYAI_API_KEY` (if used)
+  - `TSUKI_ASSEMBLYAI_API_KEY` (C#-side fallback, if used)
   - `TSUKI_DEEPL_API_KEY` (optional)
 
 3. Run app:
@@ -73,6 +73,12 @@ docker compose up -d --build
 
 The OpenVoice reference audio is processed once on the VM into a cached speaker
 embedding. Runtime requests contain only text and language.
+
+The Discord voice bridge can use the realtime path documented in
+`discord-voice-bridge/README.md`: Discord PCM -> AssemblyAI Streaming v3 ->
+TsukiAI LLM -> private OpenVoice V2 -> Discord playback. AssemblyAI is enabled
+only while the bot is connected and at least one human is in the voice channel;
+its external key file is rotated without committing secrets.
 
 ## Testing
 
