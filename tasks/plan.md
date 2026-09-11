@@ -39,7 +39,7 @@ Make OpenVoice V2 the only TTS backend for the existing TsukiAI application and 
 - VM networking: private-only; no public IP.
 - Local reference: `C:\Users\LENOVO\Downloads\tsuki_25s_clip.mp3` exists and is 318,997 bytes.
 - Remote reference checksum: `ce93bb53f197f0683d46ab4ad240e3d434ef6e2b2340190be98dfe382a0f6530`; normalized WAV duration: 28.629342 seconds.
-- Target embedding: `/opt/openvoice/voices/embeddings/tsuki_se.pth`, extracted with official VAD enabled, checksum `5949c16aa4fb1db7bdb6f20adfc3b9fdd5500f217322450ed4d99fceeb7794e8`.
+- Target embedding: `/opt/openvoice/voices/embeddings/tsuki_se.pth`, extracted with official VAD enabled; current file checksum `5949c16aa4fb1db7bdb6f20adfc3b9fdd5500f217322450ed4d99fceeb7794e8`, tensor-payload checksum `eadd8c964a5063e2f8c0d5647ff16f861f571a499ea4cdc1772d1e6dc731ca63`.
 - Official base embeddings: `en-au.pth` checksum `5e9782233deef51fc5289d05ad4dd4ce12b196e282eccf6b6db6256bbd02daaa`; `jp.pth` checksum `7b645ff428de4a57a22122318968f1e6127ac81fda2e2aa66062deccd3864416`.
 - Deployed service source: Git commit `3981161` (OpenVoice source files deployed from that commit).
 - Service verification: `/health` reports `ready`, `engine=openvoice-v2`, one loaded `tsuki` voice, and `EN`/`JA`; unauthenticated `/tts` returns 401.
