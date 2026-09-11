@@ -24,6 +24,7 @@ import {
   transcribeAudio as transcribeAssemblyAudio,
 } from './assemblyai-realtime.js';
 import { countHumanVoiceMembers, shouldEnableAssemblyRealtime } from './voice-presence.js';
+import { shouldAcceptVoiceStart } from './voice-focus.js';
 
 const DEBUG_MODE = (process.env.DEBUG || 'false').toLowerCase() === 'true';
 function debugLog(...args) {
@@ -281,14 +282,15 @@ let currentConnection = null;
 // channel means no realtime session and no provider usage.
 let assemblyRealtimeEnabled = false;
 const activeAssemblyCaptures = new Map();
-// Focus mode: track which user is currently being processed (ignore all others)
+// Legacy non-realtime focus mode: track which user is currently being processed.
+// AssemblyAI realtime uses independent per-user sessions instead.
 let focusedUserId = null;
 // Persistent manual focus list (via /focus, cleared via /unfocus).
 // When non-empty, ONLY these users are listened to.
 const manualFocusList = new Set();
-// Input gate: closed for the entire duration of a turn (speech -> STT -> LLM ->
-// TTS playback). While closed, EVERYONE's voice is filtered out until Tsuki is
-// done speaking her reply.
+// Legacy input gate for the single-speaker STT path. Realtime captures are
+// admitted per user and reject new audio at the capture layer while playback
+// is active.
 let turnGateClosed = false;
 // Track users with an active audio capture to avoid duplicate subscriptions.
 const activeAudioCaptures = new Set();
@@ -806,6 +808,7 @@ async function processRealtimeTranscript(userId, rawText) {
 function handleAssemblyRealtimeUserAudio(userId, audioStream) {
   if (!assemblyRealtimeEnabled || audioPlayer.state.status === AudioPlayerStatus.Playing) {
     audioStream.destroy();
+    activeAudioCaptures.delete(userId);
     return;
   }
 
@@ -1182,20 +1185,14 @@ async function joinVoice(guildId, channelId) {
         return;
       }
 
-      // TURN GATE: input is closed while a turn (STT -> LLM -> TTS playback)
-      // is in progress — all voice is filtered until Tsuki finishes speaking.
-      if (turnGateClosed) {
+      if (!shouldAcceptVoiceStart({
+        userId,
+        manualFocusList,
+        assemblyRealtimeRequested,
+        focusedUserId,
+        turnGateClosed,
+      })) {
         return;
-      }
-
-      // MANUAL FOCUS: when the focus list is non-empty, only listed users pass.
-      if (manualFocusList.size > 0 && !manualFocusList.has(userId)) {
-        return;
-      }
-
-      // FOCUS MODE: If we're focused on another user, ignore everyone else
-      if (focusedUserId && focusedUserId !== userId) {
-        return; // Silently ignore other users while focused
       }
 
       // If we already have an active capture for this user, skip duplicate start events.
@@ -1227,8 +1224,10 @@ async function joinVoice(guildId, channelId) {
 
       console.log(`[VOICE] User ${userId} started speaking`);
 
-      // Set focus on this user if no one is focused
-      if (!focusedUserId) {
+      // Legacy STT is single-speaker. AssemblyAI realtime creates one
+      // independent session per allowed user and therefore does not take this
+      // global focus lock.
+      if (!assemblyRealtimeRequested && !focusedUserId) {
         focusedUserId = userId;
         console.log(`[FOCUS] Locked onto user ${userId}`);
       }
