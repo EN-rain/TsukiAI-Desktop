@@ -153,7 +153,16 @@ public sealed class ProviderSwitchingService
         try
         {
             var json = JsonSerializer.Serialize(_state, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_statePath, json);
+            var tempPath = $"{_statePath}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                File.WriteAllText(tempPath, json);
+                File.Move(tempPath, _statePath, overwrite: true);
+            }
+            finally
+            {
+                try { File.Delete(tempPath); } catch { }
+            }
         }
         catch (Exception ex)
         {

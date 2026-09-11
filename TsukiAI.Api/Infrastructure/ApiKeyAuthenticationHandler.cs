@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Encodings.Web;
+using System.Text;
 
 namespace TsukiAI.Api.Infrastructure;
 
@@ -32,7 +34,9 @@ public sealed class ApiKeyAuthenticationHandler(
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
-        if (!string.Equals(provided.ToString().Trim(), expectedKey, StringComparison.Ordinal))
+        var providedBytes = Encoding.UTF8.GetBytes(provided.ToString().Trim());
+        var expectedBytes = Encoding.UTF8.GetBytes(expectedKey);
+        if (!CryptographicOperations.FixedTimeEquals(providedBytes, expectedBytes))
         {
             Logger.LogWarning("Rejected request with invalid API key from {RemoteIp}",
                 Context.Connection.RemoteIpAddress);

@@ -1,0 +1,8 @@
+{
+  "voices": {
+    "tsuki": {
+      "embedding": "voices/embeddings/tsuki_se.pth",
+      "default_language": "EN"
+    }
+  }
+}

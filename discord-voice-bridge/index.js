@@ -16,6 +16,7 @@ import { spawn as spawnProcess } from 'child_process';
 import ffmpegPath from 'ffmpeg-static';
 import axiosRetry from 'axios-retry';
 import prism from 'prism-media';
+import { GroqKeyPool, loadGroqApiKeys } from './groq-key-pool.js';
 
 const DEBUG_MODE = (process.env.DEBUG || 'false').toLowerCase() === 'true';
 function debugLog(...args) {
@@ -40,11 +41,25 @@ axiosRetry(axios, {
 });
 
 // Configuration (trim token - copy/paste often adds newlines or spaces)
-const BRIDGE_HTTP_PORT = parseInt(process.env.BRIDGE_HTTP_PORT || '3001', 10);
+function boundedInt(raw, fallback, minimum, maximum) {
+  const value = Number.parseInt(String(raw ?? ''), 10);
+  return Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
+}
+
+function boundedFloat(raw, fallback, minimum, maximum) {
+  const value = Number.parseFloat(String(raw ?? ''));
+  return Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
+}
+
+const BRIDGE_HTTP_PORT = boundedInt(process.env.BRIDGE_HTTP_PORT, 3001, 1, 65535);
 const HTTP_KEEPALIVE_ENABLED = (process.env.HTTP_KEEPALIVE_ENABLED || 'true').toLowerCase() === 'true';
-const HTTP_MAX_SOCKETS = parseInt(process.env.HTTP_MAX_SOCKETS || '10', 10);
-const HTTP_MAX_FREE_SOCKETS = parseInt(process.env.HTTP_MAX_FREE_SOCKETS || '5', 10);
-const HTTP_KEEPALIVE_MS = parseInt(process.env.HTTP_KEEPALIVE_MS || '30000', 10);
+const HTTP_MAX_SOCKETS = boundedInt(process.env.HTTP_MAX_SOCKETS, 10, 1, 100);
+const HTTP_MAX_FREE_SOCKETS = boundedInt(process.env.HTTP_MAX_FREE_SOCKETS, 5, 0, HTTP_MAX_SOCKETS);
+const HTTP_KEEPALIVE_MS = boundedInt(process.env.HTTP_KEEPALIVE_MS, 30000, 1000, 300000);
+const configuredGroqKeys = loadGroqApiKeys(
+  (process.env.GROQ_API_KEYS_FILE || '').trim(),
+  process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY,
+);
 const CONFIG = {
   DISCORD_TOKEN: (process.env.DISCORD_TOKEN || 'YOUR_BOT_TOKEN').trim(),
   GUILD_ID: process.env.GUILD_ID || 'YOUR_GUILD_ID',
@@ -56,14 +71,30 @@ const CONFIG = {
   CSHARP_API_URL: (process.env.CSHARP_API_URL || 'http://localhost:5000').trim(),
   CSHARP_API_KEY: (process.env.CSHARP_API_KEY || '').trim(),
   ASSEMBLYAI_API_KEY: (process.env.ASSEMBLYAI_API_KEY || '').trim(),
-  GROQ_API_KEY: (process.env.GROQ_API_KEY || '').trim(),
-  STT_MODE: (process.env.STT_MODE || 'groq').toLowerCase(), // 'assemblyai', 'groq', or 'local'
+  // GROQ_API_KEY remains the first-key compatibility value; runtime STT uses
+  // the pool so a rejected or rate-limited key rotates to the next one.
+  GROQ_API_KEY: configuredGroqKeys[0] || '',
+  GROQ_API_KEYS: configuredGroqKeys,
+  GROQ_API_KEYS_FILE: (process.env.GROQ_API_KEYS_FILE || '').trim(),
+  AZURE_SPEECH_KEY: (process.env.AZURE_SPEECH_KEY || '').trim(),
+  AZURE_SPEECH_REGION: (process.env.AZURE_SPEECH_REGION || '').trim(),
+  AZURE_STT_LANGUAGE: (process.env.AZURE_STT_LANGUAGE || 'en-US').trim(),
+  STT_MODE: (process.env.STT_MODE || 'groq').trim().toLowerCase(), // 'azure', 'assemblyai', 'groq', or 'local'
+  STT_FALLBACK_MODE: (process.env.STT_FALLBACK_MODE || 'groq').trim().toLowerCase(),
   STT_LANGUAGE: (process.env.STT_LANGUAGE || 'auto').trim().toLowerCase(),
   USE_CLOUD_STT: (process.env.USE_CLOUD_STT || 'false').toLowerCase() === 'true',
   SAMPLE_RATE: 48000, // Discord voice sample rate
   CHANNELS: 2, // Stereo
   FRAME_SIZE: 960, // 20ms at 48kHz
 };
+const GROQ_KEY_POOL = new GroqKeyPool(CONFIG.GROQ_API_KEYS);
+
+// USE_CLOUD_STT is the feature gate. A local setting must never silently turn
+// into a cloud request just because STT_MODE has a stale provider value.
+if (!CONFIG.USE_CLOUD_STT) {
+  CONFIG.STT_MODE = 'local';
+  CONFIG.STT_FALLBACK_MODE = 'local';
+}
 
 if (HTTP_KEEPALIVE_ENABLED) {
   const httpAgent = new http.Agent({
@@ -87,7 +118,16 @@ if (HTTP_KEEPALIVE_ENABLED) {
 let transcribeAudio = null;
 let sttModeName = 'Local (C# Whisper)';
 
-if (CONFIG.STT_MODE === 'assemblyai' && CONFIG.ASSEMBLYAI_API_KEY && CONFIG.ASSEMBLYAI_API_KEY.length > 10) {
+if (CONFIG.STT_MODE === 'azure' && CONFIG.AZURE_SPEECH_KEY.length > 10 && CONFIG.AZURE_SPEECH_REGION) {
+  console.log('[INFO] Cloud STT enabled (Azure Speech)');
+  sttModeName = 'Azure Speech';
+  try {
+    const azureModule = await import('./azure-speech.js');
+    transcribeAudio = azureModule.transcribeAudio;
+  } catch (error) {
+    console.error('[ERROR] Failed to load Azure Speech module:', error.message);
+  }
+} else if (CONFIG.STT_MODE === 'assemblyai' && CONFIG.ASSEMBLYAI_API_KEY && CONFIG.ASSEMBLYAI_API_KEY.length > 10) {
   console.log('[INFO] ✅ Cloud STT enabled (AssemblyAI)');
   sttModeName = 'AssemblyAI';
   try {
@@ -97,8 +137,8 @@ if (CONFIG.STT_MODE === 'assemblyai' && CONFIG.ASSEMBLYAI_API_KEY && CONFIG.ASSE
     console.error('[ERROR] Failed to load AssemblyAI module:', error.message);
     process.exit(1);
   }
-} else if (CONFIG.STT_MODE === 'groq' && CONFIG.GROQ_API_KEY && CONFIG.GROQ_API_KEY.length > 10) {
-  console.log('[INFO] ✅ Cloud STT enabled (Groq Whisper)');
+} else if (CONFIG.STT_MODE === 'groq' && GROQ_KEY_POOL.size > 0) {
+  console.log(`[INFO] ✅ Cloud STT enabled (Groq Whisper, ${GROQ_KEY_POOL.size} keys)`);
   sttModeName = 'Groq Whisper';
   try {
     const groqModule = await import('./groq-whisper.js');
@@ -113,25 +153,64 @@ if (CONFIG.STT_MODE === 'assemblyai' && CONFIG.ASSEMBLYAI_API_KEY && CONFIG.ASSE
 }
 
 // ── VAD & chunking settings ────────────────────────────────────────────
+// Load an optional second cloud provider for outage fallback. This stays lazy
+// with respect to requests: it does not make any network call at startup.
+let fallbackTranscriber = null;
+let fallbackApiKey = '';
+let fallbackModeName = '';
+let activeSttMode = CONFIG.STT_MODE;
+
+if (CONFIG.STT_FALLBACK_MODE !== CONFIG.STT_MODE) {
+  try {
+    if (CONFIG.STT_FALLBACK_MODE === 'azure' && CONFIG.AZURE_SPEECH_KEY.length > 10 && CONFIG.AZURE_SPEECH_REGION) {
+      const azureFallback = await import('./azure-speech.js');
+      fallbackTranscriber = azureFallback.transcribeAudio;
+      fallbackApiKey = CONFIG.AZURE_SPEECH_KEY;
+      fallbackModeName = 'Azure Speech';
+    } else if (CONFIG.STT_FALLBACK_MODE === 'assemblyai' && CONFIG.ASSEMBLYAI_API_KEY.length > 10) {
+      const assemblyFallback = await import('./assemblyai-streaming.js');
+      fallbackTranscriber = assemblyFallback.transcribeAudio;
+      fallbackApiKey = CONFIG.ASSEMBLYAI_API_KEY;
+      fallbackModeName = 'AssemblyAI';
+    } else if (CONFIG.STT_FALLBACK_MODE === 'groq' && GROQ_KEY_POOL.size > 0) {
+      const groqFallback = await import('./groq-whisper.js');
+      fallbackTranscriber = groqFallback.transcribeAudio;
+      fallbackApiKey = GROQ_KEY_POOL;
+      fallbackModeName = 'Groq Whisper';
+    }
+  } catch (error) {
+    console.error('[STT] Failed to load fallback provider:', error.message);
+  }
+}
+
+// If the selected primary is not configured, use the configured fallback as
+// the active cloud provider instead of silently dropping to C# STT.
+if (!transcribeAudio && fallbackTranscriber) {
+  transcribeAudio = fallbackTranscriber;
+  activeSttMode = CONFIG.STT_FALLBACK_MODE;
+  sttModeName = fallbackModeName + ' (fallback)';
+  console.warn('[STT] Primary provider unavailable; using ' + sttModeName);
+}
+
 const VAD = {
   // RMS threshold to consider a frame as speech (0–32767 scale for 16-bit PCM)
-  RMS_SPEECH_THRESHOLD: parseInt(process.env.VAD_RMS_THRESHOLD || '300', 10),
+  RMS_SPEECH_THRESHOLD: boundedInt(process.env.VAD_RMS_THRESHOLD, 300, 0, 32767),
   // How many consecutive silent frames (20 ms each) before we finalize a segment
   // 20 frames * 20 ms = 400 ms silence cutoff
-  SILENCE_FRAMES_CUTOFF: parseInt(process.env.VAD_SILENCE_FRAMES || '20', 10),
+  SILENCE_FRAMES_CUTOFF: boundedInt(process.env.VAD_SILENCE_FRAMES, 20, 1, 1000),
   // Hard max for a single audio segment in seconds
-  MAX_SEGMENT_SEC: parseFloat(process.env.VAD_MAX_SEGMENT_SEC || '12'),
+  MAX_SEGMENT_SEC: boundedFloat(process.env.VAD_MAX_SEGMENT_SEC, 12, 0.5, 60),
   // Max total turn length in seconds (across all segments before sending to LLM)
-  MAX_TURN_SEC: parseFloat(process.env.VAD_MAX_TURN_SEC || '30'),
+  MAX_TURN_SEC: boundedFloat(process.env.VAD_MAX_TURN_SEC, 30, 1, 300),
   // End-of-turn silence: if no new speech for this many ms, finalize the whole turn
-  END_OF_TURN_MS: parseInt(process.env.VAD_END_OF_TURN_MS || '650', 10),
+  END_OF_TURN_MS: boundedInt(process.env.VAD_END_OF_TURN_MS, 650, 100, 10000),
   // Per-user cooldown in ms (prevent rapid-fire triggers)
-  USER_COOLDOWN_MS: parseInt(process.env.VAD_USER_COOLDOWN_MS || '2000', 10),
+  USER_COOLDOWN_MS: boundedInt(process.env.VAD_USER_COOLDOWN_MS, 2000, 1000, 60000),
   // Minimum segment size in bytes to bother sending for STT (avoids tiny pops)
-  MIN_SEGMENT_BYTES: parseInt(process.env.VAD_MIN_SEGMENT_BYTES || '7680', 10), // ~40 ms stereo 48 kHz
+  MIN_SEGMENT_BYTES: boundedInt(process.env.VAD_MIN_SEGMENT_BYTES, 7680, 1, 1024 * 1024), // ~40 ms stereo 48 kHz
 };
 const VAD_BATCHING_ENABLED = (process.env.VAD_BATCHING_ENABLED || 'true').toLowerCase() === 'true';
-const VAD_FRAME_BATCH_SIZE = Math.max(1, Math.min(10, parseInt(process.env.VAD_FRAME_BATCH_SIZE || '8', 10)));
+const VAD_FRAME_BATCH_SIZE = boundedInt(process.env.VAD_FRAME_BATCH_SIZE, 8, 1, 10);
 
 // C# integration is active whenever CSHARP_API_URL is set to any non-empty value.
 // Previously this excluded the default localhost:5000 URL which is the correct address
@@ -334,10 +413,27 @@ async function sendAudioForSTT(userId, audioBuffer) {
     let text, language, confidence;
 
     if (transcribeAudio) {
-      // Use cloud STT (AssemblyAI or Groq Whisper)
+      // Use the configured cloud STT chain (Azure, AssemblyAI, or Groq).
       console.log(`[STT] Using ${sttModeName}...`);
-      const apiKey = CONFIG.STT_MODE === 'assemblyai' ? CONFIG.ASSEMBLYAI_API_KEY : CONFIG.GROQ_API_KEY;
-      const result = await transcribeAudio(apiKey, audioBuffer, CONFIG.SAMPLE_RATE, CONFIG.STT_LANGUAGE);
+      const apiKey = activeSttMode === 'azure'
+        ? CONFIG.AZURE_SPEECH_KEY
+        : activeSttMode === 'assemblyai'
+          ? CONFIG.ASSEMBLYAI_API_KEY
+          : GROQ_KEY_POOL;
+      let result;
+      try {
+        result = await transcribeAudio(apiKey, audioBuffer, CONFIG.SAMPLE_RATE, CONFIG.STT_LANGUAGE);
+      } catch (primaryError) {
+        if (!fallbackTranscriber || activeSttMode !== CONFIG.STT_MODE) {
+          throw primaryError;
+        }
+        console.warn('[STT] ' + sttModeName + ' failed; trying ' + fallbackModeName + ':', primaryError.message);
+        result = await fallbackTranscriber(fallbackApiKey, audioBuffer, CONFIG.SAMPLE_RATE, CONFIG.STT_LANGUAGE);
+      }
+      if (!result.text?.trim() && fallbackTranscriber && activeSttMode === CONFIG.STT_MODE) {
+        console.warn('[STT] ' + sttModeName + ' returned no text; trying ' + fallbackModeName);
+        result = await fallbackTranscriber(fallbackApiKey, audioBuffer, CONFIG.SAMPLE_RATE, CONFIG.STT_LANGUAGE);
+      }
       text = result.text;
       language = result.language;
       confidence = result.confidence;
@@ -382,6 +478,9 @@ async function sendAudioForSTT(userId, audioBuffer) {
  */
 async function processWithLLM(userId, text) {
   try {
+    text = String(text || '').trim();
+    if (!text) return;
+    if (text.length > 4000) text = text.slice(0, 4000);
     // Note: Text and response are logged by C# API to UI
     console.log(`[LLM] Processing request...`);
 
@@ -478,9 +577,9 @@ async function drainPlaybackQueue() {
  * Play TTS audio in Discord voice channel
  */
 async function playTTSAudio(audioBuffer) {
-  if (!currentConnection) {
-    console.error('[TTS] No active voice connection');
-    return;
+  const connection = currentConnection;
+  if (!connection) {
+    throw new Error('No active voice connection');
   }
 
   try {
@@ -503,16 +602,26 @@ async function playTTSAudio(audioBuffer) {
     }
 
     audioPlayer.play(resource);
-    currentConnection.subscribe(audioPlayer);
+    connection.subscribe(audioPlayer);
 
     // Wait for playback to finish
-    await new Promise((resolve) => {
-      audioPlayer.once(AudioPlayerStatus.Idle, resolve);
+    await new Promise((resolve, reject) => {
+      const onIdle = () => {
+        audioPlayer.removeListener('error', onError);
+        resolve();
+      };
+      const onError = (error) => {
+        audioPlayer.removeListener(AudioPlayerStatus.Idle, onIdle);
+        reject(error);
+      };
+      audioPlayer.once(AudioPlayerStatus.Idle, onIdle);
+      audioPlayer.once('error', onError);
     });
 
     console.log('[TTS] Playback complete');
   } catch (error) {
     console.error('[TTS] Playback error:', error.message);
+    throw error;
   }
 }
 
@@ -529,14 +638,33 @@ function startBridgeHttpServer() {
       return;
     }
     let body = '';
-    req.on('data', (chunk) => { body += chunk; });
+    let bodyBytes = 0;
+    let requestTooLarge = false;
+    req.on('data', (chunk) => {
+      bodyBytes += chunk.length;
+      if (bodyBytes > 64 * 1024) {
+        requestTooLarge = true;
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', async () => {
       try {
+        if (requestTooLarge) {
+          res.writeHead(413);
+          res.end(JSON.stringify({ error: 'Request body is too large' }));
+          return;
+        }
         const data = JSON.parse(body || '{}');
-        const text = (data.text || '').trim();
+        const text = typeof data.text === 'string' ? data.text.trim() : '';
         if (!text) {
           res.writeHead(400);
           res.end(JSON.stringify({ error: 'Missing or empty "text" in body' }));
+          return;
+        }
+        if (text.length > 4000) {
+          res.writeHead(413);
+          res.end(JSON.stringify({ error: 'Text is limited to 4000 characters' }));
           return;
         }
         if (!currentConnection) {
@@ -546,19 +674,20 @@ function startBridgeHttpServer() {
         }
         const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/voice/test-tts`, { text });
         const audioBase64 = response.data?.audio;
-        if (!audioBase64) {
+        if (typeof audioBase64 !== 'string' || audioBase64.length === 0) {
           res.writeHead(502);
           res.end(JSON.stringify({ error: 'C# API did not return audio' }));
           return;
         }
-        const audioBuffer = Buffer.from(audioBase64, 'base64');
+        const audioBuffer = decodeBase64Audio(audioBase64);
         await enqueuePlayback('manual-tts', audioBuffer, { priority: 0 });
         res.writeHead(200);
         res.end(JSON.stringify({ ok: true, played: true, queued: playbackQueue.length }));
       } catch (err) {
         console.error('[BRIDGE HTTP] Error:', err.message);
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: err.message || 'Play TTS failed' }));
+        const status = err instanceof SyntaxError ? 400 : 502;
+        res.writeHead(status);
+        res.end(JSON.stringify({ error: status === 400 ? 'Invalid JSON' : 'Play TTS failed' }));
       }
     });
   });
@@ -758,10 +887,15 @@ async function joinVoice(guildId, channelId) {
   try {
     console.log(`[VOICE] Joining channel ${channelId} in guild ${guildId}`);
 
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) {
+      throw new Error(`Guild ${guildId} is not available to this bot`);
+    }
+
     const connection = joinVoiceChannel({
       channelId,
       guildId,
-      adapterCreator: client.guilds.cache.get(guildId).voiceAdapterCreator,
+      adapterCreator: guild.voiceAdapterCreator,
       selfDeaf: false, // Must be false to receive audio
       selfMute: false,
       // Explicitly enable encryption mode to handle Discord's encrypted voice packets
@@ -776,7 +910,10 @@ async function joinVoice(guildId, channelId) {
 
     connection.on(VoiceConnectionStatus.Disconnected, () => {
       console.log('[VOICE] Disconnected');
-      currentConnection = null;
+      if (currentConnection === connection) {
+        currentConnection = null;
+      }
+      audioPlayer.stop(true);
     });
 
     connection.on('error', (error) => {
@@ -891,13 +1028,18 @@ client.once('clientReady', async () => {
     console.log('[BOT] Mode: voice join only (C# integration disabled)');
   }
 
-  // Auto-join voice channel on startup
-  try {
-    await joinVoice(CONFIG.GUILD_ID, CONFIG.VOICE_CHANNEL_ID);
-    startBridgeHttpServer();
-  } catch (error) {
-    console.error('[BOT] Failed to auto-join voice:', error.message);
+  // Auto-join only when a real default channel was configured. The slash
+  // command remains available for deployments that choose the channel later.
+  if (isValidSnowflake(CONFIG.VOICE_CHANNEL_ID)) {
+    try {
+      await joinVoice(CONFIG.GUILD_ID, CONFIG.VOICE_CHANNEL_ID);
+    } catch (error) {
+      console.error('[BOT] Failed to auto-join voice:', error.message);
+    }
+  } else {
+    console.log('[BOT] No default voice channel configured; waiting for /tsuki join.');
   }
+  startBridgeHttpServer();
 
   // Register guild slash commands (visible instantly, no global propagation wait)
   try {
@@ -905,28 +1047,57 @@ client.once('clientReady', async () => {
     if (guild) {
       await guild.commands.set([
         {
-          name: 'join',
-          description: 'Make Tsuki join a voice channel',
-          options: [{ name: 'channel_id', description: 'Voice channel ID', type: 3, required: true }],
-        },
-        {
-          name: 'leave',
-          description: 'Make Tsuki leave a voice channel',
-          options: [{ name: 'channel_id', description: 'Voice channel ID', type: 3, required: true }],
-        },
-        {
-          name: 'focus',
-          description: 'Only listen to this user',
-          options: [{ name: 'user_id', description: 'User ID', type: 3, required: true }],
-        },
-        {
-          name: 'unfocus',
-          description: 'Stop focusing on this user',
-          options: [{ name: 'user_id', description: 'User ID', type: 3, required: true }],
-        },
-        {
-          name: 'focuslist',
-          description: 'Show which users Tsuki is focused on',
+          name: 'tsuki',
+          description: 'Control Tsuki voice chat and direct speech',
+          options: [
+            {
+              name: 'join',
+              description: 'Join the configured voice channel, or provide a channel ID',
+              type: 1,
+              options: [{ name: 'channel_id', description: 'Optional voice channel ID', type: 3, required: false }],
+            },
+            {
+              name: 'leave',
+              description: 'Leave the current voice channel',
+              type: 1,
+              options: [{ name: 'channel_id', description: 'Optional channel ID to leave', type: 3, required: false }],
+            },
+            {
+              name: 'focus',
+              description: 'Only listen to this user',
+              type: 1,
+              options: [{ name: 'user_id', description: 'User ID', type: 3, required: true }],
+            },
+            {
+              name: 'unfocus',
+              description: 'Stop focusing on this user',
+              type: 1,
+              options: [{ name: 'user_id', description: 'User ID', type: 3, required: true }],
+            },
+            {
+              name: 'focuslist',
+              description: 'Show which users Tsuki is focused on',
+              type: 1,
+            },
+            {
+              name: 'say',
+              description: 'Make Tsuki speak text directly',
+              type: 1,
+              options: [
+                {
+                  name: 'destination',
+                  description: 'Where to send the voice',
+                  type: 3,
+                  required: true,
+                  choices: [
+                    { name: 'Voice channel', value: 'vc' },
+                    { name: 'Chat voice message', value: 'c' },
+                  ],
+                },
+                { name: 'text', description: 'Text to synthesize', type: 3, required: true },
+              ],
+            },
+          ],
         },
       ]);
       console.log('[BOT] Slash commands registered');
@@ -938,6 +1109,27 @@ client.once('clientReady', async () => {
 
 function isValidSnowflake(id) {
   return /^\d{17,20}$/.test(id);
+}
+
+function validateStartupConfig() {
+  const missing = [];
+  if (!CONFIG.DISCORD_TOKEN || CONFIG.DISCORD_TOKEN === 'YOUR_BOT_TOKEN') {
+    missing.push('DISCORD_TOKEN');
+  }
+  if (!isValidSnowflake(CONFIG.GUILD_ID)) {
+    missing.push('GUILD_ID');
+  }
+  if (hasCSharpIntegration) {
+    try {
+      const url = new URL(CONFIG.CSHARP_API_URL);
+      if (!['http:', 'https:'].includes(url.protocol)) {
+        missing.push('CSHARP_API_URL');
+      }
+    } catch {
+      missing.push('CSHARP_API_URL');
+    }
+  }
+  return missing;
 }
 
 async function resolveUserName(guild, userId) {
@@ -959,12 +1151,16 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   const guild = interaction.guild;
+  if (!guild || interaction.commandName !== 'tsuki') return;
+
+  const subcommand = interaction.options.getSubcommand();
   const arg = interaction.options.getString('channel_id') || interaction.options.getString('user_id') || '';
 
   try {
-    switch (interaction.commandName) {
+    switch (subcommand) {
       case 'join': {
-        if (!isValidSnowflake(arg)) {
+        const channelId = arg || CONFIG.VOICE_CHANNEL_ID;
+        if (!isValidSnowflake(channelId)) {
           await interaction.reply({ content: 'That does not look like a valid channel ID (numbers only).', ephemeral: true });
           return;
         }
@@ -976,28 +1172,29 @@ client.on('interactionCreate', async (interaction) => {
         turnGateClosed = false;
         userState.clear();
         try {
-          await joinVoice(CONFIG.GUILD_ID, arg);
-          await interaction.reply(`Joined <#${arg}>. I'm listening.`);
+          await joinVoice(CONFIG.GUILD_ID, channelId);
+          await interaction.reply(`Joined <#${channelId}>. I'm listening.`);
         } catch (joinError) {
-          await interaction.reply(`Failed to join <#${arg}>: ${joinError.message}`);
+          await interaction.reply(`Failed to join <#${channelId}>: ${joinError.message}`);
         }
         return;
       }
       case 'leave': {
-        if (!isValidSnowflake(arg)) {
-          await interaction.reply({ content: 'That does not look like a valid channel ID.', ephemeral: true });
+        const channelId = arg || currentConnection?.joinConfig?.channelId || '';
+        if (!isValidSnowflake(channelId)) {
+          await interaction.reply({ content: 'I am not in a voice channel right now.', ephemeral: true });
           return;
         }
         const voice = currentConnection?.joinConfig?.channelId;
-        if (voice !== arg) {
-          await interaction.reply({ content: `I'm not in <#${arg}> right now.`, ephemeral: true });
+        if (voice !== channelId) {
+          await interaction.reply({ content: `I'm not in <#${channelId}> right now.`, ephemeral: true });
           return;
         }
         leaveVoice(CONFIG.GUILD_ID);
         focusedUserId = null;
         turnGateClosed = false;
         userState.clear();
-        await interaction.reply(`Left <#${arg}>. See you later!`);
+        await interaction.reply(`Left <#${channelId}>. See you later!`);
         return;
       }
       case 'focus': {
@@ -1032,17 +1229,44 @@ client.on('interactionCreate', async (interaction) => {
       }
       case 'focuslist': {
         if (manualFocusList.size === 0) {
-          await interaction.reply('Manual focus is off — I listen to everyone. Use `/focus user_id` to restrict it.');
+          await interaction.reply('Manual focus is off — I listen to everyone. Use `/tsuki focus user_id` to restrict it.');
           return;
         }
         const names = await Promise.all([...manualFocusList].map((id) => resolveUserName(guild, id)));
         await interaction.reply(`Listening only to: **${names.join(', ')}**`);
         return;
       }
+      case 'say': {
+        const destination = interaction.options.getString('destination', true);
+        const rawText = interaction.options.getString('text', true);
+        const text = limitDirectTtsText(rawText);
+        if (!text) {
+          await interaction.reply({ content: 'Text is empty after validation.', ephemeral: true });
+          return;
+        }
+
+        if (destination === 'vc' && !currentConnection) {
+          await interaction.reply({ content: 'I am not in a voice channel. Use `/tsuki join` first.', ephemeral: true });
+          return;
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+        const pcm = await requestDirectTts(text);
+        if (destination === 'vc') {
+          await enqueuePlayback('slash-say-vc', pcm, { priority: 0 });
+          await interaction.editReply(`Speaking in <#${currentConnection.joinConfig.channelId}>.`);
+        } else {
+          await sendVoiceMessage(interaction.channelId, pcmToWav(pcm), 'Voice message from Tsuki');
+          await interaction.editReply('Voice message sent.');
+        }
+        return;
+      }
     }
   } catch (error) {
     console.error('[SLASH] Command failed:', error.message);
-    if (!interaction.replied) {
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply({ content: 'Something went wrong running that command.' }).catch(() => {});
+    } else {
       await interaction.reply({ content: 'Something went wrong running that command.', ephemeral: true }).catch(() => {});
     }
   }
@@ -1056,7 +1280,7 @@ client.on('error', (error) => {
 // run the message through the same LLM pipeline as voice turns and reply in text.
 // TEXT_REPLY_MODE='any' widens this to every non-bot message in the channel.
 // Guardrails: one turn at a time globally, per-user cooldown, short error reply.
-const TEXT_USER_COOLDOWN_MS = Math.max(1000, parseInt(process.env.TEXT_USER_COOLDOWN_MS || '3000', 10));
+const TEXT_USER_COOLDOWN_MS = boundedInt(process.env.TEXT_USER_COOLDOWN_MS, 3000, 1000, 60000);
 // Voice replies in text chat: 'all' = every reply gets a voice message,
 // 'keywords' = only when the user's message contains a keyword (TEXT_VOICE_KEYWORDS),
 // 'off' = text only. Keywords are comma-separated, case-insensitive substrings.
@@ -1129,6 +1353,11 @@ function voiceMetadataFromWav(wavBuffer, fallbackDuration) {
 // goes in raw (ffmpeg probes it and resamples 24k->48k mono with high quality).
 function wavToOggOpus(wavBuffer) {
   return new Promise((resolve, reject) => {
+    if (!Buffer.isBuffer(wavBuffer) || wavBuffer.length === 0 || wavBuffer.length > MAX_AUDIO_BYTES) {
+      reject(new Error('Invalid WAV payload'));
+      return;
+    }
+
     // FFMPEG_PATH preferred: the mwader/static-ffmpeg build is used in Docker
     // because ffmpeg-static's opus encoder produced full-static output.
     const bin = process.env.FFMPEG_PATH || ffmpegPath;
@@ -1149,18 +1378,114 @@ function wavToOggOpus(wavBuffer) {
     const chunks = [];
     proc.stdout.on("data", (c) => chunks.push(c));
     let stderr = "";
-    proc.stderr.on("data", (d) => { stderr += d.toString(); });
-    proc.on("error", reject);
+    let settled = false;
+    const timer = setTimeout(() => {
+      proc.kill('SIGKILL');
+      fail(new Error('ffmpeg timed out'));
+    }, 30000);
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    };
+    proc.stderr.on("data", (d) => { stderr = (stderr + d.toString()).slice(-2000); });
+    proc.on("error", fail);
     proc.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (code === 0) {
         resolve(Buffer.concat(chunks));
       } else {
         reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(0, 200)}`));
       }
     });
-    proc.stdin.on("error", reject);
+    proc.stdin.on("error", fail);
     proc.stdin.write(wavBuffer);
     proc.stdin.end();
+  });
+}
+
+const DIRECT_TTS_MAX_CHARS = 280;
+const MAX_AUDIO_BYTES = 16 * 1024 * 1024;
+
+function decodeBase64Audio(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > Math.ceil(MAX_AUDIO_BYTES / 3) * 4) {
+    throw new Error('Invalid audio payload');
+  }
+  if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) {
+    throw new Error('Invalid audio payload');
+  }
+  const audio = Buffer.from(value, 'base64');
+  if (audio.length === 0 || audio.length > MAX_AUDIO_BYTES) {
+    throw new Error('Invalid audio payload');
+  }
+  return audio;
+}
+
+function limitDirectTtsText(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= DIRECT_TTS_MAX_CHARS) return text;
+  const suffix = '...';
+  const contentLimit = DIRECT_TTS_MAX_CHARS - suffix.length;
+  const cut = text.lastIndexOf(' ', contentLimit);
+  return (cut > 0 ? text.slice(0, cut) : text.slice(0, contentLimit)).trim() + suffix;
+}
+
+function pcmToWav(pcmBuffer, sampleRate = 48000, channels = 2) {
+  const pcm = Buffer.from(pcmBuffer);
+  const bytesPerSample = 2;
+  const blockAlign = channels * bytesPerSample;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * blockAlign, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bytesPerSample * 8, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+async function requestDirectTts(text) {
+  const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/voice/test-tts`, { text }, {
+    timeout: 180000,
+    validateStatus: (status) => status >= 200 && status < 300,
+  });
+  const audioBase64 = response.data?.audio;
+  if (!audioBase64) {
+    throw new Error('C# API did not return TTS audio');
+  }
+  return decodeBase64Audio(audioBase64);
+}
+
+async function sendVoiceMessage(channelId, wavBuffer, description = 'Voice message from Tsuki') {
+  const meta = voiceMetadataFromWav(wavBuffer, 1);
+  const ogg = await wavToOggOpus(wavBuffer);
+  if (ogg.length === 0) {
+    throw new Error('FFmpeg returned an empty voice message');
+  }
+
+  await client.rest.post(Routes.channelMessages(channelId), {
+    body: {
+      flags: MessageFlags.IsVoiceMessage,
+      attachments: [{
+        id: 0,
+        filename: 'voice-message.ogg',
+        description,
+        duration_secs: meta.durationSecs,
+        waveform: meta.waveform,
+      }],
+    },
+    files: [{ name: 'voice-message.ogg', data: ogg, contentType: 'audio/ogg' }],
+    auth: true,
   });
 }
 
@@ -1211,7 +1536,7 @@ client.on('messageCreate', async (message) => {
         let voiceSent = false;
         if (wantVoice && response?.data?.audio) {
           try {
-            const wav = Buffer.from(response.data.audio, 'base64');
+            const wav = decodeBase64Audio(response.data.audio);
             // Some engines (Kokoro) return WAV variants the API's analyzer
             // can't parse — compute metadata from the audio itself as fallback.
             let durationSecs = response.data.duration_secs || 0;
@@ -1271,16 +1596,29 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// Handle process termination
-process.on('SIGINT', () => {
-  console.log('[BOT] Shutting down...');
+// Handle process termination. Docker sends SIGTERM during a normal stop.
+function shutdown(signal) {
+  console.log(`[BOT] Shutting down (${signal})...`);
   if (currentConnection) {
     leaveVoice(CONFIG.GUILD_ID);
   }
   client.destroy();
   process.exit(0);
-});
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 // Login to Discord (token already trimmed in CONFIG)
-console.log('[BOT] Starting Discord voice bridge...');
-client.login(CONFIG.DISCORD_TOKEN);
+const startupErrors = validateStartupConfig();
+if (startupErrors.length > 0) {
+  console.error(`[BOT] Invalid configuration. Missing or invalid: ${startupErrors.join(', ')}`);
+  process.exitCode = 78;
+} else {
+  console.log('[BOT] Starting Discord voice bridge...');
+  client.login(CONFIG.DISCORD_TOKEN).catch((error) => {
+    const code = error?.code ? ` (${error.code})` : '';
+    console.error(`[BOT] Discord login failed${code}. Check DISCORD_TOKEN and bot status.`);
+    process.exitCode = 78;
+  });
+}

@@ -6,12 +6,12 @@ namespace TsukiAI.Core.Models;
 public enum TranslationStrategy
 {
     /// <summary>
-    /// Strategy A: Translate user input to Japanese, generate LLM response in Japanese, output via VoiceVox.
+    /// Strategy A: Translate user input to Japanese, generate the LLM response in Japanese, then synthesize it.
     /// </summary>
     TranslateInputToJapanese = 0,
     
     /// <summary>
-    /// Strategy B: Generate LLM response in English, translate response to Japanese, output via VoiceVox.
+    /// Strategy B: Generate the LLM response in English, translate the response to Japanese, then synthesize it.
     /// </summary>
     TranslateResponseToJapanese = 1,
     

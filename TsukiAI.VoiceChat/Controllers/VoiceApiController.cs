@@ -10,6 +10,11 @@ namespace TsukiAI.VoiceChat.Controllers;
 [Route("api/voice")]
 public sealed class VoiceApiController : ControllerBase
 {
+    private const int MaxTextChars = 4000;
+    private const int MaxTtsTextChars = 1200;
+    private const int MaxAudioUploadBytes = 15 * 1024 * 1024;
+    private const int MaxBase64AudioChars = ((MaxAudioUploadBytes + 2) / 3) * 4;
+
     private readonly AppSettings _settings;
     private readonly IVoiceConversationPipeline _pipeline;
     private readonly IWhisperService _whisperService;
@@ -45,11 +50,15 @@ public sealed class VoiceApiController : ControllerBase
 
         if (request is null || string.IsNullOrWhiteSpace(request.AudioData))
             return BadRequest(new { error = "audioData is required" });
+        if (request.AudioData.Length > MaxBase64AudioChars)
+            return StatusCode(413, new { error = "audioData is too large", correlation_id = correlationId });
 
         try
         {
             var sw = Stopwatch.StartNew();
             var pcm = Convert.FromBase64String(request.AudioData);
+            if (pcm.Length > MaxAudioUploadBytes)
+                return StatusCode(413, new { error = "audioData is too large", correlation_id = correlationId });
             var result = await _whisperService.TranscribeDiscordPcmAsync(pcm, ct);
             sw.Stop();
             if (_pipeline is VoiceConversationPipeline concretePipeline)
@@ -68,10 +77,14 @@ public sealed class VoiceApiController : ControllerBase
         {
             return BadRequest(new { error = "audioData is not valid base64" });
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return StatusCode(499, new { error = "Request canceled", correlation_id = correlationId });
+        }
         catch (Exception ex)
         {
             DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=stt, status=error, error={1}", correlationId, ex);
-            return StatusCode(500, new { error = ex.Message, correlation_id = correlationId });
+            return StatusCode(502, new { error = "Speech-to-text failed", correlation_id = correlationId });
         }
     }
 
@@ -84,6 +97,8 @@ public sealed class VoiceApiController : ControllerBase
 
         if (request is null || string.IsNullOrWhiteSpace(request.Text))
             return BadRequest(new { error = "text is required", correlation_id = correlationId });
+        if (request.Text.Length > MaxTextChars || (request.UserId?.Length ?? 0) > 64)
+            return StatusCode(413, new { error = "text or user ID is too long", correlation_id = correlationId });
 
         try
         {
@@ -106,7 +121,7 @@ public sealed class VoiceApiController : ControllerBase
         catch (Exception ex)
         {
             DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process, status=error, error={1}", correlationId, ex);
-            return StatusCode(500, new { error = ex.Message, correlation_id = correlationId });
+            return StatusCode(502, new { error = "Voice processing failed", correlation_id = correlationId });
         }
     }
 
@@ -119,19 +134,35 @@ public sealed class VoiceApiController : ControllerBase
 
         if (request is null || string.IsNullOrWhiteSpace(request.Text))
             return BadRequest(new { error = "text is required", correlation_id = correlationId });
+        if (request.Text.Length > MaxTextChars || (request.UserId?.Length ?? 0) > 64)
+            return StatusCode(413, new { error = "text or user ID is too long", correlation_id = correlationId });
 
-        var totalSw = Stopwatch.StartNew();
-        var result = await _pipeline.ProcessTextAsync(request.UserId ?? string.Empty, request.Text, correlationId, ct);
-        totalSw.Stop();
-        DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process_binary, duration_ms={1}, status={2}",
-            correlationId, totalSw.ElapsedMilliseconds, result.Success ? "ok" : "error");
+        try
+        {
+            var totalSw = Stopwatch.StartNew();
+            var result = await _pipeline.ProcessTextAsync(request.UserId ?? string.Empty, request.Text, correlationId, ct);
+            totalSw.Stop();
+            DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process_binary, duration_ms={1}, status={2}",
+                correlationId, totalSw.ElapsedMilliseconds, result.Success ? "ok" : "error");
 
-        if (!result.Success || result.AudioPcm48kStereo.Length == 0)
-            return StatusCode(204);
+            if (!result.Success)
+                return StatusCode(502, new { error = "Voice processing failed", correlation_id = correlationId });
+            if (result.AudioPcm48kStereo.Length == 0)
+                return NoContent();
 
-        Response.Headers["x-correlation-id"] = correlationId;
-        Response.Headers["x-tsuki-text"] = result.ResponseText;
-        return File(result.AudioPcm48kStereo, "application/octet-stream");
+            Response.Headers["x-correlation-id"] = correlationId;
+            Response.Headers["x-tsuki-text"] = result.ResponseText;
+            return File(result.AudioPcm48kStereo, "application/octet-stream");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return StatusCode(499, new { error = "Request canceled", correlation_id = correlationId });
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process_binary, status=error, error={1}", correlationId, ex);
+            return StatusCode(502, new { error = "Voice processing failed", correlation_id = correlationId });
+        }
     }
 
     [HttpPost("test-tts")]
@@ -139,15 +170,31 @@ public sealed class VoiceApiController : ControllerBase
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Text))
             return BadRequest(new { error = "text is required" });
+        if (request.Text.Length > MaxTtsTextChars)
+            return StatusCode(413, new { error = "text is too long" });
 
         var correlationId = Guid.NewGuid().ToString("N");
-        var audio = await _pipeline.SynthesizeTextToPcmAsync(request.Text, correlationId, ct);
-        return Ok(new
+        try
         {
-            correlation_id = correlationId,
-            text = request.Text,
-            audio = audio.Length > 0 ? Convert.ToBase64String(audio) : null
-        });
+            var audio = await _pipeline.SynthesizeTextToPcmAsync(request.Text, correlationId, ct);
+            if (audio.Length == 0)
+                return StatusCode(502, new { error = "Text-to-speech unavailable", correlation_id = correlationId });
+            return Ok(new
+            {
+                correlation_id = correlationId,
+                text = request.Text,
+                audio = Convert.ToBase64String(audio)
+            });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return StatusCode(499, new { error = "Request canceled", correlation_id = correlationId });
+        }
+        catch (Exception ex)
+        {
+            DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=test_tts, status=error, error={1}", correlationId, ex);
+            return StatusCode(502, new { error = "Text-to-speech unavailable", correlation_id = correlationId });
+        }
     }
 }
 

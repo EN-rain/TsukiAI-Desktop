@@ -5,6 +5,7 @@
 
 import axios from 'axios';
 import FormData from 'form-data';
+import { GroqKeyPool } from './groq-key-pool.js';
 
 /**
  * Convert PCM audio to WAV format
@@ -39,68 +40,78 @@ function pcmToWav(pcmBuffer, sampleRate, numChannels, bitDepth) {
 
 /**
  * Transcribe audio using Groq Whisper API
- * @param {string} apiKey - Groq API key (same as LLM key)
+ * @param {string|string[]|GroqKeyPool} apiKeys - Groq API key(s)
  * @param {Buffer} audioBuffer - PCM audio buffer (48kHz stereo)
  * @param {number} sampleRate - Sample rate of the audio
  * @param {string} sttLanguage - Language code (e.g. en, ja) or "auto"
  * @returns {Promise<{text: string, language: string, confidence: number}>}
  */
-async function transcribeAudio(apiKey, audioBuffer, sampleRate = 48000, sttLanguage = 'auto') {
-  try {
-    // Convert PCM to WAV format
-    const wavBuffer = pcmToWav(audioBuffer, sampleRate, 2, 16);
-    console.log(`[GroqWhisper] Converted ${audioBuffer.length} bytes PCM to ${wavBuffer.length} bytes WAV`);
+async function transcribeAudio(apiKeys, audioBuffer, sampleRate = 48000, sttLanguage = 'auto', httpClient = axios) {
+  const keyPool = apiKeys instanceof GroqKeyPool ? apiKeys : new GroqKeyPool(apiKeys);
+  const candidates = keyPool.candidates();
+  if (candidates.length === 0) {
+    throw new Error('No Groq API keys configured');
+  }
 
-    // Create form data
+  // Convert PCM to WAV format once; each attempt gets a fresh multipart body.
+  const wavBuffer = pcmToWav(audioBuffer, sampleRate, 2, 16);
+  console.log(`[GroqWhisper] Converted ${audioBuffer.length} bytes PCM to ${wavBuffer.length} bytes WAV`);
+  const languageCode = (sttLanguage || 'auto').trim().toLowerCase();
+  let lastError = null;
+
+  for (let index = 0; index < candidates.length; index++) {
+    const apiKey = candidates[index];
     const form = new FormData();
     form.append('file', wavBuffer, {
       filename: 'audio.wav',
       contentType: 'audio/wav'
     });
     form.append('model', 'whisper-large-v3');
-    form.append('response_format', 'verbose_json'); // Get language and confidence
-    const languageCode = (sttLanguage || 'auto').trim().toLowerCase();
+    form.append('response_format', 'verbose_json');
     if (languageCode !== 'auto') {
       form.append('language', languageCode);
     }
 
-    // Send to Groq Whisper API
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/audio/transcriptions',
-      form,
-      {
-        headers: {
-          ...form.getHeaders(),
-          'Authorization': `Bearer ${apiKey}`
-        },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity
-      }
-    );
+    try {
+      const response = await httpClient.post(
+        'https://api.groq.com/openai/v1/audio/transcriptions',
+        form,
+        {
+          headers: {
+            ...form.getHeaders(),
+            'Authorization': `Bearer ${apiKey}`
+          },
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity
+        }
+      );
 
-    console.log('[GroqWhisper] Transcription completed');
+      const text = response.data.text || '';
+      const language = response.data.language || 'en';
+      const confidence = text.length > 10 ? 0.90 : 0.75;
+      keyPool.markSuccess(apiKey);
+      console.log(`[GroqWhisper] Transcription completed (key ${index + 1}/${candidates.length})`);
 
-    // Extract results
-    const text = response.data.text || '';
-    const language = response.data.language || 'en';
-    
-    // Groq doesn't provide confidence, but we can estimate from duration
-    // Longer transcriptions with clear text usually indicate good quality
-    const confidence = text.length > 10 ? 0.90 : 0.75;
-
-    return {
-      text: text.trim(),
-      language: language,
-      confidence: confidence
-    };
-  } catch (error) {
-    console.error('[GroqWhisper] Error:', error.message);
-    if (error.response) {
-      console.error('[GroqWhisper] Response status:', error.response.status);
-      console.error('[GroqWhisper] Response data:', JSON.stringify(error.response.data, null, 2));
+      return {
+        text: text.trim(),
+        language,
+        confidence
+      };
+    } catch (error) {
+      lastError = error;
+      const status = Number(error?.response?.status || 0);
+      keyPool.markFailure(apiKey, status);
+      if (!shouldRotate(error) || index === candidates.length - 1) break;
+      console.warn(`[GroqWhisper] key ${index + 1}/${candidates.length} failed (status=${status || 'network'}); rotating`);
     }
-    throw error;
   }
+
+  throw lastError || new Error('Groq transcription failed');
+}
+
+function shouldRotate(error) {
+  const status = Number(error?.response?.status || 0);
+  return status === 0 || status === 401 || status === 403 || status === 408 || status === 429 || status >= 500;
 }
 
 export { transcribeAudio };

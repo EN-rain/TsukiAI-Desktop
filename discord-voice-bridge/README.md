@@ -34,8 +34,19 @@ GUILD_ID=your_discord_server_id
 VOICE_CHANNEL_ID=your_voice_channel_id
 CSHARP_API_URL=http://localhost:5000
 
-# STT mode: groq | assemblyai | local
-STT_MODE=groq
+# STT mode: azure | groq | assemblyai | local
+STT_MODE=azure
+STT_FALLBACK_MODE=groq
+AZURE_SPEECH_KEY=your-azure-speech-key
+AZURE_SPEECH_REGION=southeastasia
+# Azure's REST recognizer uses one locale per request.
+AZURE_STT_LANGUAGE=en-US
+# Preferred: comma- or newline-separated keys; failed keys are rotated out.
+GROQ_API_KEYS=
+# Optional newline-separated key file. The Docker deployment mounts
+# discord-voice-bridge/groq.keys at this container path.
+GROQ_API_KEYS_FILE=/run/secrets/tsuki-groq-keys
+# Legacy single-key fallback when GROQ_API_KEYS is empty.
 GROQ_API_KEY=
 ASSEMBLYAI_API_KEY=
 
@@ -54,8 +65,40 @@ VAD_MIN_SEGMENT_BYTES=9600
 
 Important:
 - Set `CSHARP_API_URL` explicitly in `.env`. The bridge uses this to enable full STT->LLM->TTS mode.
+- `STT_MODE=azure` sends Discord PCM to Azure Speech. The bridge converts it to
+  16 kHz mono WAV and never sends the Azure key to the C# API.
+- Set `AZURE_STT_LANGUAGE=ja-JP` for Japanese voice input or `en-US` for English.
+  The REST endpoint is intentionally configured for one locale at a time; use
+  the setting that matches the current voice channel.
+- `STT_FALLBACK_MODE=groq` is attempted only if the primary cloud request fails.
 - `STT_MODE=local` uses C# Whisper via `/api/voice/stt`.
 - `STT_MODE=groq` or `assemblyai` uses cloud STT in Node, then sends text to C# for LLM/TTS.
+- `GROQ_API_KEYS` accepts comma- or newline-separated keys. Groq Whisper tries
+  the current key first and rotates to another key on authentication, rate-limit,
+  network, timeout, or server errors. Rejected keys are temporarily cooled down.
+- For Docker deployments, `GROQ_API_KEYS_FILE` is preferred for long lists. The
+  mounted key file is read at startup, excluded from the image, and mounted
+  read-only.
+
+## Slash Commands
+
+The bridge registers one grouped command. Members need **Manage Channels**:
+
+```text
+/tsuki join [channel_id]
+/tsuki leave [channel_id]
+/tsuki say destination:vc text:"Hello from Tsuki"
+/tsuki say destination:c text:"Hello in the chat"
+/tsuki focus user_id:<user-id>
+/tsuki unfocus user_id:<user-id>
+/tsuki focuslist
+```
+
+`destination:vc` speaks in the currently joined voice channel. `destination:c`
+sends a Discord voice message in the text channel where the command was used.
+Direct speech is limited to 280 characters and uses the C# TTS pipeline. The
+pipeline has one backend: the private OpenVoice V2 CPU service configured with
+`TSUKI_OPENVOICE_URL` and `TSUKI_OPENVOICE_API_KEY`.
 
 ## Run
 

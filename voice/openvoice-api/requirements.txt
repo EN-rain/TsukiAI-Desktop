@@ -1,0 +1,5 @@
+# Web/API layer. Install the official OpenVoice and MeloTTS packages separately
+# as documented in README.md so their model/runtime dependencies remain clear.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic>=2.7,<3

@@ -24,8 +24,8 @@ public static class EnvConfiguration
         "TSUKI_GEMINI_API_KEY",
         "TSUKI_GITHUB_API_KEY",
         "TSUKI_MISTRAL_API_KEY",
-        "TSUKI_CLOUD_TTS_URL",
-        "TSUKI_VOICEVOX_BASE_URL",
+        "TSUKI_OPENVOICE_URL",
+        "TSUKI_OPENVOICE_API_KEY",
         "TSUKI_MODEL_NAME",
         "TSUKI_USE_DEEPL_TRANSLATE",
         "TSUKI_USE_DEEPL_FREE_API",
@@ -55,6 +55,8 @@ public static class EnvConfiguration
             inferenceMode = settings.InferenceMode;
         }
         var useMultipleProviders = ParseBool(env, "TSUKI_USE_MULTIPLE_PROVIDERS", settings.UseMultipleAiProviders);
+        var openVoiceUrl = ReadString(env, "TSUKI_OPENVOICE_URL", settings.OpenVoiceUrl);
+        var openVoiceApiKey = ReadString(env, "TSUKI_OPENVOICE_API_KEY", settings.OpenVoiceApiKey);
 
         return settings with
         {
@@ -71,12 +73,13 @@ public static class EnvConfiguration
             GeminiApiKey = ReadString(env, "TSUKI_GEMINI_API_KEY", settings.GeminiApiKey),
             GitHubApiKey = ReadString(env, "TSUKI_GITHUB_API_KEY", settings.GitHubApiKey),
             MistralApiKey = ReadString(env, "TSUKI_MISTRAL_API_KEY", settings.MistralApiKey),
-            CloudTtsUrl = ReadString(env, "TSUKI_CLOUD_TTS_URL", settings.CloudTtsUrl),
+            OpenVoiceUrl = openVoiceUrl,
+            OpenVoiceApiKey = openVoiceApiKey,
+            TtsMode = TtsMode.OpenVoice,
             SemanticMemoryEnabled = semanticMemoryEnabled,
             InferenceMode = inferenceMode,
             UseMultipleAiProviders = useMultipleProviders,
             MultiAiProvidersCsv = ReadString(env, "TSUKI_MULTI_PROVIDERS_CSV", settings.MultiAiProvidersCsv),
-            VoicevoxBaseUrl = ReadString(env, "TSUKI_VOICEVOX_BASE_URL", settings.VoicevoxBaseUrl),
             ModelName = ReadString(env, "TSUKI_MODEL_NAME", settings.ModelName),
             UseDeepLTranslate = useDeepLTranslate,
             UseDeepLFreeApi = useDeepLFreeApi,
@@ -103,44 +106,45 @@ public static class EnvConfiguration
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        var envPath = FindEnvFile();
+        if (envPath is not null)
+        {
+            foreach (var rawLine in File.ReadAllLines(envPath))
+            {
+                var line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var idx = line.IndexOf('=');
+                if (idx <= 0)
+                {
+                    continue;
+                }
+
+                var key = line[..idx].Trim();
+                var value = line[(idx + 1)..].Trim();
+                if (value.Length >= 2 && value.StartsWith('"') && value.EndsWith('"'))
+                {
+                    value = value[1..^1];
+                }
+
+                if (key.Length > 0)
+                {
+                    map[key] = value;
+                }
+            }
+        }
+
+        // Process environment variables are the deployment authority. This
+        // keeps Docker/Kubernetes overrides from being silently replaced by a
+        // stale local .env file when both are present.
         foreach (DictionaryEntry item in Environment.GetEnvironmentVariables())
         {
             var key = item.Key?.ToString();
             var value = item.Value?.ToString();
             if (!string.IsNullOrWhiteSpace(key) && value is not null)
-            {
-                map[key] = value;
-            }
-        }
-
-        var envPath = FindEnvFile();
-        if (envPath is null)
-        {
-            return map;
-        }
-
-        foreach (var rawLine in File.ReadAllLines(envPath))
-        {
-            var line = rawLine.Trim();
-            if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var idx = line.IndexOf('=');
-            if (idx <= 0)
-            {
-                continue;
-            }
-
-            var key = line[..idx].Trim();
-            var value = line[(idx + 1)..].Trim();
-            if (value.Length >= 2 && value.StartsWith('"') && value.EndsWith('"'))
-            {
-                value = value[1..^1];
-            }
-
-            if (key.Length > 0)
             {
                 map[key] = value;
             }

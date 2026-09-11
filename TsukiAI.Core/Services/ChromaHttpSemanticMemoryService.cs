@@ -274,7 +274,7 @@ public sealed class ChromaHttpSemanticMemoryService : ISemanticMemoryService, ID
             if (doc.RootElement.TryGetProperty("id", out var idEl))
             {
                 _collectionId = idEl.GetString();
-                DevLog.WriteLine("SemanticMemory(ChromaHttp): collection '{0}' id={1}", _collectionName, _collectionId);
+                DevLog.WriteLine("SemanticMemory(ChromaHttp): collection '{0}' id={1}", _collectionName, _collectionId ?? string.Empty);
             }
 
             return _collectionId;

@@ -1104,10 +1104,10 @@
                 </StackPanel>
             </Border>
             
-            <!-- ═══ Voice (VOICEVOX) ═══ -->
+            <!-- ═══ Voice (OpenVoice V2) ═══ -->
             <Border Style="{StaticResource CardBorder}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice (VOICEVOX)"/>
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice (OpenVoice V2)"/>
 
                     <StackPanel Margin="0,0,0,12">
                         <CheckBox Style="{StaticResource SettingsCheckBox}"
@@ -1116,41 +1116,18 @@
                     </StackPanel>
 
                     <StackPanel Margin="0,0,0,12">
-                        <TextBlock Style="{StaticResource FieldLabel}" Text="TTS Mode"/>
-                        <TextBlock Style="{StaticResource FieldHint}" Text="Choose between local VoiceVox or cloud TTS"/>
-                        <StackPanel Margin="0,8,0,0">
-                            <RadioButton x:Name="RadioLocalTts" 
-                                         Style="{StaticResource SettingsRadioButton}"
-                                         GroupName="TtsMode"
-                                         Checked="RadioTtsMode_Changed"
-                                         Margin="0,4">
-                                <TextBlock Text="Local VoiceVox" TextWrapping="Wrap"/>
-                            </RadioButton>
-                            <RadioButton x:Name="RadioCloudTts" 
-                                         Style="{StaticResource SettingsRadioButton}"
-                                         GroupName="TtsMode"
-                                         Checked="RadioTtsMode_Changed"
-                                         Margin="0,4">
-                                <TextBlock Text="Remote TTS (ngrok tunnel)" TextWrapping="Wrap"/>
-                            </RadioButton>
-                        </StackPanel>
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="TTS engine"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="OpenVoice V2 CPU inference is the only configured TTS backend."/>
                     </StackPanel>
 
-                    <StackPanel x:Name="LocalTtsPanel" Margin="0,0,0,12">
-                        <TextBlock Style="{StaticResource FieldLabel}" Text="VoiceVox Engine URL"/>
-                        <TextBlock Style="{StaticResource FieldHint}" Text="Auto-detected if left default"/>
+                    <StackPanel x:Name="OpenVoiceTtsPanel" Margin="0,0,0,12">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="OpenVoice V2 URL"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="Enter the protected OpenVoice API root (for example, http://127.0.0.1:8000)"/>
                         <TextBox Style="{StaticResource SettingsTextBox}"
-                                 Text="{Binding VoicevoxBaseUrl, UpdateSourceTrigger=PropertyChanged}"/>
-                    </StackPanel>
-
-                    <StackPanel x:Name="CloudTtsPanel" Margin="0,0,0,12" Visibility="Collapsed">
-                        <TextBlock Style="{StaticResource FieldLabel}" Text="Cloud TTS URL"/>
-                        <TextBlock Style="{StaticResource FieldHint}" Text="Enter your ngrok tunnel root URL (e.g., https://xxxx.ngrok-free.dev)"/>
-                        <TextBox Style="{StaticResource SettingsTextBox}"
-                                 Text="{Binding CloudTtsUrl, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="Remote TTS endpoint URL via ngrok tunnel"/>
-                        <Button x:Name="TestCloudTtsButton" 
-                                Click="TestCloudTts_Click"
+                                 Text="{Binding OpenVoiceUrl, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="OpenVoice V2 endpoint URL"/>
+                        <Button x:Name="TestOpenVoiceButton"
+                                Click="TestOpenVoice_Click"
                                 Style="{StaticResource SettingsButton}" 
                                 Content="Test Connection"
                                 Margin="0,8,0,0"
@@ -1158,31 +1135,17 @@
                                 Padding="12,0"/>
                     </StackPanel>
 
-                    <Grid Margin="0,0,0,12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="12"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0">
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="Speaker style ID"/>
-                            <!-- Hidden hint to align height with right column -->
-                            <TextBlock Style="{StaticResource FieldHint}" Text=" " Visibility="Hidden"/>
-                            <TextBox Style="{StaticResource SettingsTextBox}"
-                                     Text="{Binding VoicevoxSpeakerStyleIdText, UpdateSourceTrigger=PropertyChanged}"/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="Audio output device"/>
-                            <TextBlock Style="{StaticResource FieldHint}" Text="Select output"/>
-                            <ComboBox Style="{StaticResource SettingsComboBox}"
-                                      ItemsSource="{Binding AudioDevices}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding VoiceOutputDeviceNumber}"/>
-                        </StackPanel>
-                    </Grid>
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Audio output device"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="Select output"/>
+                        <ComboBox Style="{StaticResource SettingsComboBox}"
+                                  ItemsSource="{Binding AudioDevices}"
+                                  DisplayMemberPath="Name"
+                                  SelectedValuePath="Id"
+                                  SelectedValue="{Binding VoiceOutputDeviceNumber}"/>
+                    </StackPanel>
 
-                    <StackPanel>
+                    <StackPanel Visibility="Collapsed">
                         <CheckBox Style="{StaticResource SettingsCheckBox}" Margin="0,0,0,4"
                                   Content="Translate voice output to Japanese"
                                   IsChecked="{Binding VoiceTranslateToJapanese}"/>

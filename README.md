@@ -20,14 +20,13 @@ TsukiAI is a .NET 8 + WPF desktop voice assistant with a local HTTP API, multi-p
 - WPF
 - ASP.NET Core minimal host (local API for bridge and tooling)
 - Node.js bridge for Discord voice I/O
+- OpenVoice V2 CPU service for English and Japanese character TTS
 
 ## Repository Layout
 
 ```text
 TsukiAI.Core/                Core services and models
-TsukiAI.Core.Tests/          Core tests
 TsukiAI.VoiceChat/           WPF app and local HTTP API
-TsukiAI.VoiceChat.Tests/     Voice/runtime tests
 discord-voice-bridge/        Discord voice sidecar (Node.js)
 scripts/                     Utility scripts (including semantic memory helpers)
 ```
@@ -39,7 +38,6 @@ scripts/                     Utility scripts (including semantic memory helpers)
 - Node.js 18+ (for Discord bridge)
 
 Optional:
-- VOICEVOX runtime for local TTS
 - API keys for cloud providers / cloud STT / translation
 
 ## Setup
@@ -65,13 +63,33 @@ dotnet build TsukiAI.sln
 dotnet run --project TsukiAI.VoiceChat/TsukiAI.VoiceChat.csproj
 ```
 
+For the Azure deployment, provision the private OpenVoice V2 service described
+in [voice/openvoice-api/README.md](voice/openvoice-api/README.md), then set
+`TSUKI_OPENVOICE_URL` and `TSUKI_OPENVOICE_API_KEY` in the root `.env` and run:
+
+```bash
+docker compose up -d --build
+```
+
+The OpenVoice reference audio is processed once on the VM into a cached speaker
+embedding. Runtime requests contain only text and language.
+
 ## Testing
 
 ```bash
-dotnet test TsukiAI.sln
+dotnet build TsukiAI.sln -c Release
+dotnet test TsukiAI.Core.Tests/TsukiAI.Core.Tests.csproj
+cd discord-voice-bridge && npm test
+cd ../web && npm run build
 ```
 
+The .NET test project covers the OpenVoice synthesis response contract.
+
 ## Discord Voice Bridge
+
+For the Azure OpenVoice deployment, see
+[voice/openvoice-api/README.md](voice/openvoice-api/README.md) and
+[tasks/plan.md](tasks/plan.md).
 
 See [discord-voice-bridge/README.md](discord-voice-bridge/README.md) for bridge setup and `.env` keys.
 
@@ -84,5 +102,5 @@ See [discord-voice-bridge/README.md](discord-voice-bridge/README.md) for bridge 
   - verify bot permissions and voice channel IDs
   - verify `CSHARP_API_URL` in bridge `.env`
 - TTS/STT issues:
-  - check configured provider keys and endpoint URLs
+  - verify the private OpenVoice `/health` endpoint and API key
   - validate local API is reachable on `http://localhost:5000`

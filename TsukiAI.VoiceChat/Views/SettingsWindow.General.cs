@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using NAudio.Wave;
 using TsukiAI.Core.Models;
+using TsukiAI.Core.Services;
 using MessageBox = System.Windows.MessageBox;
 
 namespace TsukiAI.VoiceChat.Views;
@@ -37,85 +38,73 @@ public partial class SettingsWindow
 
     private void RadioTtsMode_Changed(object sender, RoutedEventArgs e)
     {
-        UpdateTtsPanelVisibility(RadioLocalTts.IsChecked == true ? TtsMode.LocalVoiceVox : TtsMode.CloudRemote);
+        UpdateTtsPanelVisibility(TtsMode.OpenVoice);
     }
 
     private void UpdateTtsPanelVisibility(TtsMode mode)
     {
-        if (LocalTtsPanel == null || CloudTtsPanel == null)
+        if (OpenVoiceTtsPanel == null)
         {
             return;
         }
 
-        LocalTtsPanel.Visibility = mode == TtsMode.LocalVoiceVox ? Visibility.Visible : Visibility.Collapsed;
-        CloudTtsPanel.Visibility = mode == TtsMode.CloudRemote ? Visibility.Visible : Visibility.Collapsed;
+        OpenVoiceTtsPanel.Visibility = Visibility.Visible;
     }
 
-    private async void TestCloudTts_Click(object sender, RoutedEventArgs e)
+    private async void TestOpenVoice_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not SettingsVm vm)
         {
             return;
         }
 
-        var url = NormalizeCloudTtsUrl(vm.CloudTtsUrl);
-        vm.CloudTtsUrl = url;
+        var url = NormalizeOpenVoiceUrl(vm.OpenVoiceUrl);
+        vm.OpenVoiceUrl = url;
         if (string.IsNullOrWhiteSpace(url))
         {
-            MessageBox.Show(this, "Please enter a Remote TTS URL first.", "No URL", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "Please enter an OpenVoice V2 URL first.", "No URL", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        TestCloudTtsButton.IsEnabled = false;
-        TestCloudTtsButton.Content = "Testing...";
+        TestOpenVoiceButton.IsEnabled = false;
+        TestOpenVoiceButton.Content = "Testing...";
 
         try
         {
-            using var versionResp = await CloudTtsTestClient.GetAsync($"{url}/version");
-            var versionBody = await versionResp.Content.ReadAsStringAsync();
-            if (!versionResp.IsSuccessStatusCode)
-            {
-                var details = BuildRemoteTtsErrorDetails(url, versionResp.StatusCode, versionResp.ReasonPhrase, versionBody, "/version");
-                MessageBox.Show(this, details, "Remote TTS Connection", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            var probeText = "connection test";
-            using var queryResp = await CloudTtsTestClient.PostAsync(
-                $"{url}/audio_query?text={Uri.EscapeDataString(probeText)}&speaker={Result.VoicevoxSpeakerStyleId}",
-                content: null);
-            var queryBody = await queryResp.Content.ReadAsStringAsync();
-            if (!queryResp.IsSuccessStatusCode || string.IsNullOrWhiteSpace(queryBody))
-            {
-                var details = BuildRemoteTtsErrorDetails(url, queryResp.StatusCode, queryResp.ReasonPhrase, queryBody, "/audio_query");
-                MessageBox.Show(this, details, "Remote TTS Connection", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            using var synthReq = new System.Net.Http.HttpRequestMessage(
+            var runtimeSettings = EnvConfiguration.ApplyToSettings(Result);
+            using var request = new System.Net.Http.HttpRequestMessage(
                 System.Net.Http.HttpMethod.Post,
-                $"{url}/synthesis?speaker={Result.VoicevoxSpeakerStyleId}")
+                $"{url.TrimEnd('/')}/tts")
             {
-                Content = new System.Net.Http.StringContent(queryBody, System.Text.Encoding.UTF8, "application/json")
+                Content = System.Net.Http.Json.JsonContent.Create(new
+                {
+                    text = "connection test",
+                    language = "EN"
+                })
             };
-            synthReq.Headers.TryAddWithoutValidation("accept", "audio/wav");
-            using var synthResp = await CloudTtsTestClient.SendAsync(synthReq, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
+            if (!string.IsNullOrWhiteSpace(runtimeSettings.OpenVoiceApiKey))
+                request.Headers.TryAddWithoutValidation("X-Api-Key", runtimeSettings.OpenVoiceApiKey);
+            request.Headers.TryAddWithoutValidation("X-Correlation-ID", Guid.NewGuid().ToString("N"));
+            using var synthResp = await OpenVoiceTestClient.SendAsync(
+                request,
+                System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
             var wavBytes = await synthResp.Content.ReadAsByteArrayAsync();
 
-            if (!synthResp.IsSuccessStatusCode || wavBytes.Length == 0)
+            if (!synthResp.IsSuccessStatusCode || wavBytes.Length == 0 ||
+                wavBytes.Length < 12 ||
+                System.Text.Encoding.ASCII.GetString(wavBytes, 0, 4) != "RIFF")
             {
                 var synthBody = string.Empty;
                 try { synthBody = System.Text.Encoding.UTF8.GetString(wavBytes); } catch { }
-                var details = BuildRemoteTtsErrorDetails(url, synthResp.StatusCode, synthResp.ReasonPhrase, synthBody, "/synthesis");
-                MessageBox.Show(this, details, "Remote TTS Connection", MessageBoxButton.OK, MessageBoxImage.Error);
+                var details = BuildRemoteTtsErrorDetails(url, synthResp.StatusCode, synthResp.ReasonPhrase, synthBody, "/tts");
+                MessageBox.Show(this, details, "OpenVoice Connection", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
-            var version = (versionBody ?? string.Empty).Trim().Trim('"');
             MessageBox.Show(
                 this,
-                $"Connection successful.\nEngine version: {version}\nSynthesis: OK ({wavBytes.Length} bytes)",
-                "Remote TTS Connection",
+                $"Connection successful.\nOpenVoice V2 synthesis: OK ({wavBytes.Length} bytes)",
+                "OpenVoice Connection",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -125,8 +114,8 @@ public partial class SettingsWindow
         }
         finally
         {
-            TestCloudTtsButton.IsEnabled = true;
-            TestCloudTtsButton.Content = "Test Connection";
+            TestOpenVoiceButton.IsEnabled = true;
+            TestOpenVoiceButton.Content = "Test Connection";
         }
     }
 }

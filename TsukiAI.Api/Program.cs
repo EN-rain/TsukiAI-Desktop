@@ -31,11 +31,17 @@ var settings = EnvConfiguration.ApplyToSettings(SettingsService.Load() with
 var webPassword = Environment.GetEnvironmentVariable("TSUKI_WEB_PASSWORD")?.Trim();
 var publicMode = !string.IsNullOrWhiteSpace(webPassword);
 
-// Without a password the API refuses to bind publicly (single-user deployment guard).
-if (!publicMode)
+// Keep public request bodies bounded. Audio uploads use the largest part of
+// this budget; JSON/text endpoints apply their own smaller field limits below.
+builder.WebHost.ConfigureKestrel(options =>
 {
-    builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(5000));
-}
+    options.Limits.MaxRequestBodySize = 16 * 1024 * 1024;
+
+    // Without a password the API refuses to bind publicly (single-user
+    // deployment guard).
+    if (!publicMode)
+        options.ListenLocalhost(5000);
+});
 
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
@@ -102,7 +108,11 @@ else
         settings.SemanticMemoryEnabled, !string.IsNullOrWhiteSpace(chromaUrl));
 }
 
-builder.Services.AddSingleton(sp => new VoicevoxClient(sp.GetRequiredService<AppSettings>().VoicevoxBaseUrl));
+builder.Services.AddSingleton<ITtsClient>(sp => new OpenVoiceTtsClient(() =>
+{
+    var current = EnvConfiguration.ApplyToSettings(SettingsService.Load());
+    return (current.OpenVoiceUrl, current.OpenVoiceApiKey);
+}));
 builder.Services.AddSingleton<TranslationService>();
 builder.Services.AddSingleton<AudioProcessingService>();
 
@@ -187,9 +197,20 @@ app.MapPost("/api/memory/add", async (HttpContext ctx, ISemanticMemoryService me
     if (string.IsNullOrWhiteSpace(body))
         return Results.BadRequest(new { error = "Empty body" });
 
-    var payload = JsonSerializer.Deserialize<AddMemoryRequest>(body, bodyJsonOptions);
+    AddMemoryRequest? payload;
+    try
+    {
+        payload = JsonSerializer.Deserialize<AddMemoryRequest>(body, bodyJsonOptions);
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new { error = "Invalid JSON" });
+    }
+
     if (payload is null || string.IsNullOrWhiteSpace(payload.Text))
         return Results.BadRequest(new { error = "text is required" });
+    if (payload.Text.Length > 4000 || (payload.Source?.Length ?? 0) > 128)
+        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
 
     await memory.AddMemoryAsync(payload.Text, payload.Source ?? "web", ct: ctx.RequestAborted);
     return Results.Ok(new { status = "ok" });
@@ -199,8 +220,10 @@ app.MapGet("/api/memory/search", async (HttpContext ctx, string q, int? k, ISema
 {
     if (string.IsNullOrWhiteSpace(q))
         return Results.BadRequest(new { error = "q is required" });
+    if (q.Length > 4000)
+        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
 
-    var hits = await memory.SearchAsync(q, k ?? 5, ct: ctx.RequestAborted);
+    var hits = await memory.SearchAsync(q, Math.Clamp(k ?? 5, 1, 20), ct: ctx.RequestAborted);
     return Results.Ok(hits);
 });
 
@@ -209,25 +232,48 @@ app.MapPost("/api/chat", async (HttpContext ctx, IVoiceConversationPipeline pipe
 {
     using var sr = new StreamReader(ctx.Request.Body);
     var body = await sr.ReadToEndAsync();
-    var payload = string.IsNullOrWhiteSpace(body)
-        ? null
-        : JsonSerializer.Deserialize<ChatRequest>(body, bodyJsonOptions);
+    ChatRequest? payload;
+    try
+    {
+        payload = string.IsNullOrWhiteSpace(body)
+            ? null
+            : JsonSerializer.Deserialize<ChatRequest>(body, bodyJsonOptions);
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new { error = "Invalid JSON" });
+    }
 
     if (payload is null || string.IsNullOrWhiteSpace(payload.Text))
         return Results.BadRequest(new { error = "text is required" });
+    if (payload.Text.Length > 4000)
+        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
 
-    var result = await pipeline.ProcessTextAsync("web", payload.Text, ct: ctx.RequestAborted, synthesizeAudio: false);
-    if (!result.Success)
-        return Results.Json(new { error = result.ErrorMessage }, statusCode: 500);
+    try
+    {
+        var result = await pipeline.ProcessTextAsync("web", payload.Text, ct: ctx.RequestAborted, synthesizeAudio: false);
+        if (!result.Success)
+            return Results.Json(new { error = "Chat processing failed" }, statusCode: 502);
 
-    return Results.Ok(new { text = result.ResponseText });
+        return Results.Ok(new { text = result.ResponseText });
+    }
+    catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    catch (Exception ex)
+    {
+        DevLog.WriteLine("Api: web chat failed: {0}", ex);
+        return Results.Json(new { error = "Chat provider unavailable" }, statusCode: 502);
+    }
 });
 
 // ---------------------------------------------------------------------------
 // Settings (non-secret subset only — API keys are never readable via the API)
 // ---------------------------------------------------------------------------
-app.MapGet("/api/settings", (AppSettings s) =>
+app.MapGet("/api/settings", () =>
 {
+    var s = EnvConfiguration.ApplyToSettings(SettingsService.Load());
     var activeProvider = default(string);
     if (s.UseMultipleAiProviders && !string.IsNullOrWhiteSpace(s.MultiAiProvidersCsv))
     {
@@ -253,9 +299,10 @@ app.MapGet("/api/settings", (AppSettings s) =>
         },
         tts = new
         {
-            mode = s.TtsMode.ToString(),
-            voicevox_base_url = s.VoicevoxBaseUrl,
-            speaker_style_id = s.VoicevoxSpeakerStyleId
+            mode = TtsMode.OpenVoice.ToString(),
+            openvoice_url = s.OpenVoiceUrl,
+            openvoice_configured = !string.IsNullOrWhiteSpace(s.OpenVoiceUrl) &&
+                                   !string.IsNullOrWhiteSpace(s.OpenVoiceApiKey)
         },
         translation = new
         {
@@ -268,16 +315,28 @@ app.MapGet("/api/settings", (AppSettings s) =>
     });
 });
 
-app.MapPut("/api/settings", async (HttpContext ctx, AppSettings current) =>
+app.MapPut("/api/settings", async (HttpContext ctx) =>
 {
+    var current = EnvConfiguration.ApplyToSettings(SettingsService.Load());
     using var sr = new StreamReader(ctx.Request.Body);
     var body = await sr.ReadToEndAsync();
-    var patch = string.IsNullOrWhiteSpace(body)
-        ? null
-        : JsonSerializer.Deserialize<SettingsPatch>(body, bodyJsonOptions);
+    SettingsPatch? patch;
+    try
+    {
+        patch = string.IsNullOrWhiteSpace(body)
+            ? null
+            : JsonSerializer.Deserialize<SettingsPatch>(body, bodyJsonOptions);
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new { error = "Invalid JSON" });
+    }
 
     if (patch is null)
         return Results.BadRequest(new { error = "empty body" });
+
+    if (patch.ModelName is { Length: > 128 } || patch.ReplyTonePreset is { Length: > 64 })
+        return Results.BadRequest(new { error = "modelName or replyTonePreset is too long" });
 
     var updated = current;
     if (!string.IsNullOrWhiteSpace(patch.ModelName)) updated = updated with { ModelName = patch.ModelName };
@@ -287,27 +346,35 @@ app.MapPut("/api/settings", async (HttpContext ctx, AppSettings current) =>
         var g = patch.Generation;
         updated = updated with
         {
-            GenerationMaxTokens = g.MaxTokens ?? updated.GenerationMaxTokens,
-            GenerationTemperature = g.Temperature ?? updated.GenerationTemperature,
-            GenerationTopP = g.TopP ?? updated.GenerationTopP,
-            GenerationTopK = g.TopK ?? updated.GenerationTopK,
-            GenerationRepeatPenalty = g.RepeatPenalty ?? updated.GenerationRepeatPenalty,
-            GenerationMaxReplyChars = g.MaxReplyChars ?? updated.GenerationMaxReplyChars
+            GenerationMaxTokens = Math.Clamp(g.MaxTokens ?? updated.GenerationMaxTokens, 1, 2048),
+            GenerationTemperature = ClampFinite(g.Temperature ?? updated.GenerationTemperature, 0.0f, 2.0f, updated.GenerationTemperature),
+            GenerationTopP = ClampFinite(g.TopP ?? updated.GenerationTopP, 0.0f, 1.0f, updated.GenerationTopP),
+            GenerationTopK = Math.Clamp(g.TopK ?? updated.GenerationTopK, 0, 200),
+            GenerationRepeatPenalty = ClampFinite(g.RepeatPenalty ?? updated.GenerationRepeatPenalty, 0.5f, 2.0f, updated.GenerationRepeatPenalty),
+            GenerationMaxReplyChars = Math.Clamp(g.MaxReplyChars ?? updated.GenerationMaxReplyChars, 1, 4000)
         };
     }
     if (patch.Tts is not null)
     {
         var t = patch.Tts;
-        updated = updated with
-        {
-            VoicevoxBaseUrl = t.VoicevoxBaseUrl ?? updated.VoicevoxBaseUrl,
-            VoicevoxSpeakerStyleId = t.SpeakerStyleId ?? updated.VoicevoxSpeakerStyleId
-        };
         if (!string.IsNullOrWhiteSpace(t.Mode) &&
-            Enum.TryParse<TtsMode>(t.Mode, ignoreCase: true, out var ttsMode))
+            !string.Equals(t.Mode, nameof(TtsMode.OpenVoice), StringComparison.OrdinalIgnoreCase))
         {
-            updated = updated with { TtsMode = ttsMode };
+            return Results.BadRequest(new { error = "OpenVoice V2 is the only supported TTS backend" });
         }
+        if (t.OpenVoiceUrl is { } configuredUrl)
+        {
+            var trimmedUrl = configuredUrl.Trim();
+            if (trimmedUrl.Length > 2048 ||
+                !Uri.TryCreate(trimmedUrl, UriKind.Absolute, out var parsedUrl) ||
+                (parsedUrl.Scheme != Uri.UriSchemeHttp && parsedUrl.Scheme != Uri.UriSchemeHttps))
+            {
+                return Results.BadRequest(new { error = "openVoiceUrl must be an http(s) URL no longer than 2048 characters" });
+            }
+
+            updated = updated with { OpenVoiceUrl = trimmedUrl };
+        }
+        updated = updated with { TtsMode = TtsMode.OpenVoice };
     }
     if (patch.Translation is not null)
     {
@@ -357,18 +424,41 @@ app.MapDelete("/api/history", () =>
 // Discord voice message.
 
 
-app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textChat, VoicevoxClient voicevox, TranslationService translation, AppSettings settings) =>
+app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textChat, ITtsClient ttsClient) =>
 {
     using var sr = new StreamReader(ctx.Request.Body);
     var body = await sr.ReadToEndAsync();
-    var payload = string.IsNullOrWhiteSpace(body)
-        ? null
-        : JsonSerializer.Deserialize<DiscordChatRequest>(body, bodyJsonOptions);
+    DiscordChatRequest? payload;
+    try
+    {
+        payload = string.IsNullOrWhiteSpace(body)
+            ? null
+            : JsonSerializer.Deserialize<DiscordChatRequest>(body, bodyJsonOptions);
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new { error = "Invalid JSON" });
+    }
 
     if (payload is null || string.IsNullOrWhiteSpace(payload.UserId) || string.IsNullOrWhiteSpace(payload.Text))
         return Results.BadRequest(new { error = "userId and text are required" });
+    if (payload.UserId.Length > 64 || payload.Text.Length > 4000 || (payload.UserName?.Length ?? 0) > 128)
+        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
 
-    var reply = await textChat.ReplyAsync(payload.UserId, payload.UserName ?? "someone", payload.Text, ctx.RequestAborted);
+    string reply;
+    try
+    {
+        reply = await textChat.ReplyAsync(payload.UserId, payload.UserName ?? "someone", payload.Text, ctx.RequestAborted);
+    }
+    catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    catch (Exception ex)
+    {
+        DevLog.WriteLine("Api: discord text chat failed: {0}", ex);
+        return Results.Json(new { error = "Chat provider unavailable" }, statusCode: 502);
+    }
 
     string? audio = null;
     double? durationSecs = null;
@@ -385,30 +475,17 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
             const int MaxTtsChars = 280;
             if (ttsText.Length > MaxTtsChars)
             {
-                var cut = ttsText.LastIndexOf(' ', MaxTtsChars);
-                ttsText = cut > 0 ? ttsText[..cut] + "…" : ttsText[..MaxTtsChars];
+                const string suffix = "...";
+                var contentLimit = MaxTtsChars - suffix.Length;
+                var cut = ttsText.LastIndexOf(' ', contentLimit);
+                ttsText = (cut > 0 ? ttsText[..cut] : ttsText[..contentLimit]) + suffix;
             }
 
-            // Language routing: Japanese keyword -> DeepL + VOICEVOX (emotion
-            // tones); otherwise English -> local Kokoro. Falls back to VOICEVOX
-            // if Kokoro is unreachable.
-            var useJapanese = MentionsJapanese(payload.Text);
-            byte[] wav = Array.Empty<byte>();
-            if (useJapanese && settings.VoiceTranslateToJapanese && translation.IsEnabled)
-            {
-                var ja = await translation.TranslateToJapaneseAsync(ttsText, ctx.RequestAborted);
-                if (!string.IsNullOrWhiteSpace(ja))
-                    ttsText = ja.Trim();
-
-                wav = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, ctx.RequestAborted);
-                engineUsed = "voicevox";
-            }
-            else
-            {
-                // English: VOICEVOX with the katakana accent softener.
-                wav = await VoiceToneEngine.SynthesizeAsync(ttsText, voicevox, ctx.RequestAborted);
-                engineUsed = "voicevox";
-            }
+            // The selected TTS provider owns its voice/reference configuration;
+            // the request carries only generated text and detected language.
+            var language = TtsLanguageDetector.Detect(ttsText);
+            var wav = await ttsClient.SynthesizeWavAsync(ttsText, language, ctx.RequestAborted);
+            engineUsed = ttsClient.Name;
 
             if (wav.Length > 0)
             {
@@ -435,6 +512,8 @@ app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
 
+/* language detection is owned by the OpenVoice client */
+/*
 static bool MentionsJapanese(string text)
 {
     var keywords = (Environment.GetEnvironmentVariable("TSUKI_VOICE_JAPANESE_KEYWORDS") ??
@@ -442,6 +521,12 @@ static bool MentionsJapanese(string text)
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     var t = text.ToLowerInvariant();
     return keywords.Any(k => t.Contains(k.ToLowerInvariant()));
+}
+*/
+
+static float ClampFinite(float value, float min, float max, float fallback)
+{
+    return float.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
 }
 
 static (double DurationSecs, string Waveform) AnalyzeVoiceWav(byte[] wav)
@@ -529,8 +614,7 @@ sealed class GenerationPatch
 sealed class TtsPatch
 {
     public string? Mode { get; set; }
-    public string? VoicevoxBaseUrl { get; set; }
-    public int? SpeakerStyleId { get; set; }
+    public string? OpenVoiceUrl { get; set; }
 }
 
 sealed class TranslationPatch

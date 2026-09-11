@@ -110,8 +110,11 @@ public partial class App : System.Windows.Application
         // Voice-only services
         services.AddSingleton<VoiceConversationPipeline>();
         services.AddSingleton<IVoiceConversationPipeline>(sp => sp.GetRequiredService<VoiceConversationPipeline>());
-        services.AddSingleton(sp => new VoicevoxClient(sp.GetRequiredService<AppSettings>().VoicevoxBaseUrl));
-        services.AddSingleton(sp => new VoicevoxEngineService(sp.GetRequiredService<AppSettings>().VoicevoxEnginePath));
+        services.AddSingleton<ITtsClient>(sp => new OpenVoiceTtsClient(() =>
+        {
+            var current = EnvConfiguration.ApplyToSettings(SettingsService.Load());
+            return (current.OpenVoiceUrl, current.OpenVoiceApiKey);
+        }));
         services.AddSingleton<TtsPlaybackService>();
         services.AddSingleton<WhisperService>();
         services.AddSingleton<IWhisperService>(sp => sp.GetRequiredService<WhisperService>());
@@ -206,25 +209,7 @@ public partial class App : System.Windows.Application
         if (settings.VoiceRuntimeV2Enabled)
         {
             _serviceProvider.GetRequiredService<VoiceConversationPipeline>().Start();
-            if (settings.TtsMode == TtsMode.LocalVoiceVox)
-            {
-                RunBackground("voicevox_engine_start", async () =>
-                {
-                    try
-                    {
-                        var engine = _serviceProvider.GetRequiredService<VoicevoxEngineService>();
-                        await engine.StartAsync(CancellationToken.None);
-                    }
-                    catch (Exception ex)
-                    {
-                        DevLog.WriteLine("App: VoiceVox engine start failed: {0}", ex.Message);
-                    }
-                });
-            }
-            else
-            {
-                DevLog.WriteLine("App: Skipping local VoiceVox engine startup because remote TTS mode is selected.");
-            }
+            DevLog.WriteLine("App: OpenVoice V2 synthesis selected; no alternate TTS engine startup.");
         }
 
         // Start local mic capture for the voice runtime (desktop app is a
@@ -275,7 +260,6 @@ public partial class App : System.Windows.Application
         {
             _serviceProvider?.GetService<VoiceConversationPipeline>()?.Stop();
             _serviceProvider?.GetService<MicrophoneCaptureService>()?.Stop();
-            _serviceProvider?.GetService<VoicevoxEngineService>()?.Stop();
         }
         catch
         {
@@ -350,6 +334,10 @@ public partial class App : System.Windows.Application
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(5000));
         builder.Services.AddControllers();
+        var bodyJsonOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
         if (_serviceProvider is not null)
         {
             builder.Services.AddSingleton(_serviceProvider.GetRequiredService<AppSettings>());
@@ -369,7 +357,15 @@ public partial class App : System.Windows.Application
             if (string.IsNullOrWhiteSpace(body))
                 return Results.BadRequest(new { error = "Empty body" });
 
-            var payload = JsonSerializer.Deserialize<AddMemoryRequest>(body);
+            AddMemoryRequest? payload;
+            try
+            {
+                payload = JsonSerializer.Deserialize<AddMemoryRequest>(body, bodyJsonOptions);
+            }
+            catch (JsonException)
+            {
+                return Results.BadRequest(new { error = "Invalid JSON" });
+            }
             if (payload is null || string.IsNullOrWhiteSpace(payload.Text))
                 return Results.BadRequest(new { error = "text is required" });
 

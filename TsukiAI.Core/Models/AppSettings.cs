@@ -34,8 +34,7 @@ public enum SttMode
 
 public enum TtsMode
 {
-    LocalVoiceVox = 0,
-    CloudRemote = 1
+    OpenVoice = 0
 }
 
 public sealed record AppSettings(
@@ -61,13 +60,12 @@ public sealed record AppSettings(
     string GitHubApiKey = "",
     string MistralApiKey = "",
     
-    // Voice (VOICEVOX) - Shared
+    // OpenVoice V2 is the only TTS backend. The service owns the reference
+    // audio and cached speaker embedding; the application sends text only.
     bool VoiceEnabled = false,
-    TtsMode TtsMode = TtsMode.LocalVoiceVox,
-    string VoicevoxBaseUrl = "http://127.0.0.1:50021",
-    string VoicevoxEnginePath = @"voicevox_engine\run.exe",
-    int VoicevoxSpeakerStyleId = 47,
-    string CloudTtsUrl = "",
+    TtsMode TtsMode = TtsMode.OpenVoice,
+    string OpenVoiceUrl = "http://127.0.0.1:8000",
+    string OpenVoiceApiKey = "",
     bool VoiceTranslateToJapanese = true,
     bool UseDeepLTranslate = false,
     string DeepLApiKey = "",

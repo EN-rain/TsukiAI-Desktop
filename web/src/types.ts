@@ -45,8 +45,8 @@ export interface WebSettings {
   };
   tts: {
     mode: string;
-    voicevox_base_url: string;
-    speaker_style_id: number;
+    openvoice_url: string;
+    openvoice_configured: boolean;
   };
   translation: {
     voice_translate_to_japanese: boolean;

@@ -64,7 +64,13 @@ public static class SettingsService
                 DiscordFocusedUserId = loadedSettings.DiscordFocusedUserId == 0 ? ulong.MaxValue : loadedSettings.DiscordFocusedUserId,
                 VrChatOscHost = string.IsNullOrWhiteSpace(loadedSettings.VrChatOscHost) ? "127.0.0.1" : loadedSettings.VrChatOscHost,
                 VrChatOscInputPort = loadedSettings.VrChatOscInputPort == 0 ? 9000 : loadedSettings.VrChatOscInputPort,
-                VrChatOscOutputPort = loadedSettings.VrChatOscOutputPort == 0 ? 9001 : loadedSettings.VrChatOscOutputPort
+                VrChatOscOutputPort = loadedSettings.VrChatOscOutputPort == 0 ? 9001 : loadedSettings.VrChatOscOutputPort,
+                // OpenVoice V2 is the only supported TTS backend. Ignore
+                // legacy provider modes when loading old settings files.
+                TtsMode = TtsMode.OpenVoice,
+                OpenVoiceUrl = string.IsNullOrWhiteSpace(loadedSettings.OpenVoiceUrl)
+                    ? AppSettings.Default.OpenVoiceUrl
+                    : loadedSettings.OpenVoiceUrl
             };
             
             // Migrate old single API key to provider-specific keys
@@ -93,7 +99,7 @@ public static class SettingsService
             
             // Merge with defaults to ensure new properties have correct default values
             // This handles the case where old settings files don't have new properties
-            return loadedSettings with
+            var mergedSettings = loadedSettings with
             {
                 InferenceTimeoutSeconds = loadedSettings.InferenceTimeoutSeconds == 0 ? 60 : loadedSettings.InferenceTimeoutSeconds,
                 ModelLoadTimeoutSeconds = loadedSettings.ModelLoadTimeoutSeconds == 0 ? 120 : loadedSettings.ModelLoadTimeoutSeconds,
@@ -106,8 +112,14 @@ public static class SettingsService
                 DiscordFocusedUserId = loadedSettings.DiscordFocusedUserId == 0 ? ulong.MaxValue : loadedSettings.DiscordFocusedUserId,
                 VrChatOscHost = string.IsNullOrWhiteSpace(loadedSettings.VrChatOscHost) ? "127.0.0.1" : loadedSettings.VrChatOscHost,
                 VrChatOscInputPort = loadedSettings.VrChatOscInputPort == 0 ? 9000 : loadedSettings.VrChatOscInputPort,
-                VrChatOscOutputPort = loadedSettings.VrChatOscOutputPort == 0 ? 9001 : loadedSettings.VrChatOscOutputPort
+                VrChatOscOutputPort = loadedSettings.VrChatOscOutputPort == 0 ? 9001 : loadedSettings.VrChatOscOutputPort,
+                TtsMode = TtsMode.OpenVoice,
+                OpenVoiceUrl = string.IsNullOrWhiteSpace(loadedSettings.OpenVoiceUrl)
+                    ? AppSettings.Default.OpenVoiceUrl
+                    : loadedSettings.OpenVoiceUrl
             };
+
+            return MigrateApiKeys(mergedSettings);
         }
         catch
         {
@@ -135,7 +147,19 @@ public static class SettingsService
         }
         
         var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(path, json);
+        var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            // Write beside the target and replace it only after the full JSON
+            // document is on disk. A process stop must not leave settings.json
+            // truncated and force the application back to defaults.
+            await File.WriteAllTextAsync(tempPath, json);
+            File.Move(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(tempPath); } catch { }
+        }
     }
     
     public static void Save(AppSettings settings)
@@ -158,7 +182,16 @@ public static class SettingsService
         }
         
         var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(path, json);
+        var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(tempPath); } catch { }
+        }
     }
 
     private static AppSettings MigrateApiKeys(AppSettings settings)

@@ -1,10 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
-using Polly;
-using Polly.Retry;
 using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
 
@@ -28,36 +25,11 @@ public sealed record VoiceTurnEvent(
 
 public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDisposable
 {
-    private static readonly ResiliencePipeline<HttpResponseMessage> CloudTtsRetryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
-        .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
-        {
-            MaxRetryAttempts = 2,
-            Delay = TimeSpan.FromMilliseconds(500),
-            BackoffType = DelayBackoffType.Exponential,
-            UseJitter = true,
-            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                .HandleResult(r => r.StatusCode == System.Net.HttpStatusCode.TooManyRequests ||
-                                   r.StatusCode == System.Net.HttpStatusCode.RequestTimeout ||
-                                   (int)r.StatusCode >= 500)
-                .Handle<HttpRequestException>()
-                .Handle<TaskCanceledException>(ex => !ex.CancellationToken.IsCancellationRequested),
-            OnRetry = args =>
-            {
-                var statusCode = args.Outcome.Result?.StatusCode.ToString() ?? "Exception";
-                DevLog.WriteLine("[VoiceFlow][CloudTTS][Retry]: attempt={0}, status={1}, delay_ms={2:F0}",
-                    args.AttemptNumber, statusCode, args.RetryDelay.TotalMilliseconds);
-                return ValueTask.CompletedTask;
-            }
-        })
-        .Build();
-
     private readonly IInferenceClient _inferenceClient;
-    private readonly VoicevoxClient _voicevoxClient;
-    private readonly TranslationService _translationService;
+    private readonly ITtsClient _ttsClient;
     private readonly AudioProcessingService _audioProcessingService;
     private readonly AppSettings _settings;
     private readonly LatencyTracker _latencyTracker;
-    private readonly HttpClient _httpClient;
     private readonly Channel<(string UserText, string AssistantText)> _historyQueue =
         Channel.CreateBounded<(string UserText, string AssistantText)>(new BoundedChannelOptions(128)
         {
@@ -85,22 +57,15 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
 
     public VoiceConversationPipeline(
         IInferenceClient inferenceClient,
-        VoicevoxClient voicevoxClient,
-        TranslationService translationService,
+        ITtsClient ttsClient,
         AudioProcessingService audioProcessingService,
         AppSettings settings)
     {
         _inferenceClient = inferenceClient;
-        _voicevoxClient = voicevoxClient;
-        _translationService = translationService;
+        _ttsClient = ttsClient;
         _audioProcessingService = audioProcessingService;
         _settings = settings;
         _latencyTracker = new LatencyTracker();
-        // ngrok-skip-browser-warning is required for all requests through ngrok tunnels —
-        // without it ngrok returns its own HTML interstitial page (404/502) instead of
-        // forwarding to the backend VOICEVOX instance.
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(45) };
-        _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("ngrok-skip-browser-warning", "true");
         _historyWorkerTask = Task.Run(HistoryWorkerAsync);
         _queueDepthLogTimer = new System.Threading.Timer(_ =>
         {
@@ -123,7 +88,6 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
         foreach (var kv in _inflightByUser)
         {
             try { kv.Value.Cancel(); } catch { }
-            try { kv.Value.Dispose(); } catch { }
         }
         _inflightByUser.Clear();
         FlushHistoryNow();
@@ -135,34 +99,39 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
         Interlocked.Increment(ref _queueDepth);
         var totalSw = Stopwatch.StartNew();
         var typingStateRaised = false;
-        var runtimeSettings = GetRuntimeSettings();
-        text = (text ?? string.Empty).Trim();
-        if (text.Length == 0)
-            return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "Empty text");
-
-        if (!runtimeSettings.VoiceTextReceptionEnabled)
-            return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "Voice text reception disabled");
-
-        if (!ShouldProcessUser(userId, runtimeSettings))
-            return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "User filtered");
-
-        var dedupeKey = $"{userId}:{text.ToLowerInvariant()}";
-        if (IsDuplicate(dedupeKey))
-            return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "Duplicate transcription");
-
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var currentCts = _inflightByUser.AddOrUpdate(
-            userId,
-            _ => linkedCts,
-            (_, existing) =>
-            {
-                try { existing.Cancel(); } catch { }
-                try { existing.Dispose(); } catch { }
-                return linkedCts;
-            });
-
+        CancellationTokenSource? currentCts = null;
         try
         {
+            var runtimeSettings = GetRuntimeSettings();
+            text = (text ?? string.Empty).Trim();
+            if (text.Length == 0)
+                return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "Empty text");
+
+            if (text.Length > 4000)
+                return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "Text is too long");
+
+            if (!runtimeSettings.VoiceTextReceptionEnabled)
+                return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "Voice text reception disabled");
+
+            if (!ShouldProcessUser(userId, runtimeSettings))
+                return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "User filtered");
+
+            var dedupeKey = $"{userId}:{text.ToLowerInvariant()}";
+            if (IsDuplicate(dedupeKey))
+                return new VoiceProcessResult(false, text, string.Empty, Array.Empty<byte>(), "Duplicate transcription");
+
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            currentCts = _inflightByUser.AddOrUpdate(
+                userId,
+                _ => linkedCts,
+                (_, existing) =>
+                {
+                    try { existing.Cancel(); } catch { }
+                    // The previous request owns disposal of its CTS. Disposing
+                    // it here can race with that request still reading its token.
+                    return linkedCts;
+                });
+
             SetAssistantTyping(true);
             typingStateRaised = true;
 
@@ -228,7 +197,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
 
             if (!synthesizeAudio)
             {
-                // Text-only turn (web chat / Discord text mentions): skip VOICEVOX
+                // Text-only turn (web chat / Discord text mentions): skip synthesis
                 // synthesis entirely — the caller only consumes ResponseText.
                 EnqueueConversationTurn(text, responseText);
                 totalSw.Stop();
@@ -238,64 +207,11 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
             }
 
             var ttsSw = Stopwatch.StartNew();
-            byte[] wav;
+            // The selected provider handles native/cross-lingual synthesis for
+            // the detected language. Keep the reply text unchanged.
+            var wav = await SynthesizeWavAsync(ttsText, currentCts.Token, correlationId);
 
-            // Parallel TTS optimisation: when translation is needed and using local VOICEVOX,
-            // fire audio_query (with the untranslated text as a warm-up probe) and DeepL
-            // concurrently, then synthesize once we have both the translated text and query JSON.
-            // This saves ~300-800ms per turn by overlapping the two network round-trips.
-            bool needsTranslation = runtimeSettings.VoiceTranslateToJapanese
-                && !LooksPrimarilyJapanese(ttsText)
-                && runtimeSettings.TtsMode == TtsMode.LocalVoiceVox;
-
-            // Accent softening: common English words -> tuned katakana.
-            ttsText = EnglishKanaSoftener.Apply(ttsText);
-
-            // Emotion-aware tone: pick VOICEVOX style + prosody from the reply's
-            // emotion (LLM hint) and text heuristics.
-            var tone = VoiceToneEngine.ClassifyTone(ttsText, emotionHint);
-            var toneStyle = VoiceToneEngine.StyleFor(tone);
-
-            if (needsTranslation && _translationService.IsEnabled)
-            {
-                // Run translation and audio_query for the original text concurrently.
-                // We use the original text for audio_query so VOICEVOX can pre-process
-                // phoneme data; we discard that result and re-query with translated text.
-                // Net saving: translation latency is fully hidden behind audio_query.
-                var translateTask = _translationService.TranslateToJapaneseAsync(responseText, currentCts.Token, correlationId);
-                var warmQueryTask = _voicevoxClient.AudioQueryAsync(ttsText, toneStyle, currentCts.Token, correlationId);
-
-                await Task.WhenAll(translateTask, warmQueryTask);
-                ttsText = translateTask.Result;
-
-                // Now fetch the real audio_query for the translated text, then synthesize.
-                // If translated text happens to equal original (e.g. already Japanese), reuse warm query.
-                string queryJson;
-                if (string.Equals(ttsText, StripParenthesesForTts(responseText), StringComparison.Ordinal))
-                {
-                    queryJson = warmQueryTask.Result;
-                }
-                else
-                {
-                    queryJson = await _voicevoxClient.AudioQueryAsync(ttsText, toneStyle, currentCts.Token, correlationId);
-                }
-
-                queryJson = VoiceToneEngine.PatchQuery(queryJson, tone);
-
-                wav = string.IsNullOrWhiteSpace(queryJson)
-                    ? Array.Empty<byte>()
-                    : await _voicevoxClient.SynthesizeFromQueryAsync(queryJson, toneStyle, currentCts.Token, correlationId);
-            }
-            else
-            {
-                // No translation or cloud TTS — use standard path.
-                if (needsTranslation && !_translationService.IsEnabled)
-                    DevLog.WriteLine("[VoiceFlow] translation_requested_but_deepl_unavailable=1");
-
-                wav = await SynthesizeWavAsync(ttsText, currentCts.Token, correlationId, tone);
-            }
-
-            var pcm = _audioProcessingService.ConvertVoiceVoxWavToDiscordPcm(wav);
+            var pcm = _audioProcessingService.ConvertWavToDiscordPcm(wav);
             ttsSw.Stop();
             _latencyTracker.RecordLatency("tts", ttsSw.Elapsed);
             DevLog.WriteLine("[VoiceFlow] tts_ms={0}", ttsSw.ElapsedMilliseconds);
@@ -330,9 +246,20 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
             {
                 SetAssistantTyping(false);
             }
-            _inflightByUser.TryRemove(userId, out _);
+            if (currentCts is not null)
+            {
+                RemoveInflight(userId, currentCts);
+            }
             Interlocked.Decrement(ref _queueDepth);
         }
+    }
+
+    private void RemoveInflight(string userId, CancellationTokenSource currentCts)
+    {
+        // Remove only our own entry. A newer request may already have replaced
+        // it after cancelling this request.
+        ((ICollection<KeyValuePair<string, CancellationTokenSource>>)_inflightByUser)
+            .Remove(new KeyValuePair<string, CancellationTokenSource>(userId, currentCts));
     }
 
     public async Task<byte[]> SynthesizeTextToPcmAsync(string text, string? correlationId = null, CancellationToken ct = default)
@@ -344,13 +271,13 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
             return Array.Empty<byte>();
         }
 
-        var wav = await SynthesizeWavAsync(ttsText, ct, correlationId, VoiceToneEngine.ClassifyTone(ttsText));
+        var wav = await SynthesizeWavAsync(ttsText, ct, correlationId);
         if (wav.Length == 0)
         {
             return Array.Empty<byte>();
         }
 
-        return _audioProcessingService.ConvertVoiceVoxWavToDiscordPcm(wav);
+        return _audioProcessingService.ConvertWavToDiscordPcm(wav);
     }
 
     private void SetAssistantTyping(bool isTyping)
@@ -442,97 +369,27 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
         }
     }
 
-    private async Task<byte[]> SynthesizeWavAsync(string text, CancellationToken ct, string? correlationId, string? tone = null)
+    private async Task<byte[]> SynthesizeWavAsync(string text, CancellationToken ct, string? correlationId)
     {
-        var runtimeSettings = GetRuntimeSettings();
-        tone ??= VoiceToneEngine.ClassifyTone(text);
-        // NOTE: English accent softening happens inside VoiceToneEngine
-        // (it needs to see the original text to pace-normalize).
-
-        // Auto-fallback: if CloudRemote is selected but no URL is configured, use local VOICEVOX
-        if (runtimeSettings.TtsMode == TtsMode.CloudRemote && string.IsNullOrWhiteSpace(runtimeSettings.CloudTtsUrl))
+        if (!_ttsClient.IsConfigured)
         {
-            DevLog.WriteLine("[VoiceFlow][CloudTTS] CloudTtsUrl is empty, falling back to local VOICEVOX");
-            try
-            {
-                var tonedWav = await VoiceToneEngine.SynthesizeAsync(text, _voicevoxClient, ct, correlationId: correlationId);
-                if (tonedWav.Length > 0)
-                    return tonedWav;
-            }
-            catch (Exception ex)
-            {
-                DevLog.WriteLine("[VoiceFlow][LocalTTS] tone synthesis failed ({0}), falling back", ex.GetBaseException().Message);
-            }
-
-            try
-            {
-                return await _voicevoxClient.SynthesizeWavAsync(text, runtimeSettings.VoicevoxSpeakerStyleId, ct, correlationId);
-            }
-            catch (Exception ex)
-            {
-                DevLog.WriteLine("[VoiceFlow][LocalTTS] fallback failed ({0})", ex.GetBaseException().Message);
-                return Array.Empty<byte>();
-            }
-        }
-
-        if (runtimeSettings.TtsMode == TtsMode.CloudRemote)
-        {
-            try
-            {
-                var baseUrl = runtimeSettings.CloudTtsUrl.TrimEnd('/');
-                var queryUrl = $"{baseUrl}/audio_query?text={Uri.EscapeDataString(text)}&speaker={runtimeSettings.VoicevoxSpeakerStyleId}";
-                using var queryResp = await CloudTtsRetryPipeline.ExecuteAsync(
-                    async innerCt =>
-                    {
-                        using var req = new HttpRequestMessage(HttpMethod.Post, queryUrl);
-                        if (!string.IsNullOrWhiteSpace(correlationId))
-                            req.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
-                        return await _httpClient.SendAsync(req, innerCt);
-                    },
-                    ct);
-                queryResp.EnsureSuccessStatusCode();
-                var queryJson = VoiceToneEngine.PatchQuery(await queryResp.Content.ReadAsStringAsync(ct), tone);
-
-                using var synthResp = await CloudTtsRetryPipeline.ExecuteAsync(
-                    async innerCt =>
-                    {
-                        using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/synthesis?speaker={runtimeSettings.VoicevoxSpeakerStyleId}")
-                        {
-                            Content = new StringContent(queryJson, System.Text.Encoding.UTF8, "application/json")
-                        };
-                        if (!string.IsNullOrWhiteSpace(correlationId))
-                            req.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
-                        return await _httpClient.SendAsync(req, innerCt);
-                    },
-                    ct);
-                synthResp.EnsureSuccessStatusCode();
-                return await synthResp.Content.ReadAsByteArrayAsync(ct);
-            }
-            catch (Exception ex)
-            {
-                DevLog.WriteLine("[VoiceFlow][CloudTTS] failed ({0})", ex.GetBaseException().Message);
-                return Array.Empty<byte>();
-            }
+            DevLog.WriteLine("[VoiceFlow][{0}] provider is not configured", _ttsClient.Name);
+            return Array.Empty<byte>();
         }
 
         try
         {
-            var tonedWav = await VoiceToneEngine.SynthesizeAsync(text, _voicevoxClient, ct, correlationId: correlationId);
-            if (tonedWav.Length > 0)
-                return tonedWav;
+            var language = TtsLanguageDetector.Detect(text);
+            DevLog.WriteLine("[VoiceFlow][{0}] language={1}, chars={2}", _ttsClient.Name, language, text.Length);
+            return await _ttsClient.SynthesizeWavAsync(text, language, ct, correlationId);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            DevLog.WriteLine("[VoiceFlow][LocalTTS] tone synthesis failed ({0}), falling back", ex.GetBaseException().Message);
-        }
-
-        try
-        {
-            return await _voicevoxClient.SynthesizeWavAsync(text, runtimeSettings.VoicevoxSpeakerStyleId, ct, correlationId);
-        }
-        catch (Exception ex)
-        {
-            DevLog.WriteLine("[VoiceFlow][LocalTTS] failed ({0}), returning text-only response", ex.GetBaseException().Message);
+            DevLog.WriteLine("[VoiceFlow][{0}] failed ({1}), returning text-only response", _ttsClient.Name, ex.GetBaseException().Message);
             return Array.Empty<byte>();
         }
     }
@@ -541,7 +398,7 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
     {
         try
         {
-            return SettingsService.Load();
+            return EnvConfiguration.ApplyToSettings(SettingsService.Load());
         }
         catch
         {
@@ -558,7 +415,9 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
 
         cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "\\s+", " ").Trim();
         const int maxChars = 280;
-        return cleaned.Length <= maxChars ? cleaned : cleaned[..maxChars] + "...";
+        const string suffix = "...";
+        var contentLimit = maxChars - suffix.Length;
+        return cleaned.Length <= maxChars ? cleaned : cleaned[..contentLimit] + suffix;
     }
 
     private static string StripParenthesesForTts(string text)
@@ -767,6 +626,5 @@ public sealed class VoiceConversationPipeline : IVoiceConversationPipeline, IDis
         FlushHistoryNow();
         _historyWorkerCts.Dispose();
         _queueDepthLogTimer.Dispose();
-        _httpClient.Dispose();
     }
 }

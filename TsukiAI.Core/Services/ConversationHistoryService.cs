@@ -226,8 +226,7 @@ public static class ConversationHistoryService
         lock (_chatLock)
         {
             _pendingChatHistory = history;
-            _chatSaveTimer?.Dispose();
-            _chatSaveTimer = new Timer(_ => QueueFlushChatWorker(), null, SaveDebounceDelay, Timeout.InfiniteTimeSpan);
+            ScheduleChatFlush_NoLock();
         }
     }
 
@@ -236,18 +235,39 @@ public static class ConversationHistoryService
         lock (_voiceLock)
         {
             _pendingVoiceHistory = history;
-            _voiceSaveTimer?.Dispose();
-            _voiceSaveTimer = new Timer(_ => QueueFlushVoiceWorker(), null, SaveDebounceDelay, Timeout.InfiniteTimeSpan);
+            ScheduleVoiceFlush_NoLock();
         }
+    }
+
+    private static void ScheduleChatFlush_NoLock()
+    {
+        _chatSaveTimer?.Dispose();
+        _chatSaveTimer = new Timer(_ => QueueFlushChatWorker(), null, SaveDebounceDelay, Timeout.InfiniteTimeSpan);
+    }
+
+    private static void ScheduleVoiceFlush_NoLock()
+    {
+        _voiceSaveTimer?.Dispose();
+        _voiceSaveTimer = new Timer(_ => QueueFlushVoiceWorker(), null, SaveDebounceDelay, Timeout.InfiniteTimeSpan);
     }
 
     private static void QueueFlushChatWorker()
     {
+        lock (_chatLock)
+        {
+            _chatSaveTimer?.Dispose();
+            _chatSaveTimer = null;
+        }
         _ = Task.Run(FlushChatHistoryAsync);
     }
 
     private static void QueueFlushVoiceWorker()
     {
+        lock (_voiceLock)
+        {
+            _voiceSaveTimer?.Dispose();
+            _voiceSaveTimer = null;
+        }
         _ = Task.Run(FlushVoiceHistoryAsync);
     }
 
@@ -269,7 +289,7 @@ public static class ConversationHistoryService
                 return;
 
             var json = JsonSerializer.Serialize(history, CompactJson);
-            await File.WriteAllTextAsync(ChatHistoryPath, json).ConfigureAwait(false);
+            await WriteTextAtomicallyAsync(ChatHistoryPath, json).ConfigureAwait(false);
             DevLog.WriteLine("[History] Flushed chat history: {0} messages", history.Messages.Count);
         }
         catch (Exception ex)
@@ -279,6 +299,11 @@ public static class ConversationHistoryService
         finally
         {
             Volatile.Write(ref _chatFlushInProgress, 0);
+            lock (_chatLock)
+            {
+                if (_pendingChatHistory is not null && _chatSaveTimer is null)
+                    ScheduleChatFlush_NoLock();
+            }
         }
     }
 
@@ -300,7 +325,7 @@ public static class ConversationHistoryService
                 return;
 
             var json = JsonSerializer.Serialize(history, CompactJson);
-            await File.WriteAllTextAsync(VoiceChatHistoryPath, json).ConfigureAwait(false);
+            await WriteTextAtomicallyAsync(VoiceChatHistoryPath, json).ConfigureAwait(false);
             DevLog.WriteLine("[History] Flushed voice chat history: {0} messages", history.Messages.Count);
         }
         catch (Exception ex)
@@ -310,6 +335,11 @@ public static class ConversationHistoryService
         finally
         {
             Volatile.Write(ref _voiceFlushInProgress, 0);
+            lock (_voiceLock)
+            {
+                if (_pendingVoiceHistory is not null && _voiceSaveTimer is null)
+                    ScheduleVoiceFlush_NoLock();
+            }
         }
     }
 
@@ -323,7 +353,7 @@ public static class ConversationHistoryService
             try
             {
                 var json = JsonSerializer.Serialize(pending, CompactJson);
-                File.WriteAllText(path, json);
+                WriteTextAtomically(path, json);
                 DevLog.WriteLine("[History] Emergency flush {0} history: {1} messages", kind, pending.Messages.Count);
             }
             catch (Exception ex)
@@ -334,6 +364,34 @@ public static class ConversationHistoryService
             {
                 pending = null;
             }
+        }
+    }
+
+    private static async Task WriteTextAtomicallyAsync(string path, string content)
+    {
+        var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllTextAsync(tempPath, content).ConfigureAwait(false);
+            File.Move(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(tempPath); } catch { }
+        }
+    }
+
+    private static void WriteTextAtomically(string path, string content)
+    {
+        var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(tempPath, content);
+            File.Move(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(tempPath); } catch { }
         }
     }
 

@@ -1,6 +1,6 @@
-# Caddy: automatic HTTPS for the TsukiAI domain; everything proxies to the API
-# container, which serves both the SPA and the API.
-{$DOMAIN} {
+# Cloudflare Tunnel terminates public HTTPS before forwarding to this HTTP origin.
+# The API container serves both the SPA and the API.
+http://{$DOMAIN} {
 	encode gzip
 	reverse_proxy api:8080
 }

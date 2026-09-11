@@ -43,7 +43,7 @@ public sealed class TtsPlaybackService : IDisposable
     {
         if (wavBytes is null || wavBytes.Length == 0) return;
 
-        await Task.Run(async () =>
+        await Task.Run(() =>
         {
             lock (_lock)
             {

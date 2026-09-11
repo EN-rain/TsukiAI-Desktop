@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
@@ -28,12 +30,17 @@ public sealed class TextChatService
 
     private readonly IInferenceClient _llm;
     private readonly ISemanticMemoryService _memory;
-    private readonly AppSettings _settings;
     private readonly PromptBuilder _promptBuilder = new();
     private readonly ConcurrentDictionary<string, UserHistory> _histories = new();
-    private readonly SemaphoreSlim _turnGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, UserGate> _turnGates = new();
     private readonly int _retentionDays;
     private readonly int _maxTurns = 60;
+
+    private sealed class UserGate
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+        public int References;
+    }
 
     public int RetentionDays => _retentionDays;
 
@@ -41,16 +48,39 @@ public sealed class TextChatService
     {
         _llm = llm;
         _memory = memory;
-        _settings = settings;
-        _retentionDays = Math.Max(1, GetIntEnv("TSUKI_MEMORY_RETENTION_DAYS", 30));
+        _retentionDays = Math.Clamp(GetIntEnv("TSUKI_MEMORY_RETENTION_DAYS", 30), 1, 3650);
     }
 
     public async Task<string> ReplyAsync(string userId, string displayName, string text, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
-        var name = string.IsNullOrWhiteSpace(displayName) ? "someone" : displayName.Trim();
+        userId = userId?.Trim() ?? string.Empty;
+        text = text?.Trim() ?? string.Empty;
+        if (userId.Length == 0)
+            throw new ArgumentException("User ID is required.", nameof(userId));
+        if (userId.Length > 64)
+            throw new ArgumentException("User ID is too long.", nameof(userId));
+        if (text.Length == 0)
+            throw new ArgumentException("Text is required.", nameof(text));
+        if (text.Length > 4000)
+            throw new ArgumentException("Text is too long.", nameof(text));
 
-        await _turnGate.WaitAsync(ct);
+        var name = string.IsNullOrWhiteSpace(displayName) ? "someone" : displayName.Trim();
+        name = new string(name.Where(c => !char.IsControl(c)).ToArray()).Trim();
+        if (name.Length == 0)
+            name = "someone";
+        if (name.Length > 128)
+            name = name[..128];
+
+        var gate = AcquireGate(userId);
+        try
+        {
+            await gate.Semaphore.WaitAsync(ct);
+        }
+        catch
+        {
+            ReleaseGate(userId, gate, acquired: false);
+            throw;
+        }
         try
         {
             var history = LoadHistory(userId);
@@ -90,8 +120,8 @@ public sealed class TextChatService
                 .TakeLast(30)
                 .SelectMany(t => new (string role, string content)[]
                 {
-                    ("user", $"{t.Name}: {t.User}"),
-                    ("assistant", t.Assistant)
+                    ("user", $"{TrimForPrompt(t.Name, 128)}: {TrimForPrompt(t.User, 1200)}"),
+                    ("assistant", TrimForPrompt(t.Assistant, 1200))
                 })
                 .ToList();
 
@@ -133,7 +163,27 @@ public sealed class TextChatService
         }
         finally
         {
-            _turnGate.Release();
+            ReleaseGate(userId, gate, acquired: true);
+        }
+    }
+
+    private UserGate AcquireGate(string userId)
+    {
+        var gate = _turnGates.GetOrAdd(userId, static _ => new UserGate());
+        Interlocked.Increment(ref gate.References);
+        return gate;
+    }
+
+    private void ReleaseGate(string userId, UserGate gate, bool acquired)
+    {
+        if (acquired)
+            gate.Semaphore.Release();
+
+        if (Interlocked.Decrement(ref gate.References) == 0 &&
+            ((ICollection<KeyValuePair<string, UserGate>>)_turnGates)
+                .Remove(new KeyValuePair<string, UserGate>(userId, gate)))
+        {
+            gate.Semaphore.Dispose();
         }
     }
 
@@ -149,7 +199,10 @@ public sealed class TextChatService
                     var loaded = JsonSerializer.Deserialize<UserHistory>(File.ReadAllText(path), FileJsonOptions);
                     if (loaded is not null)
                     {
+                        loaded.Turns ??= [];
                         loaded.Turns.RemoveAll(t => t.At < DateTimeOffset.UtcNow.AddDays(-_retentionDays));
+                        while (loaded.Turns.Count > _maxTurns)
+                            loaded.Turns.RemoveAt(0);
                         return loaded;
                     }
                 }
@@ -163,6 +216,8 @@ public sealed class TextChatService
 
         // Drop memories past the retention window even if the file was cached.
         history.Turns.RemoveAll(t => t.At < DateTimeOffset.UtcNow.AddDays(-_retentionDays));
+        while (history.Turns.Count > _maxTurns)
+            history.Turns.RemoveAt(0);
         return history;
     }
 
@@ -172,7 +227,16 @@ public sealed class TextChatService
         {
             var path = HistoryPath(userId);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, JsonSerializer.Serialize(history, FileJsonOptions));
+            var tempPath = string.Concat(path, ".", Guid.NewGuid().ToString("N"), ".tmp");
+            try
+            {
+                File.WriteAllText(tempPath, JsonSerializer.Serialize(history, FileJsonOptions));
+                File.Move(tempPath, path, overwrite: true);
+            }
+            finally
+            {
+                File.Delete(tempPath);
+            }
         }
         catch (Exception ex)
         {
@@ -182,9 +246,12 @@ public sealed class TextChatService
 
     private static string HistoryPath(string userId)
     {
-        var safe = new string(userId.Where(char.IsLetterOrDigit).ToArray());
-        return Path.Combine(SettingsService.GetBaseDir(), $"text_history_{safe}.json");
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(userId))).ToLowerInvariant();
+        return Path.Combine(SettingsService.GetBaseDir(), $"text_history_{hash}.json");
     }
+
+    private static string TrimForPrompt(string value, int maxChars) =>
+        value.Length <= maxChars ? value : value[..maxChars] + "...";
 
     private static int GetIntEnv(string key, int defaultValue)
     {

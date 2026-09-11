@@ -1,5 +1,3 @@
-using System.Net.Http;
-using System.Text;
 using System.Windows;
 using System.Windows.Input;
 using TsukiAI.Core.Models;
@@ -11,15 +9,6 @@ namespace TsukiAI.VoiceChat.Views;
 
 public partial class MainWindow
 {
-    private static readonly HttpClient PreviewTtsClient = CreatePreviewTtsClient();
-
-    private static HttpClient CreatePreviewTtsClient()
-    {
-        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(45) };
-        client.DefaultRequestHeaders.TryAddWithoutValidation("ngrok-skip-browser-warning", "true");
-        return client;
-    }
-
     private void TtsTestInput_GotFocus(object sender, RoutedEventArgs e)
     {
         if (TtsTestInput.Text == TtsPlaceholder)
@@ -58,10 +47,10 @@ public partial class MainWindow
             vm.NotifyManualTtsQueued(text);
         }
 
-        _settings = SettingsService.Load();
+        _settings = EnvConfiguration.ApplyToSettings(SettingsService.Load());
         var deviceNumber = _settings.VoiceOutputDeviceNumber;
-        DevLog.WriteLine("[PlayHere] device={0}, tts_mode={1}, cloud_url={2}",
-            deviceNumber, _settings.TtsMode, string.IsNullOrWhiteSpace(_settings.CloudTtsUrl) ? "(empty)" : _settings.CloudTtsUrl);
+        DevLog.WriteLine("[PlayHere] device={0}, tts_engine=OpenVoiceV2, openvoice_url={1}",
+            deviceNumber, string.IsNullOrWhiteSpace(_settings.OpenVoiceUrl) ? "(empty)" : _settings.OpenVoiceUrl);
         await PlayVoicePreviewAsync(text, deviceNumber);
     }
 
@@ -88,7 +77,7 @@ public partial class MainWindow
     {
         try
         {
-            _settings = SettingsService.Load();
+            _settings = EnvConfiguration.ApplyToSettings(SettingsService.Load());
             var preparedText = await PrepareManualTtsTextAsync(text, CancellationToken.None);
             if (string.IsNullOrWhiteSpace(preparedText))
             {
@@ -117,72 +106,21 @@ public partial class MainWindow
         }
     }
 
-    private async Task<string> PrepareManualTtsTextAsync(string text, CancellationToken ct)
+    private Task<string> PrepareManualTtsTextAsync(string text, CancellationToken ct)
     {
-        var input = text.Trim();
-        if (!ShouldTranslateManualTts())
-        {
-            return input;
-        }
-
-        using var translationService = new TranslationService(_settings);
-        if (!translationService.IsEnabled)
-        {
-            MessageBox.Show(
-                this,
-                "English to Japanese manual TTS requires DeepL translation to be enabled in Main Settings.",
-                "TsukiAI Voice Chat",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            return string.Empty;
-        }
-
-        return await translationService.TranslateToJapaneseAsync(input, ct);
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(text.Trim());
     }
-
-    private bool ShouldTranslateManualTts() => _settings.VoiceTranslateToJapanese;
 
     private async Task<byte[]> SynthesizePreviewWavAsync(string text, CancellationToken ct)
     {
-        if (_settings.TtsMode == TtsMode.CloudRemote)
-        {
-            if (string.IsNullOrWhiteSpace(_settings.CloudTtsUrl))
-            {
-                return Array.Empty<byte>();
-            }
-
-            try
-            {
-                var baseUrl = _settings.CloudTtsUrl.TrimEnd('/');
-                using var queryResp = await PreviewTtsClient.PostAsync(
-                    $"{baseUrl}/audio_query?text={Uri.EscapeDataString(text)}&speaker={_settings.VoicevoxSpeakerStyleId}",
-                    content: null,
-                    ct);
-                queryResp.EnsureSuccessStatusCode();
-                var queryJson = await queryResp.Content.ReadAsStringAsync(ct);
-
-                using var synthReq = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/synthesis?speaker={_settings.VoicevoxSpeakerStyleId}")
-                {
-                    Content = new StringContent(queryJson, Encoding.UTF8, "application/json")
-                };
-                using var synthResp = await PreviewTtsClient.SendAsync(synthReq, ct);
-                synthResp.EnsureSuccessStatusCode();
-                return await synthResp.Content.ReadAsByteArrayAsync(ct);
-            }
-            catch (Exception ex)
-            {
-                DevLog.WriteLine("[MainWindow][CloudTTS Preview] failed: {0}", ex.GetBaseException().Message);
-                return Array.Empty<byte>();
-            }
-        }
-
-        using var voicevox = new VoicevoxClient(_settings.VoicevoxBaseUrl);
-        return await voicevox.SynthesizeWavAsync(text, _settings.VoicevoxSpeakerStyleId, ct);
+        using var openVoice = new OpenVoiceTtsClient(_settings.OpenVoiceUrl, _settings.OpenVoiceApiKey);
+        return await openVoice.SynthesizeWavAsync(text, TtsLanguageDetector.Detect(text), ct);
     }
 
     private void LoadVoiceReceptionSettings()
     {
-        _settings = SettingsService.Load();
+        _settings = EnvConfiguration.ApplyToSettings(SettingsService.Load());
         _voiceReceptionToggleKey = ParseToggleHotkey(_settings.VoiceReceptionToggleKey, Key.F8);
 
         if (VoiceReceptionToggle != null)

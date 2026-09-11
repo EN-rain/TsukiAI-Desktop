@@ -193,33 +193,22 @@ export function SettingsView() {
         </h2>
         <div className="mt-3 grid gap-4 sm:grid-cols-3">
           <Field label="TTS mode">
-            <select
-              value={settings.tts.mode}
-              onChange={(e) => patch((d) => (d.tts.mode = e.target.value))}
-              className={inputClass}
-            >
-              <option value="LocalVoiceVox">VOICEVOX</option>
-              <option value="CloudRemote">Cloud remote</option>
-            </select>
+            <input type="text" value="OpenVoice V2" readOnly className={inputClass} />
           </Field>
-          <Field label="VOICEVOX URL">
+          <Field label="OpenVoice endpoint" hint="The protected /health and /tts service URL">
             <input
               type="url"
-              value={settings.tts.voicevox_base_url}
-              onChange={(e) => patch((d) => (d.tts.voicevox_base_url = e.target.value))}
-              className={inputClass}
-            />
-          </Field>
-          <Field label="Speaker style ID">
-            <input
-              type="number"
-              min={0}
-              value={settings.tts.speaker_style_id}
-              onChange={(e) => patch((d) => (d.tts.speaker_style_id = Number(e.target.value)))}
+              value={settings.tts.openvoice_url}
+              onChange={(e) => patch((d) => (d.tts.openvoice_url = e.target.value))}
               className={inputClass}
             />
           </Field>
         </div>
+        <p className="mt-2 text-xs text-mist-500">
+          {settings.tts.openvoice_configured
+            ? "OpenVoice V2 configured."
+            : "Set the OpenVoice endpoint and server API key before using voice output."}
+        </p>
       </section>
 
       <section aria-labelledby="settings-translation">

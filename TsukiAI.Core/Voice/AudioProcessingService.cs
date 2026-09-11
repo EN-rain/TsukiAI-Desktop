@@ -35,7 +35,7 @@ public sealed class AudioProcessingService
         return output;
     }
 
-    public byte[] ConvertVoiceVoxWavToDiscordPcm(byte[] wavData)
+    public byte[] ConvertWavToDiscordPcm(byte[] wavData)
     {
         if (wavData is null || wavData.Length <= 44)
             return Array.Empty<byte>();
@@ -86,4 +86,5 @@ public sealed class AudioProcessingService
 
         return output;
     }
+
 }
