@@ -24,6 +24,7 @@ public sealed class MicrophoneCaptureService : IDisposable
 
     private readonly IVoiceConversationPipeline _pipeline;
     private readonly TtsPlaybackService _playback;
+    private readonly GroqApiKeyPool _groqKeyPool;
     private readonly HttpClient _httpClient;
 
     private WaveInEvent? _waveIn;
@@ -41,11 +42,13 @@ public sealed class MicrophoneCaptureService : IDisposable
     public MicrophoneCaptureService(
         IVoiceConversationPipeline pipeline,
         TtsPlaybackService playback,
-        AppSettings settings)
+        AppSettings settings,
+        GroqApiKeyPool groqKeyPool)
     {
         _pipeline = pipeline;
         _playback = playback;
         _settings = settings;
+        _groqKeyPool = groqKeyPool;
         _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
     }
 
@@ -178,52 +181,71 @@ public sealed class MicrophoneCaptureService : IDisposable
 
     private async Task<string> TranscribeAsync(byte[] pcm16kMono, string correlationId)
     {
-        var apiKey = _settings.GroqApiKey?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(apiKey))
+        var candidates = _groqKeyPool.GetCandidates();
+        if (candidates.Count == 0)
         {
-            DevLog.WriteLine("[Mic] No Groq API key configured for STT");
+            DevLog.WriteLine("[Mic] No Groq STT keys configured");
             return string.Empty;
         }
 
-        try
+        var wav = PcmToWav(pcm16kMono, 16000, 1);
+        for (var index = 0; index < candidates.Count; index++)
         {
-            var wav = PcmToWav(pcm16kMono, 16000, 1);
-
-            using var form = new MultipartFormDataContent();
-            var fileContent = new ByteArrayContent(wav);
-            fileContent.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
-            form.Add(fileContent, "file", "audio.wav");
-            form.Add(new StringContent("whisper-large-v3-turbo"), "model");
-            form.Add(new StringContent("verbose_json"), "response_format");
-
-            var lang = (_settings.SttLanguageCode ?? "auto").Trim().ToLowerInvariant();
-            if (lang != "auto")
-                form.Add(new StringContent(lang), "language");
-
-            using var req = new HttpRequestMessage(HttpMethod.Post,
-                "https://api.groq.com/openai/v1/audio/transcriptions");
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            req.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
-            req.Content = form;
-
-            using var resp = await _httpClient.SendAsync(req);
-            if (!resp.IsSuccessStatusCode)
+            var apiKey = candidates[index];
+            try
             {
-                var err = await resp.Content.ReadAsStringAsync();
-                DevLog.WriteLine("[Mic] Groq STT error {0}: {1}", (int)resp.StatusCode, err);
-                return string.Empty;
-            }
+                using var form = new MultipartFormDataContent();
+                var fileContent = new ByteArrayContent(wav);
+                fileContent.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+                form.Add(fileContent, "file", "audio.wav");
+                form.Add(new StringContent("whisper-large-v3-turbo"), "model");
+                form.Add(new StringContent("verbose_json"), "response_format");
 
-            var body = await resp.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(body);
-            return doc.RootElement.TryGetProperty("text", out var t) ? (t.GetString() ?? string.Empty).Trim() : string.Empty;
+                var lang = (_settings.SttLanguageCode ?? "auto").Trim().ToLowerInvariant();
+                if (lang != "auto")
+                    form.Add(new StringContent(lang), "language");
+
+                using var req = new HttpRequestMessage(HttpMethod.Post,
+                    "https://api.groq.com/openai/v1/audio/transcriptions");
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                req.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
+                req.Content = form;
+
+                using var resp = await _httpClient.SendAsync(req);
+                if (resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(body);
+                    var text = doc.RootElement.TryGetProperty("text", out var t)
+                        ? (t.GetString() ?? string.Empty).Trim()
+                        : string.Empty;
+                    _groqKeyPool.MarkSuccess(apiKey);
+                    DevLog.WriteLine("[Mic] Groq STT ok, key={0}/{1}, chars={2}", index + 1, candidates.Count, text.Length);
+                    return text;
+                }
+
+                var status = (int)resp.StatusCode;
+                _groqKeyPool.MarkFailure(apiKey, status);
+                DevLog.WriteLine("[Mic] Groq STT key {0}/{1} error {2}",
+                    index + 1, candidates.Count, status);
+                if (!ShouldRotate(status) || index == candidates.Count - 1)
+                    return string.Empty;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _groqKeyPool.MarkFailure(apiKey, 0);
+                DevLog.WriteLine("[Mic] Groq STT key {0}/{1} failed; rotating: {2}",
+                    index + 1, candidates.Count, ex.GetBaseException().Message);
+                if (index == candidates.Count - 1)
+                    return string.Empty;
+            }
         }
-        catch (Exception ex)
-        {
-            DevLog.WriteLine("[Mic] Groq STT exception: {0}", ex.GetBaseException().Message);
-            return string.Empty;
-        }
+
+        return string.Empty;
     }
+
+    private static bool ShouldRotate(int status) =>
+        status == 401 || status == 403 || status == 408 || status == 429 || status >= 500;
 
     /// <summary>Builds a minimal WAV header around raw PCM bytes.</summary>
     private static byte[] PcmToWav(byte[] pcm, int sampleRate, int channels)

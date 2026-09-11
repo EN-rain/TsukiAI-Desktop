@@ -7,12 +7,13 @@ TsukiAI is a .NET 8 + WPF desktop voice assistant with a local HTTP API, multi-p
 - Voice pipeline: STT -> LLM -> TTS
 - Local + remote inference support
 - Multi-provider model routing configuration (Cerebras, Groq, Gemini, GitHub Models, Mistral, etc.)
-- Semantic memory integration (Chroma-backed service)
+- Semantic memory integration (Supermemory or Chroma fallback)
 - Discord voice bridge (`discord-voice-bridge/`)
 - Resilience improvements:
   - retry + circuit-breaker on key outbound HTTP calls
   - correlation IDs across request flow
   - bounded background queues for memory write-back
+  - file-backed Groq STT key rotation for Discord, API, and desktop microphone paths
 
 ## Tech Stack
 
@@ -57,6 +58,17 @@ dotnet build TsukiAI.sln
   - `TSUKI_ASSEMBLYAI_API_KEY` (C#-side fallback, if used)
   - `TSUKI_DEEPL_API_KEY` (optional)
 
+For Groq STT rotation, set `TSUKI_GROQ_API_KEYS_FILE` or
+`GROQ_KEYS_HOST_PATH` to a newline-separated key file outside Git. The API,
+desktop microphone, and Discord bridge all rotate the same configured pool.
+
+For long-term memory, set `TSUKI_SEMANTIC_MEMORY_ENABLED=true`, then set
+`TSUKI_SUPERMEMORY_API_KEY` for the Discord/API process and
+`TSUKI_DESKTOP_SUPERMEMORY_API_KEY` separately for the desktop app. Discord
+text and Discord voice use the same per-user memory container; desktop voice
+uses a separate desktop container. Empty keys preserve the Chroma/local
+fallback.
+
 3. Run app:
 
 ```bash
@@ -79,6 +91,9 @@ The Discord voice bridge can use the realtime path documented in
 TsukiAI LLM -> private OpenVoice V2 -> Discord playback. AssemblyAI is enabled
 only while the bot is connected and at least one human is in the voice channel;
 its external key file is rotated without committing secrets.
+
+Normal Discord text chat goes through `/api/chat/discord`; the bridge sends the
+Discord user ID so text and voice memory are synchronized for that user.
 
 ## Testing
 

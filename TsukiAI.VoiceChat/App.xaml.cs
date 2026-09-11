@@ -58,7 +58,25 @@ public partial class App : System.Windows.Application
     public static void ConfigureServices(IServiceCollection services, AppSettings settings)
     {
         var scriptPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "scripts", "semantic_memory_chroma.py"));
-        var semanticMemory = new ChromaSqliteSemanticMemoryService(SettingsService.GetBaseDir(), scriptPath);
+        var groqKeyPool = GroqApiKeyPool.LoadFromFileOrValues(
+            EnvConfiguration.Get("TSUKI_GROQ_API_KEYS_FILE"),
+            EnvConfiguration.Get("GROQ_API_KEYS_FILE"),
+            EnvConfiguration.Get("GROQ_KEYS_HOST_PATH"),
+            EnvConfiguration.Get("TSUKI_GROQ_API_KEYS"),
+            EnvConfiguration.Get("TSUKI_GROQ_STT_API_KEYS"),
+            EnvConfiguration.Get("TSUKI_GROQ_STT_API_KEY"),
+            EnvConfiguration.Get("TSUKI_GROQ_API_KEY"),
+            settings.GroqApiKey);
+        var desktopSupermemoryKey = EnvConfiguration.Get("TSUKI_DESKTOP_SUPERMEMORY_API_KEY");
+        var desktopSupermemoryUrl = EnvConfiguration.Get("TSUKI_DESKTOP_SUPERMEMORY_BASE_URL");
+        ISemanticMemoryService semanticMemory = string.IsNullOrWhiteSpace(desktopSupermemoryKey)
+            ? new ChromaSqliteSemanticMemoryService(SettingsService.GetBaseDir(), scriptPath)
+            : new SupermemorySemanticMemoryService(
+                desktopSupermemoryKey,
+                string.IsNullOrWhiteSpace(desktopSupermemoryUrl) ? "https://api.supermemory.ai" : desktopSupermemoryUrl,
+                ConversationMemoryIdentity.DesktopDefaultContainer);
+        DevLog.WriteLine("App: desktop semantic memory provider={0}",
+            string.IsNullOrWhiteSpace(desktopSupermemoryKey) ? "local-chroma" : "supermemory");
         var generationTuning = settings.GetGenerationTuning();
         
         // Multi-provider support: resolve current provider from state
@@ -86,7 +104,9 @@ public partial class App : System.Windows.Application
         }
 
         // Semantic memory: pass null when disabled so RemoteInferenceClient skips all memory ops
-        ISemanticMemoryService? activeSemanticMemory = settings.SemanticMemoryEnabled ? semanticMemory : null;
+        // VoiceConversationPipeline owns scoped memory retrieval/write-back. Do
+        // not also give the generic inference client an unscoped memory handle.
+        ISemanticMemoryService? activeSemanticMemory = null;
         DevLog.WriteLine("App: SemanticMemory enabled={0}", settings.SemanticMemoryEnabled);
 
         IInferenceClient inferenceClient = settings.InferenceMode switch
@@ -102,7 +122,9 @@ public partial class App : System.Windows.Application
         };
 
         services.AddSingleton(settings);
-        services.AddSingleton<ISemanticMemoryService>(semanticMemory);
+        services.AddSingleton(groqKeyPool);
+        services.AddSingleton<ISemanticMemoryService>(
+            settings.SemanticMemoryEnabled ? semanticMemory : new NoopSemanticMemoryService());
         services.AddSingleton<IInferenceClient>(inferenceClient);
         services.AddSingleton(new ConversationFormattingService("Tsuki", "User"));
         services.AddSingleton<ConversationViewModel>();

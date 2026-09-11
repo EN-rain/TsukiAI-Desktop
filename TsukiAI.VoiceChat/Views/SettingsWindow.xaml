@@ -1084,11 +1084,11 @@
                 <StackPanel>
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Semantic Memory"/>
                     <TextBlock Style="{StaticResource FieldHint}"
-                               Text="Stores conversation context in a local ChromaDB vector database for long-term recall. Disable if you experience startup delays or don't need memory across sessions."
+                               Text="Stores conversation context for long-term recall. Uses the configured desktop Supermemory account when available, otherwise local ChromaDB."
                                TextWrapping="Wrap"
                                Margin="0,0,0,10"/>
                     <CheckBox Style="{StaticResource SettingsCheckBox}"
-                              Content="Enable semantic memory (ChromaDB)"
+                              Content="Enable semantic memory (Supermemory or local ChromaDB)"
                               IsChecked="{Binding SemanticMemoryEnabled}"/>
                 </StackPanel>
             </Border>

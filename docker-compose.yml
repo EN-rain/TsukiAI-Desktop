@@ -38,8 +38,11 @@ services:
       - TSUKI_OPENVOICE_URL=${TSUKI_OPENVOICE_URL:-http://host.docker.internal:8000}
       - TSUKI_OPENVOICE_API_KEY=${TSUKI_OPENVOICE_API_KEY:?Set TSUKI_OPENVOICE_API_KEY in .env}
       - TSUKI_SEMANTIC_MEMORY_ENABLED=true
+      # API-side Groq STT uses the same read-only key pool as the bridge.
+      - TSUKI_GROQ_API_KEYS_FILE=/run/secrets/tsuki-groq-keys
     volumes:
       - tsuki-data:/data
+      - ${GROQ_KEYS_HOST_PATH:-./discord-voice-bridge/groq.keys}:/run/secrets/tsuki-groq-keys:ro
     depends_on:
       - chromadb
 
@@ -70,7 +73,7 @@ services:
     volumes:
       # The host-side file is created with mode 600 and is excluded from the
       # image build context. The container only receives a read-only mount.
-      - ./discord-voice-bridge/groq.keys:/run/secrets/tsuki-groq-keys:ro
+      - ${GROQ_KEYS_HOST_PATH:-./discord-voice-bridge/groq.keys}:/run/secrets/tsuki-groq-keys:ro
       # Set ASSEMBLYAI_KEYS_HOST_PATH in the root .env to the host-side key
       # file (for example C:/Users/.../assembly.txt). Never commit the file.
       - ${ASSEMBLYAI_KEYS_HOST_PATH:-./discord-voice-bridge/assemblyai.keys}:/run/secrets/assemblyai-keys:ro

@@ -21,6 +21,10 @@ public static class EnvConfiguration
         "TSUKI_REMOTE_INFERENCE_API_KEY",
         "TSUKI_CEREBRAS_API_KEY",
         "TSUKI_GROQ_API_KEY",
+        "TSUKI_GROQ_API_KEYS",
+        "TSUKI_GROQ_API_KEYS_FILE",
+        "TSUKI_GROQ_STT_API_KEYS",
+        "TSUKI_GROQ_STT_API_KEY",
         "TSUKI_GEMINI_API_KEY",
         "TSUKI_GITHUB_API_KEY",
         "TSUKI_MISTRAL_API_KEY",
@@ -30,6 +34,10 @@ public static class EnvConfiguration
         "TSUKI_USE_DEEPL_TRANSLATE",
         "TSUKI_USE_DEEPL_FREE_API",
         "TSUKI_SEMANTIC_MEMORY_ENABLED",
+        "TSUKI_SUPERMEMORY_API_KEY",
+        "TSUKI_SUPERMEMORY_BASE_URL",
+        "TSUKI_DESKTOP_SUPERMEMORY_API_KEY",
+        "TSUKI_DESKTOP_SUPERMEMORY_BASE_URL",
         "TSUKI_VOICE_RUNTIME_V2",
         "TSUKI_VOICE_API_CONTROLLER",
         "TSUKI_VOICE_BARGE_IN"
@@ -101,6 +109,13 @@ public static class EnvConfiguration
             })
             .ToList();
     }
+
+    /// <summary>
+    /// Reads one deployment value using the same .env/process precedence as
+    /// <see cref="ApplyToSettings"/> without exposing the whole environment.
+    /// </summary>
+    public static string Get(string key, string fallback = "") =>
+        ReadString(LoadEnv(), key, fallback);
 
     private static Dictionary<string, string> LoadEnv()
     {

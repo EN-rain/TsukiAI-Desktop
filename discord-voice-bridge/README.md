@@ -13,6 +13,10 @@ Discord user speaks
   -> Discord bot playback
 ```
 
+Discord text mentions use `/api/chat/discord`. The bridge sends the same
+Discord user ID for text and voice requests, so their long-term memory is
+shared per user while desktop memory remains separate.
+
 ## What It Does
 
 - Joins a Discord voice channel as a bot
@@ -106,7 +110,8 @@ Important:
   network, timeout, or server errors. Rejected keys are temporarily cooled down.
 - For Docker deployments, `GROQ_API_KEYS_FILE` is preferred for long lists. The
   mounted key file is read at startup, excluded from the image, and mounted
-  read-only.
+  read-only. The API and desktop C# STT paths can use the same file through
+  `TSUKI_GROQ_API_KEYS_FILE` or `GROQ_KEYS_HOST_PATH`.
 - For Docker deployments, set `ASSEMBLYAI_KEYS_HOST_PATH` in the root `.env` to
   the host-side `assembly.txt`. Compose mounts it read-only at
   `/run/secrets/assemblyai-keys`.

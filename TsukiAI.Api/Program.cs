@@ -91,12 +91,25 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddSingleton(settings);
 
 var chromaUrl = Environment.GetEnvironmentVariable("TSUKI_CHROMA_URL")?.Trim();
-if (settings.SemanticMemoryEnabled && !string.IsNullOrWhiteSpace(chromaUrl))
+var supermemoryKey = EnvConfiguration.Get("TSUKI_SUPERMEMORY_API_KEY");
+var supermemoryUrl = EnvConfiguration.Get("TSUKI_SUPERMEMORY_BASE_URL");
+if (settings.SemanticMemoryEnabled && !string.IsNullOrWhiteSpace(supermemoryKey))
+{
+    var semanticMemory = new SupermemorySemanticMemoryService(
+        supermemoryKey,
+        string.IsNullOrWhiteSpace(supermemoryUrl) ? "https://api.supermemory.ai" : supermemoryUrl,
+        ConversationMemoryIdentity.DiscordDefaultContainer);
+    builder.Services.AddSingleton<ISemanticMemoryService>(semanticMemory);
+    builder.Services.AddSingleton<IInferenceClient>(sp =>
+        InferenceClientFactory.Create(sp.GetRequiredService<AppSettings>(), null));
+    DevLog.WriteLine("Api: semantic memory enabled via Supermemory");
+}
+else if (settings.SemanticMemoryEnabled && !string.IsNullOrWhiteSpace(chromaUrl))
 {
     var semanticMemory = new ChromaHttpSemanticMemoryService(chromaUrl);
     builder.Services.AddSingleton<ISemanticMemoryService>(semanticMemory);
     builder.Services.AddSingleton<IInferenceClient>(sp =>
-        InferenceClientFactory.Create(sp.GetRequiredService<AppSettings>(), semanticMemory));
+        InferenceClientFactory.Create(sp.GetRequiredService<AppSettings>(), null));
     DevLog.WriteLine("Api: semantic memory enabled via ChromaDB at {0}", chromaUrl);
 }
 else
@@ -104,8 +117,10 @@ else
     builder.Services.AddSingleton<ISemanticMemoryService>(NullSemanticMemoryService.Instance);
     builder.Services.AddSingleton<IInferenceClient>(sp =>
         InferenceClientFactory.Create(sp.GetRequiredService<AppSettings>(), null));
-    DevLog.WriteLine("Api: semantic memory disabled (SemanticMemoryEnabled={0}, TSUKI_CHROMA_URL set={1})",
-        settings.SemanticMemoryEnabled, !string.IsNullOrWhiteSpace(chromaUrl));
+    DevLog.WriteLine("Api: semantic memory disabled (SemanticMemoryEnabled={0}, Supermemory key set={1}, TSUKI_CHROMA_URL set={2})",
+        settings.SemanticMemoryEnabled,
+        !string.IsNullOrWhiteSpace(supermemoryKey),
+        !string.IsNullOrWhiteSpace(chromaUrl));
 }
 
 builder.Services.AddSingleton<ITtsClient>(sp => new OpenVoiceTtsClient(() =>
@@ -116,13 +131,25 @@ builder.Services.AddSingleton<ITtsClient>(sp => new OpenVoiceTtsClient(() =>
 builder.Services.AddSingleton<TranslationService>();
 builder.Services.AddSingleton<AudioProcessingService>();
 
+var groqKeyPool = GroqApiKeyPool.LoadFromFileOrValues(
+    EnvConfiguration.Get("TSUKI_GROQ_API_KEYS_FILE"),
+    EnvConfiguration.Get("GROQ_API_KEYS_FILE"),
+    EnvConfiguration.Get("GROQ_KEYS_HOST_PATH"),
+    EnvConfiguration.Get("TSUKI_GROQ_API_KEYS"),
+    EnvConfiguration.Get("TSUKI_GROQ_STT_API_KEYS"),
+    EnvConfiguration.Get("TSUKI_GROQ_STT_API_KEY"),
+    EnvConfiguration.Get("TSUKI_GROQ_API_KEY"),
+    settings.GroqApiKey);
+builder.Services.AddSingleton(groqKeyPool);
+DevLog.WriteLine("Api: Groq STT key pool loaded ({0} keys)", groqKeyPool.Count);
+
 builder.Services.AddSingleton(sp =>
 {
-    var sttKey = Environment.GetEnvironmentVariable("TSUKI_GROQ_STT_API_KEY")?.Trim();
-    if (string.IsNullOrWhiteSpace(sttKey))
-        sttKey = sp.GetRequiredService<AppSettings>().GroqApiKey;
-    var model = Environment.GetEnvironmentVariable("TSUKI_GROQ_STT_MODEL")?.Trim();
-    return new GroqWhisperService(sttKey ?? string.Empty, model, sp.GetRequiredService<AudioProcessingService>());
+    var model = EnvConfiguration.Get("TSUKI_GROQ_STT_MODEL", "whisper-large-v3");
+    return new GroqWhisperService(
+        sp.GetRequiredService<GroqApiKeyPool>(),
+        model,
+        sp.GetRequiredService<AudioProcessingService>());
 });
 builder.Services.AddSingleton<IWhisperService>(sp => sp.GetRequiredService<GroqWhisperService>());
 

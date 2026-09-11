@@ -140,8 +140,12 @@ public sealed class VoiceApiController : ControllerBase
 
         if (request is null || string.IsNullOrWhiteSpace(request.Text))
             return BadRequest(new { error = "text is required", correlation_id = correlationId });
-        if (request.Text.Length > MaxTextChars || (request.UserId?.Length ?? 0) > 64)
+        if (request.Text.Length > MaxTextChars || (request.UserId?.Length ?? 0) > 64 || (request.MemoryScope?.Length ?? 0) > 16)
             return StatusCode(413, new { error = "text is too long", correlation_id = correlationId });
+        if (!string.IsNullOrWhiteSpace(request.MemoryScope) &&
+            !string.Equals(request.MemoryScope, "discord", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(request.MemoryScope, "desktop", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { error = "memoryScope must be discord or desktop", correlation_id = correlationId });
 
         try
         {
@@ -151,7 +155,8 @@ public sealed class VoiceApiController : ControllerBase
                 request.Text,
                 correlationId,
                 ct,
-                synthesizeAudio: request.Audio);
+                synthesizeAudio: request.Audio,
+                memoryScope: request.MemoryScope);
             totalSw.Stop();
             DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process, duration_ms={1}, status={2}",
                 correlationId, totalSw.ElapsedMilliseconds, result.Success ? "ok" : "error");
@@ -182,13 +187,22 @@ public sealed class VoiceApiController : ControllerBase
 
         if (request is null || string.IsNullOrWhiteSpace(request.Text))
             return BadRequest(new { error = "text is required", correlation_id = correlationId });
-        if (request.Text.Length > MaxTextChars || (request.UserId?.Length ?? 0) > 64)
+        if (request.Text.Length > MaxTextChars || (request.UserId?.Length ?? 0) > 64 || (request.MemoryScope?.Length ?? 0) > 16)
             return StatusCode(413, new { error = "text is too long", correlation_id = correlationId });
+        if (!string.IsNullOrWhiteSpace(request.MemoryScope) &&
+            !string.Equals(request.MemoryScope, "discord", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(request.MemoryScope, "desktop", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { error = "memoryScope must be discord or desktop", correlation_id = correlationId });
 
         try
         {
             var totalSw = Stopwatch.StartNew();
-            var result = await _pipeline.ProcessTextAsync(request.UserId ?? string.Empty, request.Text, correlationId, ct);
+            var result = await _pipeline.ProcessTextAsync(
+                request.UserId ?? string.Empty,
+                request.Text,
+                correlationId,
+                ct,
+                memoryScope: request.MemoryScope);
             totalSw.Stop();
             DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process_binary, duration_ms={1}, status={2}",
                 correlationId, totalSw.ElapsedMilliseconds, result.Success ? "ok" : "error");
@@ -256,6 +270,7 @@ public sealed class ProcessRequest
     public string Text { get; set; } = string.Empty;
     // Text-only clients (Discord text replies, web chat) can skip TTS synthesis.
     public bool Audio { get; set; } = true;
+    public string? MemoryScope { get; set; }
 }
 
 public sealed class TestTtsRequest

@@ -561,7 +561,8 @@ async function processWithLLM(userId, text) {
 
     const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/voice/process-binary`, {
       userId: userId.toString(),
-      text: text
+      text: text,
+      memoryScope: 'discord'
     }, {
       timeout: 180000, // 3 minutes timeout for LLM processing
       responseType: 'arraybuffer',
