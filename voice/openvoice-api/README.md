@@ -24,9 +24,9 @@ sequence.
 /opt/openvoice/
 ├── app/                         # this service plus the OpenVoice checkout
 ├── models/checkpoints_v2/       # converter plus official V2 base speakers
-│   └── base_speakers/ses/       # en-newest.pth and jp.pth from OpenVoiceV2
+│   └── base_speakers/ses/       # en-us.pth and jp.pth from OpenVoiceV2
 ├── voices/references/tsuki.wav  # normalized once from the supplied MP3
-├── voices/embeddings/tsuki_se.pth
+├── voices/embeddings/tsuki_freeai_se.pth
 └── voice_registry.json
 ```
 
