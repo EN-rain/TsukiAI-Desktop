@@ -14,7 +14,7 @@ from base_speakers import official_embedding_filename
 
 class BaseSpeakerTests(unittest.TestCase):
     def test_melo_speaker_names_map_to_official_v2_filenames(self):
-        self.assertEqual(official_embedding_filename("EN-AU"), "en-au.pth")
+        self.assertEqual(official_embedding_filename("EN-US"), "en-us.pth")
         self.assertEqual(official_embedding_filename("JP"), "jp.pth")
 
     def test_filename_mapping_normalizes_whitespace_and_underscores(self):
@@ -38,7 +38,7 @@ class BaseSpeakerTests(unittest.TestCase):
                 max_wav_bytes=16 * 1024 * 1024,
                 inference_wait_seconds=30,
                 torch_threads=4,
-                base_speaker_en="EN-AU",
+                base_speaker_en="EN-US",
                 base_speaker_ja="JP",
                 speed_en=1.0,
                 speed_ja=1.0,
@@ -46,7 +46,7 @@ class BaseSpeakerTests(unittest.TestCase):
             )
             fake_melo_api = ModuleType("melo.api")
             fake_melo_api.TTS = lambda **_: SimpleNamespace(
-                hps=SimpleNamespace(data=SimpleNamespace(spk2id={"EN-AU": 0}))
+                hps=SimpleNamespace(data=SimpleNamespace(spk2id={"EN-US": 0}))
             )
             fake_melo = ModuleType("melo")
             with patch.dict(sys.modules, {"melo": fake_melo, "melo.api": fake_melo_api}):
