@@ -23,6 +23,9 @@ class BaseSpeakerTests(unittest.TestCase):
     def test_newest_english_speaker_uses_the_official_newest_melo_model(self):
         self.assertEqual(_melo_language_for_speaker("EN", "EN-NEWEST"), "EN_NEWEST")
 
+    def test_japanese_speaker_can_be_used_for_english_source_speech(self):
+        self.assertEqual(_melo_language_for_speaker("EN", "JP"), "JP")
+
     def test_newest_speaker_selects_newest_model_and_checkpoint_label(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

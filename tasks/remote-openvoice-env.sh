@@ -17,7 +17,7 @@ printf '%s\n' \
   'OPENVOICE_REFERENCE_WAV=/opt/openvoice/voices/references/tsuki.wav' \
   'OPENVOICE_EMBEDDING_DIR=/opt/openvoice/voices/embeddings' \
   'OPENVOICE_BASE_SPEAKER_DIR=/opt/openvoice/models/checkpoints_v2/base_speakers/ses' \
-  'OPENVOICE_BASE_SPEAKER_EN=EN-US' \
+  'OPENVOICE_BASE_SPEAKER_EN=JP' \
   'OPENVOICE_BASE_SPEAKER_JA=JP' \
   'OPENVOICE_SPEED_EN=1.0' \
   'OPENVOICE_SPEED_JA=1.0' \

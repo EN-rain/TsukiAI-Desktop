@@ -78,7 +78,13 @@ def _melo_language_for_speaker(language: str, requested_speaker: str) -> str:
 
     if language == "JA":
         return "JP"
-    if _canonical_speaker_name(requested_speaker) == "EN-NEWEST":
+    requested_key = _canonical_speaker_name(requested_speaker)
+    if requested_key == "JP":
+        # Diagnostic/experimental mode: use Melo's Japanese source model for
+        # English text so its cross-lingual phonemization can be compared with
+        # Free.ai. The production default remains EN-US.
+        return "JP"
+    if requested_key == "EN-NEWEST":
         return "EN_NEWEST"
     return "EN"
 
@@ -257,8 +263,9 @@ class OpenVoiceEngine:
         self._source_se[language] = _load_tensor(self._torch, source_embedding_path, self.config.device)
         speed = self.config.speed_ja if language == "JA" else self.config.speed_en
         LOG.info(
-            "loaded base language=%s speaker=%s speed=%.2f output_sample_rate=%d",
+            "loaded request_language=%s melo_language=%s speaker=%s speed=%.2f output_sample_rate=%d",
             language,
+            melo_language,
             speaker_name,
             speed,
             self.config.output_sample_rate,
