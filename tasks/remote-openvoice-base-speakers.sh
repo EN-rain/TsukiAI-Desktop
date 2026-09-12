@@ -41,8 +41,8 @@ PY
 }
 
 download_embedding \
-  en-us.pth \
-  'https://huggingface.co/myshell-ai/OpenVoiceV2/resolve/main/base_speakers/ses/en-us.pth?download=true'
+  en-newest.pth \
+  'https://huggingface.co/myshell-ai/OpenVoiceV2/resolve/main/base_speakers/ses/en-newest.pth?download=true'
 download_embedding \
   jp.pth \
   'https://huggingface.co/myshell-ai/OpenVoiceV2/resolve/main/base_speakers/ses/jp.pth?download=true'

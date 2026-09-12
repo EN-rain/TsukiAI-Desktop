@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import os
+import re
 import secrets
 import tempfile
 import time
@@ -52,6 +53,22 @@ def _bounded_float(name: str, default: float, minimum: float, maximum: float) ->
     if not math.isfinite(value):
         value = default
     return max(minimum, min(maximum, value))
+
+
+def _canonical_speaker_name(value: str) -> str:
+    """Normalize Melo speaker labels for config and checkpoint lookup."""
+
+    return re.sub(r"[-_]+", "-", value.strip().upper())
+
+
+def _melo_language_for_speaker(language: str, requested_speaker: str) -> str:
+    """Select the Melo model that owns the configured base speaker."""
+
+    if language == "JA":
+        return "JP"
+    if _canonical_speaker_name(requested_speaker) == "EN-NEWEST":
+        return "EN_NEWEST"
+    return "EN"
 
 
 @dataclass(frozen=True)
@@ -192,24 +209,28 @@ class OpenVoiceEngine:
     def _load_base_language(self, language: str) -> None:
         from melo.api import TTS
 
-        melo_language = "JP" if language == "JA" else "EN"
+        requested_speaker = self.config.base_speaker_ja if language == "JA" else self.config.base_speaker_en
+        melo_language = _melo_language_for_speaker(language, requested_speaker)
         model = TTS(language=melo_language, device="cpu", use_hf=True)
         speaker_map = getattr(getattr(model, "hps", None), "data", None)
         speaker_map = getattr(speaker_map, "spk2id", None)
         if not speaker_map:
             raise RuntimeError(f"MeloTTS returned no speakers for {melo_language}")
 
-        requested_speaker = self.config.base_speaker_ja if language == "JA" else self.config.base_speaker_en
-        speaker_names = {str(name): speaker_id for name, speaker_id in speaker_map.items()}
+        speaker_names = {
+            _canonical_speaker_name(str(name)): (str(name), speaker_id)
+            for name, speaker_id in speaker_map.items()
+        }
         if requested_speaker:
-            if requested_speaker not in speaker_names:
+            requested_key = _canonical_speaker_name(requested_speaker)
+            if requested_key not in speaker_names:
                 raise RuntimeError(
                     f"configured MeloTTS base speaker is unavailable for {language}: {requested_speaker}"
                 )
-            speaker_name = requested_speaker
+            speaker_name, speaker_id = speaker_names[requested_key]
         else:
-            speaker_name = sorted(speaker_names)[0]
-        speaker_id = speaker_names[speaker_name]
+            speaker_key = sorted(speaker_names)[0]
+            speaker_name, speaker_id = speaker_names[speaker_key]
 
         source_embedding_path = official_embedding_path(self.config.base_speaker_dir, speaker_name)
         if not source_embedding_path.is_file():

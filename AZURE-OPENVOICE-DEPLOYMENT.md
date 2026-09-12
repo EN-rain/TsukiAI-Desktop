@@ -32,10 +32,10 @@ to `/opt/openvoice/voices/embeddings/tsuki_se.pth` using the official VAD-aware
 OpenVoice extractor. Requests never upload the reference audio.
 
 The runtime uses the official V2 MeloTTS source embeddings at
-`/opt/openvoice/models/checkpoints_v2/base_speakers/ses/en-us.pth` and
-`jp.pth`. English is explicitly pinned to the supported `EN-US` MeloTTS
-speaker; startup fails if either artifact is absent; it does not synthesize a
-replacement embedding from an arbitrary sentence.
+`/opt/openvoice/models/checkpoints_v2/base_speakers/ses/en-newest.pth` and
+`jp.pth`. English is explicitly pinned to MeloTTS's separate `EN_NEWEST`
+model and `EN-Newest` speaker; startup fails if either artifact is absent; it
+does not synthesize a replacement embedding from an arbitrary sentence.
 
 ## Required environment
 

@@ -24,7 +24,7 @@ sequence.
 /opt/openvoice/
 ├── app/                         # this service plus the OpenVoice checkout
 ├── models/checkpoints_v2/       # converter plus official V2 base speakers
-│   └── base_speakers/ses/       # en-us.pth and jp.pth from OpenVoiceV2
+│   └── base_speakers/ses/       # en-newest.pth and jp.pth from OpenVoiceV2
 ├── voices/references/tsuki.wav  # normalized once from the supplied MP3
 ├── voices/embeddings/tsuki_se.pth
 └── voice_registry.json
@@ -44,15 +44,16 @@ embeddings matching the configured MeloTTS speakers; it deliberately fails
 startup if those files are missing instead of creating a different embedding
 from an arbitrary sentence.
 
-The required base-speaker files are `en-us.pth` and `jp.pth` from the
+The required base-speaker files are `en-newest.pth` and `jp.pth` from the
 [OpenVoiceV2 base-speaker directory](https://huggingface.co/myshell-ai/OpenVoiceV2/tree/main/base_speakers/ses).
 
-The English runtime is explicitly configured as `EN-US`. The installed
-MeloTTS speaker map exposes `EN-US` but not `EN-NEWEST`; although the official
-checkpoint bundle contains an `en-newest.pth` artifact, using it with a
-different MeloTTS speaker would mix unmatched base-TTS and source embeddings.
+The English runtime is explicitly configured as `EN-NEWEST`. This selects
+MeloTTS's separate `EN_NEWEST` model and its `EN-Newest` speaker ID, matching
+the official OpenVoice V2 multi-accent demo. The source embedding is
+`en-newest.pth`; it must remain paired with that model rather than with the
+older `EN` speaker map.
 
-The current Free.ai comparison configuration uses `OPENVOICE_BASE_SPEAKER_EN=EN-US`,
+The current Free.ai comparison configuration uses `OPENVOICE_BASE_SPEAKER_EN=EN-NEWEST`,
 `OPENVOICE_SPEED_EN=1.0`,
 `OPENVOICE_SPEED_JA=1.0`, and `OPENVOICE_OUTPUT_SAMPLE_RATE=24000`. The final
 24 kHz WAV is a post-processing step after the official V2 converter, whose
