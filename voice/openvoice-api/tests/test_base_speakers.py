@@ -1,4 +1,5 @@
 import unittest
+import os
 import sys
 import tempfile
 from types import ModuleType, SimpleNamespace
@@ -39,6 +40,8 @@ class BaseSpeakerTests(unittest.TestCase):
                 torch_threads=4,
                 base_speaker_en="EN-AU",
                 base_speaker_ja="JP",
+                speed_en=1.0,
+                speed_ja=1.0,
             )
             fake_melo_api = ModuleType("melo.api")
             fake_melo_api.TTS = lambda **_: SimpleNamespace(
@@ -48,6 +51,13 @@ class BaseSpeakerTests(unittest.TestCase):
             with patch.dict(sys.modules, {"melo": fake_melo, "melo.api": fake_melo_api}):
                 with self.assertRaisesRegex(RuntimeError, "official OpenVoice V2 base-speaker embedding is missing"):
                     OpenVoiceEngine(config)._load_base_language("EN")
+
+    def test_runtime_speeds_are_configurable_per_language(self):
+        with patch.dict(os.environ, {"OPENVOICE_SPEED_EN": "0.9", "OPENVOICE_SPEED_JA": "1.0"}, clear=False):
+            config = RuntimeConfig.from_env()
+
+        self.assertEqual(config.speed_en, 0.9)
+        self.assertEqual(config.speed_ja, 1.0)
 
 
 if __name__ == "__main__":

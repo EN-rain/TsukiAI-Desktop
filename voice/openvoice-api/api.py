@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import secrets
 import tempfile
@@ -43,6 +44,16 @@ def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
+def _bounded_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError:
+        value = default
+    if not math.isfinite(value):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     api_key: str
@@ -61,6 +72,8 @@ class RuntimeConfig:
     torch_threads: int
     base_speaker_en: str
     base_speaker_ja: str
+    speed_en: float
+    speed_ja: float
 
     @classmethod
     def from_env(cls) -> "RuntimeConfig":
@@ -85,6 +98,8 @@ class RuntimeConfig:
             torch_threads=_bounded_int("OPENVOICE_TORCH_THREADS", 4, 1, 16),
             base_speaker_en=os.getenv("OPENVOICE_BASE_SPEAKER_EN", "").strip(),
             base_speaker_ja=os.getenv("OPENVOICE_BASE_SPEAKER_JA", "").strip(),
+            speed_en=_bounded_float("OPENVOICE_SPEED_EN", 1.0, 0.5, 2.0),
+            speed_ja=_bounded_float("OPENVOICE_SPEED_JA", 1.0, 0.5, 2.0),
         )
 
 
@@ -205,7 +220,8 @@ class OpenVoiceEngine:
         self._models[language] = model
         self._speaker_ids[language] = speaker_id
         self._source_se[language] = _load_tensor(self._torch, source_embedding_path, self.config.device)
-        LOG.info("loaded base language=%s speaker=%s", language, speaker_name)
+        speed = self.config.speed_ja if language == "JA" else self.config.speed_en
+        LOG.info("loaded base language=%s speaker=%s speed=%.2f", language, speaker_name, speed)
 
     def synthesize(self, text: str, language: str, output_path: Path) -> None:
         if self._converter is None or self._target_se is None:
@@ -216,13 +232,14 @@ class OpenVoiceEngine:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         model = self._models[language]
+        speed = self.config.speed_ja if language == "JA" else self.config.speed_en
         with tempfile.TemporaryDirectory(prefix="openvoice-source-") as temp_dir:
             source_wav = Path(temp_dir) / "source.wav"
             model.tts_to_file(
                 text,
                 self._speaker_ids[language],
                 str(source_wav),
-                speed=1.0,
+                speed=speed,
             )
             self._converter.convert(
                 audio_src_path=str(source_wav),

@@ -40,9 +40,12 @@ Make OpenVoice V2 the only TTS backend for the existing TsukiAI application and 
 - Local reference: `C:\Users\LENOVO\Downloads\tsuki_25s_clip.mp3` exists and is 318,997 bytes.
 - Remote reference checksum: `ce93bb53f197f0683d46ab4ad240e3d434ef6e2b2340190be98dfe382a0f6530`; normalized WAV duration: 28.629342 seconds.
 - Target embedding: `/opt/openvoice/voices/embeddings/tsuki_se.pth`, extracted with official VAD enabled; current file checksum `5949c16aa4fb1db7bdb6f20adfc3b9fdd5500f217322450ed4d99fceeb7794e8`, tensor-payload checksum `eadd8c964a5063e2f8c0d5647ff16f861f571a499ea4cdc1772d1e6dc731ca63`.
+- Matching calibration: the active target was calibrated from the user-provided Free.ai OpenVoice render (`https://api.free.ai/static/outputs/7b9bd60e-aa2b-4634-9473-ce8aabda71b4.wav`, SHA-256 `29d6f5f7411a60cd8a19c54097fccb9535bc185f3f9a5477d34f0d3b968d8e`); the original-reference embedding remains on the VM as `tsuki_se.pth.reference-vad`.
+- Calibrated target: file checksum `13fd7aed0ebef5b965d86ee8550b0ba344cda34f9f03f81f77e99147158858d0`, tensor-payload checksum `9787baca64d958cd0626c3d688e8a64a3c5cf3003fcec7303901ac38726dba32`.
 - Official base embeddings: `en-au.pth` checksum `5e9782233deef51fc5289d05ad4dd4ce12b196e282eccf6b6db6256bbd02daaa`; `jp.pth` checksum `7b645ff428de4a57a22122318968f1e6127ac81fda2e2aa66062deccd3864416`.
 - Deployed service source: Git commit `3981161` (OpenVoice source files deployed from that commit).
 - Service verification: `/health` reports `ready`, `engine=openvoice-v2`, one loaded `tsuki` voice, and `EN`/`JA`; unauthenticated `/tts` returns 401.
 - Post-fix smoke verification: authenticated EN and JA synthesis returned valid mono 22.05 kHz PCM WAV files (2.345 s and 2.844 s audio durations); `/health` reported `ready` with both languages loaded.
+- Free.ai comparison: the same legal-consent sentence measured 0.6984 speaker-embedding cosine before calibration and 0.8596 after calibration against the downloaded Free.ai WAV.
 - Earlier benchmark verification: EN 64/120/252 chars took 3,992/6,928/20,484 ms with RTF 0.958/0.964/1.384; JA 18/35/82 chars took 2,883/6,128/16,594 ms with RTF 1.018/0.974/1.098. Peak observed service RSS was about 4.97 GB; root disk was 31% used after setup.
 - Local verification: C# API and desktop builds succeeded; 3 OpenVoice client tests and 5 Python validation tests passed.

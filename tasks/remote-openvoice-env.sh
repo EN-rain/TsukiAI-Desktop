@@ -19,6 +19,8 @@ printf '%s\n' \
   'OPENVOICE_BASE_SPEAKER_DIR=/opt/openvoice/models/checkpoints_v2/base_speakers/ses' \
   'OPENVOICE_BASE_SPEAKER_EN=EN-AU' \
   'OPENVOICE_BASE_SPEAKER_JA=JP' \
+  'OPENVOICE_SPEED_EN=0.9' \
+  'OPENVOICE_SPEED_JA=1.0' \
   'OPENVOICE_OUTPUT_DIR=/tmp/openvoice-output' \
   'OPENVOICE_VOICE_ID=tsuki' \
   'OPENVOICE_DEVICE=cpu' \
