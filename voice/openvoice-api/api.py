@@ -74,6 +74,7 @@ class RuntimeConfig:
     base_speaker_ja: str
     speed_en: float
     speed_ja: float
+    output_sample_rate: int
 
     @classmethod
     def from_env(cls) -> "RuntimeConfig":
@@ -100,6 +101,7 @@ class RuntimeConfig:
             base_speaker_ja=os.getenv("OPENVOICE_BASE_SPEAKER_JA", "").strip(),
             speed_en=_bounded_float("OPENVOICE_SPEED_EN", 1.0, 0.5, 2.0),
             speed_ja=_bounded_float("OPENVOICE_SPEED_JA", 1.0, 0.5, 2.0),
+            output_sample_rate=_bounded_int("OPENVOICE_OUTPUT_SAMPLE_RATE", 24000, 8000, 48000),
         )
 
 
@@ -221,7 +223,13 @@ class OpenVoiceEngine:
         self._speaker_ids[language] = speaker_id
         self._source_se[language] = _load_tensor(self._torch, source_embedding_path, self.config.device)
         speed = self.config.speed_ja if language == "JA" else self.config.speed_en
-        LOG.info("loaded base language=%s speaker=%s speed=%.2f", language, speaker_name, speed)
+        LOG.info(
+            "loaded base language=%s speaker=%s speed=%.2f output_sample_rate=%d",
+            language,
+            speaker_name,
+            speed,
+            self.config.output_sample_rate,
+        )
 
     def synthesize(self, text: str, language: str, output_path: Path) -> None:
         if self._converter is None or self._target_se is None:
@@ -248,6 +256,7 @@ class OpenVoiceEngine:
                 output_path=str(output_path),
                 message="@TsukiAI",
             )
+            _resample_wav(output_path, self.config.output_sample_rate)
 
         _validate_wav(output_path, self.config.max_wav_bytes)
 
@@ -262,6 +271,33 @@ def _validate_wav(path: Path, max_bytes: int) -> tuple[int, float]:
     except (wave.Error, OSError) as exc:
         raise RuntimeError("OpenVoice produced an unreadable WAV file") from exc
     return path.stat().st_size, frames / rate if rate else 0.0
+
+
+def _resample_wav(path: Path, target_sample_rate: int) -> None:
+    """Finalize OpenVoice's 22.05 kHz WAV at the public API sample rate."""
+
+    import librosa
+    import soundfile
+
+    audio, source_sample_rate = soundfile.read(
+        str(path),
+        dtype="float32",
+        always_2d=False,
+    )
+    if getattr(audio, "ndim", 1) > 1:
+        audio = audio.mean(axis=1)
+    if source_sample_rate != target_sample_rate:
+        audio = librosa.resample(
+            audio,
+            orig_sr=source_sample_rate,
+            target_sr=target_sample_rate,
+        )
+    soundfile.write(
+        str(path),
+        audio,
+        target_sample_rate,
+        subtype="PCM_16",
+    )
 
 
 class TtsRequest(BaseModel):

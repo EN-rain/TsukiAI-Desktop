@@ -4,11 +4,11 @@ import sys
 import tempfile
 from types import ModuleType, SimpleNamespace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from api import OpenVoiceEngine, RuntimeConfig
+from api import OpenVoiceEngine, RuntimeConfig, _resample_wav
 from base_speakers import official_embedding_filename
 
 
@@ -42,6 +42,7 @@ class BaseSpeakerTests(unittest.TestCase):
                 base_speaker_ja="JP",
                 speed_en=1.0,
                 speed_ja=1.0,
+                output_sample_rate=24000,
             )
             fake_melo_api = ModuleType("melo.api")
             fake_melo_api.TTS = lambda **_: SimpleNamespace(
@@ -53,11 +54,37 @@ class BaseSpeakerTests(unittest.TestCase):
                     OpenVoiceEngine(config)._load_base_language("EN")
 
     def test_runtime_speeds_are_configurable_per_language(self):
-        with patch.dict(os.environ, {"OPENVOICE_SPEED_EN": "0.9", "OPENVOICE_SPEED_JA": "1.0"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "OPENVOICE_SPEED_EN": "1.0",
+                "OPENVOICE_SPEED_JA": "1.0",
+                "OPENVOICE_OUTPUT_SAMPLE_RATE": "24000",
+            },
+            clear=False,
+        ):
             config = RuntimeConfig.from_env()
 
-        self.assertEqual(config.speed_en, 0.9)
+        self.assertEqual(config.speed_en, 1.0)
         self.assertEqual(config.speed_ja, 1.0)
+        self.assertEqual(config.output_sample_rate, 24000)
+
+    def test_output_is_resampled_to_configured_sample_rate(self):
+        fake_librosa = ModuleType("librosa")
+        fake_librosa.resample = lambda audio, *, orig_sr, target_sr: (audio, orig_sr, target_sr)
+        fake_soundfile = ModuleType("soundfile")
+        fake_soundfile.read = lambda *_args, **_kwargs: ([0.1, 0.2], 22050)
+        fake_soundfile.write = Mock()
+
+        with patch.dict(
+            sys.modules,
+            {"librosa": fake_librosa, "soundfile": fake_soundfile},
+        ):
+            _resample_wav(Path("output.wav"), 24000)
+
+        fake_soundfile.write.assert_called_once()
+        self.assertEqual(fake_soundfile.write.call_args.args[2], 24000)
+        self.assertEqual(fake_soundfile.write.call_args.kwargs["subtype"], "PCM_16")
 
 
 if __name__ == "__main__":

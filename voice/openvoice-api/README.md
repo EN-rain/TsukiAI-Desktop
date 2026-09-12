@@ -35,12 +35,11 @@ official OpenVoice checkout and MeloTTS according to their current upstream
 instructions. Do not copy secrets into this repository. Put the API key in
 `/opt/openvoice/openvoice.env` with mode `600`.
 
-The target voice is extracted once with OpenVoice's official VAD-aware
-`se_extractor.get_se(..., vad=True)` path. The normal target is the supplied
-reference recording. When matching an external reference render is required,
-the active embedding may instead be calibrated from that exact render; keep
-the original-reference embedding as a separate rollback artifact and do not
-replace it silently. The runtime also requires the official V2 base-speaker
+The target voice is extracted once from the supplied reference recording with
+OpenVoice's official VAD-aware `se_extractor.get_se(..., vad=True)` path. The
+runtime uses that original-reference embedding; any external-render
+calibration is kept as a separate experiment/rollback artifact and is not
+silently made active. The runtime also requires the official V2 base-speaker
 embeddings matching the configured MeloTTS speakers; it deliberately fails
 startup if those files are missing instead of creating a different embedding
 from an arbitrary sentence.
@@ -48,8 +47,10 @@ from an arbitrary sentence.
 The required base-speaker files are `en-au.pth` and `jp.pth` from the
 [OpenVoiceV2 base-speaker directory](https://huggingface.co/myshell-ai/OpenVoiceV2/tree/main/base_speakers/ses).
 
-The current Free.ai-matching deployment uses `OPENVOICE_SPEED_EN=0.9` and
-`OPENVOICE_SPEED_JA=1.0`; these are runtime settings, not model changes.
+The current Free.ai comparison configuration uses `OPENVOICE_SPEED_EN=1.0`,
+`OPENVOICE_SPEED_JA=1.0`, and `OPENVOICE_OUTPUT_SAMPLE_RATE=24000`. The final
+24 kHz WAV is a post-processing step after the official V2 converter, whose
+native converter configuration is 22.05 kHz.
 
 The historical OpenVoice V2 ZIP URL in older instructions is not treated as a
 guaranteed source. The deployment must verify the converter files before
