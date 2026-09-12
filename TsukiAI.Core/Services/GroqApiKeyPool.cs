@@ -38,7 +38,7 @@ public sealed class GroqApiKeyPool
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {
-                DevLog.WriteLine("Groq STT key file unavailable; using environment fallback. error={0}", ex.Message);
+                DevLog.WriteLine("Groq key file unavailable; using environment fallback. error={0}", ex.Message);
             }
         }
 

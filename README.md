@@ -58,9 +58,9 @@ dotnet build TsukiAI.sln
   - `TSUKI_ASSEMBLYAI_API_KEY` (C#-side fallback, if used)
   - `TSUKI_DEEPL_API_KEY` (optional)
 
-For Groq STT rotation, set `TSUKI_GROQ_API_KEYS_FILE` or
-`GROQ_KEYS_HOST_PATH` to a newline-separated key file outside Git. The API,
-desktop microphone, and Discord bridge all rotate the same configured pool.
+For Groq rotation, set `TSUKI_GROQ_API_KEYS_FILE` or `GROQ_KEYS_HOST_PATH` to
+a newline-separated key file outside Git. Discord/API/desktop STT and LLM chat
+all rotate the same configured pool when a key is rejected or rate-limited.
 
 For long-term memory, set `TSUKI_SEMANTIC_MEMORY_ENABLED=true`, then set
 `TSUKI_SUPERMEMORY_API_KEY` for the Discord/API process and

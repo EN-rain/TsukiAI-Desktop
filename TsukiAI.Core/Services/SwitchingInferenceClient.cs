@@ -15,6 +15,7 @@ public sealed class SwitchingInferenceClient : IInferenceClient, IDisposable
     private readonly AppSettings _settings;
     private readonly ISemanticMemoryService? _semanticMemory;
     private readonly ProviderSwitchingService _switcher = new();
+    private readonly GroqApiKeyPool _groqKeyPool;
     private readonly object _gate = new();
     private readonly Dictionary<string, IInferenceClient> _clients = new(StringComparer.OrdinalIgnoreCase);
 
@@ -24,6 +25,14 @@ public sealed class SwitchingInferenceClient : IInferenceClient, IDisposable
     {
         _settings = settings;
         _semanticMemory = semanticMemory;
+        _groqKeyPool = GroqApiKeyPool.LoadFromFileOrValues(
+            EnvConfiguration.Get("TSUKI_GROQ_API_KEYS_FILE"),
+            EnvConfiguration.Get("GROQ_API_KEYS_FILE"),
+            EnvConfiguration.Get("GROQ_KEYS_HOST_PATH"),
+            EnvConfiguration.Get("TSUKI_GROQ_API_KEYS"),
+            settings.GroqApiKey);
+
+        DevLog.WriteLine("SwitchingInferenceClient: Groq LLM key pool loaded ({0} keys)", _groqKeyPool.Count);
     }
 
     private IInferenceClient Active
@@ -37,13 +46,22 @@ public sealed class SwitchingInferenceClient : IInferenceClient, IDisposable
                 if (_clients.TryGetValue(provider, out var existing))
                     return existing;
 
-                var client = new RemoteInferenceClient(
-                    ProviderSwitchingService.GetProviderUrl(provider),
-                    ProviderSwitchingService.GetProviderApiKey(provider, _settings),
-                    ProviderSwitchingService.GetProviderModel(provider),
-                    _semanticMemory,
-                    _settings.GetGenerationTuning(),
-                    _settings.ReplyTonePreset);
+                IInferenceClient client = provider.Equals("groq", StringComparison.OrdinalIgnoreCase)
+                    ? new GroqRotatingInferenceClient(
+                        ProviderSwitchingService.GetProviderUrl(provider),
+                        ProviderSwitchingService.GetProviderModel(provider),
+                        _groqKeyPool,
+                        ProviderSwitchingService.GetProviderApiKey(provider, _settings),
+                        _semanticMemory,
+                        _settings.GetGenerationTuning(),
+                        _settings.ReplyTonePreset)
+                    : new RemoteInferenceClient(
+                        ProviderSwitchingService.GetProviderUrl(provider),
+                        ProviderSwitchingService.GetProviderApiKey(provider, _settings),
+                        ProviderSwitchingService.GetProviderModel(provider),
+                        _semanticMemory,
+                        _settings.GetGenerationTuning(),
+                        _settings.ReplyTonePreset);
                 _clients[provider] = client;
                 DevLog.WriteLine("SwitchingInferenceClient: activated provider '{0}' ({1})",
                     provider, ProviderSwitchingService.GetProviderUrl(provider));

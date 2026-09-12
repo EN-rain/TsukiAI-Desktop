@@ -27,4 +27,22 @@ public sealed class GroqApiKeyPoolTests
         pool.MarkSuccess("third");
         Assert.Equal(["third", "second"], pool.GetCandidates());
     }
+
+    [Fact]
+    public void External_file_is_used_before_inline_fallback_values()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"tsukiai-groq-{Guid.NewGuid():N}.keys");
+        File.WriteAllText(path, "file-first\nfile-second\n");
+
+        try
+        {
+            var pool = GroqApiKeyPool.LoadFromFileOrValues(path, "inline-fallback");
+
+            Assert.Equal(["file-first", "file-second"], pool.GetCandidates());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
