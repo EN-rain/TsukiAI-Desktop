@@ -27,15 +27,19 @@ The VM keeps the API on `127.0.0.1:8000`. The C# container reaches the host
 service through `host.docker.internal`; no public TTS port is opened.
 
 The reference file is normalized once to
-`/opt/openvoice/voices/references/tsuki.wav`, and the target embedding is saved
-to `/opt/openvoice/voices/embeddings/tsuki_se.pth` using the official VAD-aware
-OpenVoice extractor. Requests never upload the reference audio.
+`/opt/openvoice/voices/references/tsuki.wav`. The original target embedding is
+created with the official VAD-aware OpenVoice extractor; the active registry
+uses the preserved Free.ai-render calibration
+`/opt/openvoice/voices/embeddings/tsuki_freeai_se.pth` to match the supplied
+HAR output. Requests never upload or re-process the reference audio.
 
 The runtime uses the official V2 MeloTTS source embeddings at
-`/opt/openvoice/models/checkpoints_v2/base_speakers/ses/en-newest.pth` and
-`jp.pth`. English is explicitly pinned to MeloTTS's separate `EN_NEWEST`
-model and `EN-Newest` speaker; startup fails if either artifact is absent; it
-does not synthesize a replacement embedding from an arbitrary sentence.
+`/opt/openvoice/models/checkpoints_v2/base_speakers/ses/en-us.pth` and
+`jp.pth`. English is explicitly pinned to the `EN-US` speaker at speed `0.8`;
+startup fails if either artifact is absent; it does not synthesize a replacement
+embedding from an arbitrary sentence. The API masters the generated WAV with
+the tested denoise/loudness filter before it reaches Discord or the C# audio
+pipeline.
 
 ## Required environment
 

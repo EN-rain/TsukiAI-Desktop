@@ -1,7 +1,7 @@
 {
   "voices": {
     "tsuki": {
-      "embedding": "voices/embeddings/tsuki_se.pth",
+      "embedding": "voices/embeddings/tsuki_freeai_se.pth",
       "default_language": "EN"
     }
   }

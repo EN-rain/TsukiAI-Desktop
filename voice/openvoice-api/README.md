@@ -35,29 +35,32 @@ official OpenVoice checkout and MeloTTS according to their current upstream
 instructions. Do not copy secrets into this repository. Put the API key in
 `/opt/openvoice/openvoice.env` with mode `600`.
 
-The target voice is extracted once from the supplied reference recording with
-OpenVoice's official VAD-aware `se_extractor.get_se(..., vad=True)` path. The
-runtime uses that original-reference embedding; any external-render
-calibration is kept as a separate experiment/rollback artifact and is not
-silently made active. The runtime also requires the official V2 base-speaker
-embeddings matching the configured MeloTTS speakers; it deliberately fails
-startup if those files are missing instead of creating a different embedding
-from an arbitrary sentence.
+The original target is extracted once from the supplied reference recording
+with OpenVoice's official VAD-aware `se_extractor.get_se(..., vad=True)` path.
+For Free.ai matching, the registry intentionally uses the separately preserved
+`tsuki_freeai_se.pth` calibration produced from the user's exact Free.ai
+OpenVoice render; the original-reference embedding remains available as a
+rollback artifact. Runtime requests still never upload or process reference
+audio. The runtime also requires the official V2 base-speaker embeddings
+matching the configured MeloTTS speakers; it deliberately fails startup if
+those files are missing instead of creating a different embedding from an
+arbitrary sentence.
 
-The required base-speaker files are `en-newest.pth` and `jp.pth` from the
+The required base-speaker files are `en-us.pth` and `jp.pth` from the
 [OpenVoiceV2 base-speaker directory](https://huggingface.co/myshell-ai/OpenVoiceV2/tree/main/base_speakers/ses).
 
-The English runtime is explicitly configured as `EN-NEWEST`. This selects
-MeloTTS's separate `EN_NEWEST` model and its `EN-Newest` speaker ID, matching
-the official OpenVoice V2 multi-accent demo. The source embedding is
-`en-newest.pth`; it must remain paired with that model rather than with the
-older `EN` speaker map.
+The English runtime is explicitly configured as `EN-US` with speed `0.8`.
+This is the closest tested match to the HAR output: it produced 15.151 seconds
+for the exact 189-character sentence versus Free.ai's 15.120 seconds. The
+separate `EN_NEWEST` path remains available on the VM for comparison.
 
-The current Free.ai comparison configuration uses `OPENVOICE_BASE_SPEAKER_EN=EN-NEWEST`,
-`OPENVOICE_SPEED_EN=1.0`,
-`OPENVOICE_SPEED_JA=1.0`, and `OPENVOICE_OUTPUT_SAMPLE_RATE=24000`. The final
-24 kHz WAV is a post-processing step after the official V2 converter, whose
-native converter configuration is 22.05 kHz.
+The current Free.ai comparison configuration uses
+`OPENVOICE_BASE_SPEAKER_EN=EN-US`, `OPENVOICE_SPEED_EN=0.8`,
+`OPENVOICE_SPEED_JA=1.0`, and `OPENVOICE_OUTPUT_SAMPLE_RATE=24000`. After
+conversion, the API applies a fixed high/low-pass, FFT denoise, and loudness
+normalization pass. This is a delivery-quality step after the official V2
+converter, whose native converter configuration is 22.05 kHz; the final WAV is
+24 kHz mono PCM.
 
 The historical OpenVoice V2 ZIP URL in older instructions is not treated as a
 guaranteed source. The deployment must verify the converter files before

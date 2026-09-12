@@ -1,4 +1,3 @@
-// Keep Discord voice-message mastering conservative: the OpenVoice WAVs are
-// already valid PCM, so only apply the measured delivery gain and a true-peak
-// ceiling before Opus encoding.
-export const DISCORD_VOICE_AUDIO_FILTER = 'volume=5dB,alimiter=limit=0.95';
+// OpenVoice masters its WAV before this bridge sees it. Keep only a true-peak
+// ceiling here so Discord's Opus conversion cannot add gain or re-introduce hiss.
+export const DISCORD_VOICE_AUDIO_FILTER = 'alimiter=limit=0.95';

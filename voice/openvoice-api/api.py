@@ -14,6 +14,7 @@ import math
 import os
 import re
 import secrets
+import subprocess
 import tempfile
 import time
 import uuid
@@ -35,6 +36,17 @@ from validation import normalize_language, normalize_text, normalize_voice_id
 
 LOG = logging.getLogger("openvoice-api")
 ROOT = Path(__file__).resolve().parent
+
+
+# Free.ai's HAR-matched render is materially louder and has less high-frequency
+# noise than an unmastered OpenVoice converter output. Keep this post-processing
+# in the private API so every consumer receives the same mastered WAV.
+OPENVOICE_AUDIO_MASTER_FILTER = (
+    "highpass=f=60,"
+    "lowpass=f=9500,"
+    "afftdn=nr=12:nf=-50:tn=1,"
+    "loudnorm=I=-16.8:TP=-1.0:LRA=7"
+)
 
 
 def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -278,6 +290,7 @@ class OpenVoiceEngine:
                 message="@TsukiAI",
             )
             _resample_wav(output_path, self.config.output_sample_rate)
+            _master_wav(output_path, self.config.output_sample_rate)
 
         _validate_wav(output_path, self.config.max_wav_bytes)
 
@@ -319,6 +332,49 @@ def _resample_wav(path: Path, target_sample_rate: int) -> None:
         target_sample_rate,
         subtype="PCM_16",
     )
+
+
+def _master_wav(path: Path, target_sample_rate: int) -> None:
+    """Reduce converter hiss and normalize output before Discord encoding."""
+
+    with tempfile.TemporaryDirectory(prefix="openvoice-master-") as temp_dir:
+        mastered_path = Path(temp_dir) / "mastered.wav"
+        command = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(path),
+            "-af",
+            OPENVOICE_AUDIO_MASTER_FILTER,
+            "-ar",
+            str(target_sample_rate),
+            "-ac",
+            "1",
+            "-c:a",
+            "pcm_s16le",
+            str(mastered_path),
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("ffmpeg is required to master OpenVoice output") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("ffmpeg timed out while mastering OpenVoice output") from exc
+
+        if result.returncode != 0 or not mastered_path.is_file():
+            detail = (result.stderr or "").strip()[-400:]
+            raise RuntimeError(f"ffmpeg failed while mastering OpenVoice output: {detail}")
+
+        os.replace(mastered_path, path)
 
 
 class TtsRequest(BaseModel):

@@ -8,7 +8,14 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from api import OpenVoiceEngine, RuntimeConfig, _melo_language_for_speaker, _resample_wav
+from api import (
+    OPENVOICE_AUDIO_MASTER_FILTER,
+    OpenVoiceEngine,
+    RuntimeConfig,
+    _master_wav,
+    _melo_language_for_speaker,
+    _resample_wav,
+)
 from base_speakers import official_embedding_filename
 
 
@@ -137,6 +144,23 @@ class BaseSpeakerTests(unittest.TestCase):
         fake_soundfile.write.assert_called_once()
         self.assertEqual(fake_soundfile.write.call_args.args[2], 24000)
         self.assertEqual(fake_soundfile.write.call_args.kwargs["subtype"], "PCM_16")
+
+    def test_output_mastering_uses_denoise_loudness_and_peak_safe_filter(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "output.wav"
+            output.write_bytes(b"input")
+            with patch("api.subprocess.run") as run:
+                run.return_value = SimpleNamespace(returncode=0, stderr="")
+                with patch("api.os.replace") as replace:
+                    with patch("api.Path.is_file", return_value=True):
+                        _master_wav(output, 24000)
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[0], "ffmpeg")
+            self.assertIn(OPENVOICE_AUDIO_MASTER_FILTER, command)
+            self.assertIn("-ar", command)
+            self.assertIn("24000", command)
+            replace.assert_called_once()
 
 
 if __name__ == "__main__":
