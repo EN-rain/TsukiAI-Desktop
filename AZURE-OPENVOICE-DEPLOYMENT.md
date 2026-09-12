@@ -35,7 +35,7 @@ HAR output. Requests never upload or re-process the reference audio.
 
 The runtime uses the official V2 MeloTTS source embeddings at
 `/opt/openvoice/models/checkpoints_v2/base_speakers/ses/en-us.pth` and
-`jp.pth`. English is explicitly pinned to the `EN-US` speaker at speed `0.8`;
+`jp.pth`. English is explicitly pinned to the `EN-US` speaker at speed `1.0`;
 startup fails if either artifact is absent; it does not synthesize a replacement
 embedding from an arbitrary sentence. The API masters the generated WAV with
 the tested denoise/loudness filter before it reaches Discord or the C# audio

@@ -49,13 +49,17 @@ arbitrary sentence.
 The required base-speaker files are `en-us.pth` and `jp.pth` from the
 [OpenVoiceV2 base-speaker directory](https://huggingface.co/myshell-ai/OpenVoiceV2/tree/main/base_speakers/ses).
 
-The English runtime is explicitly configured as `EN-US` with speed `0.8`.
-This is the closest tested match to the HAR output: it produced 15.151 seconds
-for the exact 189-character sentence versus Free.ai's 15.120 seconds. The
-separate `EN_NEWEST` path remains available on the VM for comparison.
+The English runtime is explicitly configured as `EN-US` with speed `1.0`.
+In the manual Chrome verification, Free.ai showed `model=openvoice`, speed `1`,
+and produced a 12.400-second WAV for the exact 189-character sentence. The
+matching local `EN-US` speed-1 render was 12.411 seconds. An older HAR render
+was 15.120 seconds with the same visible settings, so Free.ai's backend is not
+duration-deterministic; the target and base-speaker choice are the important
+matching controls. The separate `EN_NEWEST` path remains available on the VM
+for comparison.
 
 The current Free.ai comparison configuration uses
-`OPENVOICE_BASE_SPEAKER_EN=EN-US`, `OPENVOICE_SPEED_EN=0.8`,
+`OPENVOICE_BASE_SPEAKER_EN=EN-US`, `OPENVOICE_SPEED_EN=1.0`,
 `OPENVOICE_SPEED_JA=1.0`, and `OPENVOICE_OUTPUT_SAMPLE_RATE=24000`. After
 conversion, the API applies a fixed high/low-pass, FFT denoise, and loudness
 normalization pass. This is a delivery-quality step after the official V2
