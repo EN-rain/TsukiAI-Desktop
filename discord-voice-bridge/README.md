@@ -121,13 +121,13 @@ Important:
 The bridge registers one grouped command. Members need **Manage Channels**:
 
 ```text
-/tsuki join [channel_id]
-/tsuki leave [channel_id]
-/tsuki say destination:vc text:"Hello from Tsuki"
-/tsuki say destination:c text:"Hello in the chat"
-/tsuki focus user_id:<user-id>
-/tsuki unfocus user_id:<user-id>
-/tsuki focuslist
+/t join [channel_id]
+/t leave [channel_id]
+/t say destination:vc text:"Hello from Tsuki"
+/t say destination:c text:"Hello in the chat"
+/t focus user_id:<user-id>
+/t unfocus user_id:<user-id>
+/t focuslist
 ```
 
 `destination:vc` speaks in the currently joined voice channel. `destination:c`

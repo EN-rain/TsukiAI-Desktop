@@ -7,8 +7,11 @@ import {
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
+  NoSubscriberBehavior,
+  StreamType,
   VoiceConnectionStatus,
   EndBehaviorType,
+  entersState,
   getVoiceConnection
 } from '@discordjs/voice';
 import axios from 'axios';
@@ -29,6 +32,7 @@ import {
 } from './voice-presence.js';
 import { shouldAcceptVoiceStart } from './voice-focus.js';
 import { DISCORD_VOICE_AUDIO_FILTER } from './audio-encoding.js';
+import { createDiscordPcmStream, inspectDiscordPcm } from './voice-playback.js';
 
 const DEBUG_MODE = (process.env.DEBUG || 'false').toLowerCase() === 'true';
 function debugLog(...args) {
@@ -275,10 +279,17 @@ client.on('voiceStateUpdate', (oldState, newState) => {
 });
 
 // Audio player for TTS playback
-const audioPlayer = createAudioPlayer();
+const audioPlayer = createAudioPlayer({
+  behaviors: {
+    // Keep consuming the resource while a connection transitions to Ready;
+    // playTTSAudio still waits for Ready before starting the resource.
+    noSubscriber: NoSubscriberBehavior.Play,
+  },
+});
 const playbackQueue = [];
 let playbackWorkerActive = false;
 let playbackSequence = 0;
+let audioPlayerConnection = null;
 
 // Track active voice connections
 let currentConnection = null;
@@ -675,6 +686,26 @@ async function drainPlaybackQueue() {
   }
 }
 
+async function waitForVoiceConnectionReady(connection) {
+  if (connection.state.status === VoiceConnectionStatus.Destroyed) {
+    throw new Error('Voice connection is destroyed');
+  }
+  if (connection.state.status !== VoiceConnectionStatus.Ready) {
+    await entersState(connection, VoiceConnectionStatus.Ready, 15000);
+  }
+}
+
+function subscribeAudioPlayer(connection) {
+  if (audioPlayerConnection === connection) return;
+
+  const subscription = connection.subscribe(audioPlayer);
+  if (!subscription) {
+    throw new Error(`Unable to subscribe audio player while connection is ${connection.state.status}`);
+  }
+  audioPlayerConnection = connection;
+  console.log(`[TTS] Audio player subscribed (connection=${connection.state.status})`);
+}
+
 /**
  * Play TTS audio in Discord voice channel
  */
@@ -685,16 +716,24 @@ async function playTTSAudio(audioBuffer) {
   }
 
   try {
-    console.log('[TTS] Playing audio in voice channel...');
+    const stats = inspectDiscordPcm(audioBuffer, {
+      sampleRate: CONFIG.SAMPLE_RATE,
+      channels: CONFIG.CHANNELS,
+    });
+    await waitForVoiceConnectionReady(connection);
+    subscribeAudioPlayer(connection);
 
-    // Create a readable stream from the buffer
-    const { Readable } = await import('stream');
-    const audioStream = Readable.from(audioBuffer);
+    console.log(
+      `[TTS] Playing audio in voice channel (bytes=${stats.bytes}, duration=${stats.durationSecs.toFixed(2)}s, ` +
+      `rms=${stats.rms.toFixed(2)}, peak=${stats.peak}, connection=${connection.state.status})...`,
+    );
+
+    const audioStream = createDiscordPcmStream(audioBuffer);
 
     // Create audio resource from stream
     // The buffer should be PCM 48kHz stereo
     const resource = createAudioResource(audioStream, {
-      inputType: 'raw', // Raw PCM audio
+      inputType: StreamType.Raw,
       inlineVolume: true
     });
 
@@ -703,24 +742,47 @@ async function playTTSAudio(audioBuffer) {
       resource.volume.setVolume(0.5);
     }
 
-    audioPlayer.play(resource);
-    connection.subscribe(audioPlayer);
-
-    // Wait for playback to finish
+    // Install listeners before play() so a fast/short resource cannot finish
+    // before the completion promise is observing the player.
     await new Promise((resolve, reject) => {
-      const onIdle = () => {
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timeout);
+        audioPlayer.removeListener(AudioPlayerStatus.Idle, onIdle);
         audioPlayer.removeListener('error', onError);
+      };
+      const onIdle = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
         resolve();
       };
       const onError = (error) => {
-        audioPlayer.removeListener(AudioPlayerStatus.Idle, onIdle);
+        if (settled) return;
+        settled = true;
+        cleanup();
         reject(error);
       };
-      audioPlayer.once(AudioPlayerStatus.Idle, onIdle);
-      audioPlayer.once('error', onError);
+      const timeout = setTimeout(() => {
+        onError(new Error('Discord audio playback timed out'));
+      }, Math.max(15000, stats.durationSecs * 4000));
+
+      audioPlayer.on(AudioPlayerStatus.Idle, onIdle);
+      audioPlayer.on('error', onError);
+      try {
+        // The connection must already be subscribed before the player starts;
+        // otherwise the default voice-player state can consume/pause audio
+        // before Discord has a playable subscriber.
+        audioPlayer.play(resource);
+      } catch (error) {
+        onError(error);
+      }
     });
 
-    console.log('[TTS] Playback complete');
+    console.log(
+      `[TTS] Playback complete (player=${audioPlayer.state.status}, connection=${connection.state.status}, ` +
+      `ping=${connection.ping ?? 'n/a'}ms)`,
+    );
   } catch (error) {
     console.error('[TTS] Playback error:', error.message);
     throw error;
@@ -1174,6 +1236,7 @@ async function joinVoice(guildId, channelId) {
     });
 
     currentConnection = connection;
+    subscribeAudioPlayer(connection);
 
     connection.on(VoiceConnectionStatus.Ready, () => {
       console.log('[VOICE] ✅ Connected and ready!');
@@ -1184,6 +1247,9 @@ async function joinVoice(guildId, channelId) {
       console.log('[VOICE] Disconnected');
       if (currentConnection === connection) {
         currentConnection = null;
+      }
+      if (audioPlayerConnection === connection) {
+        audioPlayerConnection = null;
       }
       audioPlayer.stop(true);
       assemblyRealtimeEnabled = false;
@@ -1292,6 +1358,9 @@ function leaveVoice(guildId) {
   if (connection) {
     connection.destroy();
     currentConnection = null;
+    if (audioPlayerConnection === connection) {
+      audioPlayerConnection = null;
+    }
     console.log('[VOICE] Left voice channel');
   }
 }
@@ -1317,7 +1386,7 @@ client.once('clientReady', async () => {
       console.error('[BOT] Failed to auto-join voice:', error.message);
     }
   } else {
-    console.log('[BOT] No default voice channel configured; waiting for /tsuki join.');
+    console.log('[BOT] No default voice channel configured; waiting for /t join.');
   }
   startBridgeHttpServer();
 
@@ -1327,7 +1396,7 @@ client.once('clientReady', async () => {
     if (guild) {
       await guild.commands.set([
         {
-          name: 'tsuki',
+          name: 't',
           description: 'Control Tsuki voice chat and direct speech',
           options: [
             {
@@ -1434,7 +1503,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   const guild = interaction.guild;
-  if (!guild || interaction.commandName !== 'tsuki') return;
+  if (!guild || interaction.commandName !== 't') return;
 
   const subcommand = interaction.options.getSubcommand();
   const arg = interaction.options.getString('channel_id') || interaction.options.getString('user_id') || '';
@@ -1514,7 +1583,7 @@ client.on('interactionCreate', async (interaction) => {
       }
       case 'focuslist': {
         if (manualFocusList.size === 0) {
-          await interaction.reply('Manual focus is off — I listen to everyone. Use `/tsuki focus user_id` to restrict it.');
+          await interaction.reply('Manual focus is off — I listen to everyone. Use `/t focus user_id` to restrict it.');
           return;
         }
         const names = await Promise.all([...manualFocusList].map((id) => resolveUserName(guild, id)));
@@ -1531,7 +1600,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (destination === 'vc' && !currentConnection) {
-          await interaction.reply({ content: 'I am not in a voice channel. Use `/tsuki join` first.', ephemeral: true });
+          await interaction.reply({ content: 'I am not in a voice channel. Use `/t join` first.', ephemeral: true });
           return;
         }
 
