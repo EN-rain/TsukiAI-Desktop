@@ -29,6 +29,7 @@ test('the raw PCM playback guard is wired into the player path', () => {
   assert.match(bridgeSource, /inspectDiscordPcm\(audioBuffer/);
   assert.match(bridgeSource, /sampleRate:\s*CONFIG\.SAMPLE_RATE/);
   assert.match(bridgeSource, /channels:\s*CONFIG\.CHANNELS/);
+  assert.match(bridgeSource, /formatVoicePing\(connection\.ping\)/);
 });
 
 test('the playback guard rejects empty, silent, and misaligned PCM', () => {

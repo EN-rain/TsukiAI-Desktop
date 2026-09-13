@@ -706,6 +706,16 @@ function subscribeAudioPlayer(connection) {
   console.log(`[TTS] Audio player subscribed (connection=${connection.state.status})`);
 }
 
+function formatVoicePing(ping) {
+  if (ping === null || ping === undefined) return 'n/a';
+  if (typeof ping === 'number') return `${ping}ms`;
+  try {
+    return JSON.stringify(ping);
+  } catch {
+    return String(ping);
+  }
+}
+
 /**
  * Play TTS audio in Discord voice channel
  */
@@ -781,7 +791,7 @@ async function playTTSAudio(audioBuffer) {
 
     console.log(
       `[TTS] Playback complete (player=${audioPlayer.state.status}, connection=${connection.state.status}, ` +
-      `ping=${connection.ping ?? 'n/a'}ms)`,
+      `ping=${formatVoicePing(connection.ping)})`,
     );
   } catch (error) {
     console.error('[TTS] Playback error:', error.message);
