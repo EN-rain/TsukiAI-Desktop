@@ -132,10 +132,10 @@ public partial class App : System.Windows.Application
         // Voice-only services
         services.AddSingleton<VoiceConversationPipeline>();
         services.AddSingleton<IVoiceConversationPipeline>(sp => sp.GetRequiredService<VoiceConversationPipeline>());
-        services.AddSingleton<ITtsClient>(sp => new OpenVoiceTtsClient(() =>
+        services.AddSingleton<ITtsClient>(sp => new QwenTtsClient(() =>
         {
             var current = EnvConfiguration.ApplyToSettings(SettingsService.Load());
-            return (current.OpenVoiceUrl, current.OpenVoiceApiKey);
+            return (current.QwenTtsUrl, current.QwenTtsApiKey);
         }));
         services.AddSingleton<TtsPlaybackService>();
         services.AddSingleton<WhisperService>();
@@ -231,7 +231,7 @@ public partial class App : System.Windows.Application
         if (settings.VoiceRuntimeV2Enabled)
         {
             _serviceProvider.GetRequiredService<VoiceConversationPipeline>().Start();
-            DevLog.WriteLine("App: OpenVoice V2 synthesis selected; no alternate TTS engine startup.");
+            DevLog.WriteLine("App: Qwen3-TTS full-ICL synthesis selected; no alternate TTS engine startup.");
         }
 
         // Start local mic capture for the voice runtime (desktop app is a

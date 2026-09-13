@@ -28,8 +28,8 @@ public static class EnvConfiguration
         "TSUKI_GEMINI_API_KEY",
         "TSUKI_GITHUB_API_KEY",
         "TSUKI_MISTRAL_API_KEY",
-        "TSUKI_OPENVOICE_URL",
-        "TSUKI_OPENVOICE_API_KEY",
+        "TSUKI_QWEN_TTS_URL",
+        "TSUKI_QWEN_TTS_API_KEY",
         "TSUKI_MODEL_NAME",
         "TSUKI_USE_DEEPL_TRANSLATE",
         "TSUKI_USE_DEEPL_FREE_API",
@@ -63,8 +63,8 @@ public static class EnvConfiguration
             inferenceMode = settings.InferenceMode;
         }
         var useMultipleProviders = ParseBool(env, "TSUKI_USE_MULTIPLE_PROVIDERS", settings.UseMultipleAiProviders);
-        var openVoiceUrl = ReadString(env, "TSUKI_OPENVOICE_URL", settings.OpenVoiceUrl);
-        var openVoiceApiKey = ReadString(env, "TSUKI_OPENVOICE_API_KEY", settings.OpenVoiceApiKey);
+        var qwenTtsUrl = ReadString(env, "TSUKI_QWEN_TTS_URL", settings.QwenTtsUrl);
+        var qwenTtsApiKey = ReadString(env, "TSUKI_QWEN_TTS_API_KEY", settings.QwenTtsApiKey);
 
         return settings with
         {
@@ -81,9 +81,9 @@ public static class EnvConfiguration
             GeminiApiKey = ReadString(env, "TSUKI_GEMINI_API_KEY", settings.GeminiApiKey),
             GitHubApiKey = ReadString(env, "TSUKI_GITHUB_API_KEY", settings.GitHubApiKey),
             MistralApiKey = ReadString(env, "TSUKI_MISTRAL_API_KEY", settings.MistralApiKey),
-            OpenVoiceUrl = openVoiceUrl,
-            OpenVoiceApiKey = openVoiceApiKey,
-            TtsMode = TtsMode.OpenVoice,
+            QwenTtsUrl = qwenTtsUrl,
+            QwenTtsApiKey = qwenTtsApiKey,
+            TtsMode = TtsMode.Qwen3Tts,
             SemanticMemoryEnabled = semanticMemoryEnabled,
             InferenceMode = inferenceMode,
             UseMultipleAiProviders = useMultipleProviders,

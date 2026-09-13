@@ -123,10 +123,10 @@ else
         !string.IsNullOrWhiteSpace(chromaUrl));
 }
 
-builder.Services.AddSingleton<ITtsClient>(sp => new OpenVoiceTtsClient(() =>
+builder.Services.AddSingleton<ITtsClient>(sp => new QwenTtsClient(() =>
 {
     var current = EnvConfiguration.ApplyToSettings(SettingsService.Load());
-    return (current.OpenVoiceUrl, current.OpenVoiceApiKey);
+    return (current.QwenTtsUrl, current.QwenTtsApiKey);
 }));
 builder.Services.AddSingleton<TranslationService>();
 builder.Services.AddSingleton<AudioProcessingService>();
@@ -326,10 +326,10 @@ app.MapGet("/api/settings", () =>
         },
         tts = new
         {
-            mode = TtsMode.OpenVoice.ToString(),
-            openvoice_url = s.OpenVoiceUrl,
-            openvoice_configured = !string.IsNullOrWhiteSpace(s.OpenVoiceUrl) &&
-                                   !string.IsNullOrWhiteSpace(s.OpenVoiceApiKey)
+            mode = TtsMode.Qwen3Tts.ToString(),
+            qwen_tts_url = s.QwenTtsUrl,
+            qwen_tts_configured = !string.IsNullOrWhiteSpace(s.QwenTtsUrl) &&
+                                  !string.IsNullOrWhiteSpace(s.QwenTtsApiKey)
         },
         translation = new
         {
@@ -385,23 +385,23 @@ app.MapPut("/api/settings", async (HttpContext ctx) =>
     {
         var t = patch.Tts;
         if (!string.IsNullOrWhiteSpace(t.Mode) &&
-            !string.Equals(t.Mode, nameof(TtsMode.OpenVoice), StringComparison.OrdinalIgnoreCase))
+            !string.Equals(t.Mode, nameof(TtsMode.Qwen3Tts), StringComparison.OrdinalIgnoreCase))
         {
-            return Results.BadRequest(new { error = "OpenVoice V2 is the only supported TTS backend" });
+            return Results.BadRequest(new { error = "Qwen3-TTS is the only supported TTS backend" });
         }
-        if (t.OpenVoiceUrl is { } configuredUrl)
+        if (t.QwenTtsUrl is { } configuredUrl)
         {
             var trimmedUrl = configuredUrl.Trim();
             if (trimmedUrl.Length > 2048 ||
                 !Uri.TryCreate(trimmedUrl, UriKind.Absolute, out var parsedUrl) ||
                 (parsedUrl.Scheme != Uri.UriSchemeHttp && parsedUrl.Scheme != Uri.UriSchemeHttps))
             {
-                return Results.BadRequest(new { error = "openVoiceUrl must be an http(s) URL no longer than 2048 characters" });
+                return Results.BadRequest(new { error = "qwenTtsUrl must be an http(s) URL no longer than 2048 characters" });
             }
 
-            updated = updated with { OpenVoiceUrl = trimmedUrl };
+            updated = updated with { QwenTtsUrl = trimmedUrl };
         }
-        updated = updated with { TtsMode = TtsMode.OpenVoice };
+        updated = updated with { TtsMode = TtsMode.Qwen3Tts };
     }
     if (patch.Translation is not null)
     {
@@ -539,7 +539,7 @@ app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
 
-/* language detection is owned by the OpenVoice client */
+/* language detection is owned by the Qwen TTS client */
 /*
 static bool MentionsJapanese(string text)
 {
@@ -641,7 +641,7 @@ sealed class GenerationPatch
 sealed class TtsPatch
 {
     public string? Mode { get; set; }
-    public string? OpenVoiceUrl { get; set; }
+    public string? QwenTtsUrl { get; set; }
 }
 
 sealed class TranslationPatch

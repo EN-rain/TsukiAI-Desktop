@@ -1,0 +1,25 @@
+[Unit]
+Description=TsukiAI Qwen3-TTS 0.6B CPU service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<VM_USER>
+Group=<VM_USER>
+WorkingDirectory=/opt/tsuki-qwen3-tts/server
+EnvironmentFile=/opt/tsuki-qwen3-tts/qwen.env
+Environment=NUMBA_CACHE_DIR=/opt/tsuki-qwen3-tts/numba-cache
+ExecStart=/opt/tsuki-qwen3-tts/venv/bin/uvicorn api:app --host 127.0.0.1 --port 8100 --workers 1
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=900
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/tsuki-qwen3-tts /tmp
+
+[Install]
+WantedBy=multi-user.target

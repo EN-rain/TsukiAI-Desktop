@@ -33,10 +33,10 @@ services:
       # missing instead of starting an unreachable localhost-only container.
       - TSUKI_WEB_PASSWORD=${TSUKI_WEB_PASSWORD:?Set TSUKI_WEB_PASSWORD in .env}
       - TSUKI_API_KEY=${TSUKI_API_KEY:?Set TSUKI_API_KEY in .env}
-      # OpenVoice runs privately on the Azure VM host; the API container
+      # Qwen3-TTS runs privately on the Azure VM host; the API container
       # reaches it through the host gateway. Fail fast if its API key is absent.
-      - TSUKI_OPENVOICE_URL=${TSUKI_OPENVOICE_URL:-http://host.docker.internal:8000}
-      - TSUKI_OPENVOICE_API_KEY=${TSUKI_OPENVOICE_API_KEY:?Set TSUKI_OPENVOICE_API_KEY in .env}
+      - TSUKI_QWEN_TTS_URL=${TSUKI_QWEN_TTS_URL:-http://host.docker.internal:8100}
+      - TSUKI_QWEN_TTS_API_KEY=${TSUKI_QWEN_TTS_API_KEY:?Set TSUKI_QWEN_TTS_API_KEY in .env}
       - TSUKI_SEMANTIC_MEMORY_ENABLED=true
       # API-side Groq STT uses the same read-only key pool as the bridge.
       - TSUKI_GROQ_API_KEYS_FILE=/run/secrets/tsuki-groq-keys

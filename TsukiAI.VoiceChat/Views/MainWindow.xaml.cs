@@ -44,7 +44,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OpenVoiceSettings_Click(object sender, RoutedEventArgs e)
+    private void QwenTtsSettings_Click(object sender, RoutedEventArgs e)
     {
         try
         {

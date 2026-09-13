@@ -34,7 +34,7 @@ public enum SttMode
 
 public enum TtsMode
 {
-    OpenVoice = 0
+    Qwen3Tts = 0
 }
 
 public sealed record AppSettings(
@@ -60,12 +60,12 @@ public sealed record AppSettings(
     string GitHubApiKey = "",
     string MistralApiKey = "",
     
-    // OpenVoice V2 is the only TTS backend. The service owns the reference
-    // audio and cached speaker embedding; the application sends text only.
+    // Qwen3-TTS is the only TTS backend. The service owns the reference audio
+    // and cached full-ICL voice prompt; the application sends text only.
     bool VoiceEnabled = false,
-    TtsMode TtsMode = TtsMode.OpenVoice,
-    string OpenVoiceUrl = "http://127.0.0.1:8000",
-    string OpenVoiceApiKey = "",
+    TtsMode TtsMode = TtsMode.Qwen3Tts,
+    string QwenTtsUrl = "http://127.0.0.1:8100",
+    string QwenTtsApiKey = "",
     bool VoiceTranslateToJapanese = true,
     bool UseDeepLTranslate = false,
     string DeepLApiKey = "",

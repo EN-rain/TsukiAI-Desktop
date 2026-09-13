@@ -1,3 +1,6 @@
+using System.Buffers.Binary;
+using System.Text;
+
 namespace TsukiAI.VoiceChat.Services;
 
 public sealed class AudioProcessingService
@@ -37,11 +40,11 @@ public sealed class AudioProcessingService
 
     public byte[] ConvertWavToDiscordPcm(byte[] wavData)
     {
-        if (wavData is null || wavData.Length <= 44)
+        if (!TryGetPcm16MonoData(wavData, out var dataOffset, out var dataLength))
             return Array.Empty<byte>();
 
-        var pcm24kMono = new byte[wavData.Length - 44];
-        Array.Copy(wavData, 44, pcm24kMono, 0, pcm24kMono.Length);
+        var pcm24kMono = new byte[dataLength];
+        Array.Copy(wavData, dataOffset, pcm24kMono, 0, dataLength);
 
         var inputSampleCount = pcm24kMono.Length / 2;
         var outputSampleCount = inputSampleCount * 2;
@@ -85,6 +88,61 @@ public sealed class AudioProcessingService
         }
 
         return output;
+    }
+
+    private static bool TryGetPcm16MonoData(byte[]? wavData, out int dataOffset, out int dataLength)
+    {
+        dataOffset = 0;
+        dataLength = 0;
+
+        if (wavData is null || wavData.Length < 12 ||
+            !wavData.AsSpan(0, 4).SequenceEqual("RIFF"u8) ||
+            !wavData.AsSpan(8, 4).SequenceEqual("WAVE"u8))
+            return false;
+
+        ushort audioFormat = 0;
+        ushort channels = 0;
+        ushort bitsPerSample = 0;
+        uint sampleRate = 0;
+        var foundFormat = false;
+        var foundData = false;
+
+        for (var position = 12; position + 8 <= wavData.Length;)
+        {
+            var chunkSize = BinaryPrimitives.ReadUInt32LittleEndian(wavData.AsSpan(position + 4, 4));
+            var payloadStart = position + 8;
+            var payloadEnd = (long)payloadStart + chunkSize;
+            if (payloadEnd > wavData.Length || payloadEnd > int.MaxValue)
+                return false;
+
+            var chunkId = Encoding.ASCII.GetString(wavData, position, 4);
+            if (chunkId == "fmt " && chunkSize >= 16)
+            {
+                audioFormat = BinaryPrimitives.ReadUInt16LittleEndian(wavData.AsSpan(payloadStart, 2));
+                channels = BinaryPrimitives.ReadUInt16LittleEndian(wavData.AsSpan(payloadStart + 2, 2));
+                sampleRate = BinaryPrimitives.ReadUInt32LittleEndian(wavData.AsSpan(payloadStart + 4, 4));
+                bitsPerSample = BinaryPrimitives.ReadUInt16LittleEndian(wavData.AsSpan(payloadStart + 14, 2));
+                foundFormat = true;
+            }
+            else if (chunkId == "data")
+            {
+                dataOffset = payloadStart;
+                dataLength = (int)chunkSize;
+                foundData = true;
+            }
+
+            var nextPosition = payloadEnd + (chunkSize & 1);
+            if (nextPosition > wavData.Length || nextPosition <= position)
+                return false;
+            position = (int)nextPosition;
+        }
+
+        // Qwen service returns 24 kHz, mono, signed PCM16. The
+        // chunk scan above deliberately accepts LIST/JUNK/INFO chunks between
+        // fmt and data instead of assuming the 44-byte WAV layout.
+        return foundFormat && foundData &&
+            audioFormat == 1 && channels == 1 && bitsPerSample == 16 &&
+            sampleRate == 24000 && dataLength >= 2 && (dataLength & 1) == 0;
     }
 
 }

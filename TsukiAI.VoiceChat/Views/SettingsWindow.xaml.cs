@@ -21,7 +21,7 @@ namespace TsukiAI.VoiceChat.Views;
 
 public partial class SettingsWindow : Window
 {
-    private static readonly HttpClient OpenVoiceTestClient = CreateSharedHttpClient(TimeSpan.FromSeconds(25));
+    private static readonly HttpClient QwenTtsTestClient = CreateSharedHttpClient(TimeSpan.FromSeconds(25));
     private static readonly HttpClient ProviderProbeClient = CreateSharedHttpClient(TimeSpan.FromSeconds(12));
 
     public AppSettings Result { get; private set; }
@@ -68,7 +68,7 @@ public partial class SettingsWindow : Window
             UseGpu = Result.UseGpu,
             ModelDirectory = Result.ModelDirectory ?? string.Empty,
             VoiceEnabled = Result.VoiceEnabled,
-            OpenVoiceUrl = NormalizeOpenVoiceUrl(Result.OpenVoiceUrl),
+            QwenTtsUrl = NormalizeQwenTtsUrl(Result.QwenTtsUrl),
             VoiceTranslateToJapanese = Result.VoiceTranslateToJapanese,
             UseDeepLTranslate = Result.UseDeepLTranslate,
             UseDeepLFreeApi = Result.UseDeepLFreeApi,
@@ -99,7 +99,7 @@ public partial class SettingsWindow : Window
         };
         DataContext = vm;
 
-        // OpenVoice V2 is the only synthesis backend.
+        // Qwen3-TTS is the only synthesis backend.
         UpdateTtsPanelVisibility(Result.TtsMode);
         var normalizedRemoteApiKey = NormalizeApiKey(Result.RemoteInferenceApiKey);
         TxtRemoteApiKey.Password = normalizedRemoteApiKey;
@@ -321,7 +321,7 @@ public partial class SettingsWindow : Window
 
         var inferenceMode = InferenceMode.RemoteColab;
         var newMode = InteractionMode.VoiceChat;
-        var ttsMode = TtsMode.OpenVoice;
+        var ttsMode = TtsMode.Qwen3Tts;
         var captureMode = vm.CaptureModeIndex == 1 ? ScreenshotCaptureMode.ActiveWindow : ScreenshotCaptureMode.FullScreen;
         var modeChanged = Result.EnabledMode != newMode;
         if (GetInferenceModeSelectionTag() == "custom")
@@ -377,7 +377,7 @@ public partial class SettingsWindow : Window
             ModelDirectory = vm.ModelDirectory?.Trim() ?? string.Empty,
             VoiceEnabled = vm.VoiceEnabled,
             TtsMode = ttsMode,
-            OpenVoiceUrl = NormalizeOpenVoiceUrl(vm.OpenVoiceUrl),
+            QwenTtsUrl = NormalizeQwenTtsUrl(vm.QwenTtsUrl),
             VoiceTranslateToJapanese = vm.VoiceTranslateToJapanese,
             UseDeepLTranslate = vm.UseDeepLTranslate,
             DeepLApiKey = deepLApiKeyFromEnv,
@@ -444,7 +444,7 @@ public partial class SettingsWindow : Window
         Close();
     }
 
-    private void OpenVoiceSetup_Click(object sender, RoutedEventArgs e)
+    private void QwenTtsSetup_Click(object sender, RoutedEventArgs e)
     {
         try
         {
@@ -1396,7 +1396,7 @@ public partial class SettingsWindow : Window
         public bool UseGpu { get; set; } = true;
         public string ModelDirectory { get; set; } = string.Empty;
         public bool VoiceEnabled { get; set; }
-        public string OpenVoiceUrl { get; set; } = "http://127.0.0.1:8000";
+        public string QwenTtsUrl { get; set; } = "http://127.0.0.1:8100";
         public bool VoiceTranslateToJapanese { get; set; } = true;
         public bool UseDeepLTranslate { get; set; }
         public bool UseDeepLFreeApi { get; set; } = true;
@@ -1507,7 +1507,7 @@ public partial class SettingsWindow : Window
         return value;
     }
 
-    private static string NormalizeOpenVoiceUrl(string? url)
+    private static string NormalizeQwenTtsUrl(string? url)
     {
         var value = (url ?? string.Empty).Trim().Trim('"', '\'');
         if (string.IsNullOrWhiteSpace(value))
@@ -1545,8 +1545,8 @@ public partial class SettingsWindow : Window
         var details = $"Connection failed at {step}.\nURL: {baseUrl}\nStatus: {(int)statusCode} ({reason})";
         if (statusCode == HttpStatusCode.BadGateway)
         {
-            details += "\n\nngrok returned 502 (Bad Gateway). Tunnel is up, but backend service is not reachable.";
-            details += "\nCheck that the OpenVoice service is running and that the configured URL is reachable.";
+            details += "\n\nThe remote Qwen TTS service returned 502. The endpoint is reachable, but synthesis failed.";
+            details += "\nCheck that the Qwen3-TTS service is running and that the configured URL is reachable.";
         }
 
         if (!string.IsNullOrWhiteSpace(snippet))

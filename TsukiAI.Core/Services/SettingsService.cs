@@ -65,12 +65,12 @@ public static class SettingsService
                 VrChatOscHost = string.IsNullOrWhiteSpace(loadedSettings.VrChatOscHost) ? "127.0.0.1" : loadedSettings.VrChatOscHost,
                 VrChatOscInputPort = loadedSettings.VrChatOscInputPort == 0 ? 9000 : loadedSettings.VrChatOscInputPort,
                 VrChatOscOutputPort = loadedSettings.VrChatOscOutputPort == 0 ? 9001 : loadedSettings.VrChatOscOutputPort,
-                // OpenVoice V2 is the only supported TTS backend. Ignore
-                // legacy provider modes when loading old settings files.
-                TtsMode = TtsMode.OpenVoice,
-                OpenVoiceUrl = string.IsNullOrWhiteSpace(loadedSettings.OpenVoiceUrl)
-                    ? AppSettings.Default.OpenVoiceUrl
-                    : loadedSettings.OpenVoiceUrl
+                // Qwen3-TTS is the only supported TTS backend. Ignore legacy
+                // provider modes when loading old settings files.
+                TtsMode = TtsMode.Qwen3Tts,
+                QwenTtsUrl = string.IsNullOrWhiteSpace(loadedSettings.QwenTtsUrl)
+                    ? AppSettings.Default.QwenTtsUrl
+                    : loadedSettings.QwenTtsUrl
             };
             
             // Migrate old single API key to provider-specific keys
@@ -113,10 +113,10 @@ public static class SettingsService
                 VrChatOscHost = string.IsNullOrWhiteSpace(loadedSettings.VrChatOscHost) ? "127.0.0.1" : loadedSettings.VrChatOscHost,
                 VrChatOscInputPort = loadedSettings.VrChatOscInputPort == 0 ? 9000 : loadedSettings.VrChatOscInputPort,
                 VrChatOscOutputPort = loadedSettings.VrChatOscOutputPort == 0 ? 9001 : loadedSettings.VrChatOscOutputPort,
-                TtsMode = TtsMode.OpenVoice,
-                OpenVoiceUrl = string.IsNullOrWhiteSpace(loadedSettings.OpenVoiceUrl)
-                    ? AppSettings.Default.OpenVoiceUrl
-                    : loadedSettings.OpenVoiceUrl
+                TtsMode = TtsMode.Qwen3Tts,
+                QwenTtsUrl = string.IsNullOrWhiteSpace(loadedSettings.QwenTtsUrl)
+                    ? AppSettings.Default.QwenTtsUrl
+                    : loadedSettings.QwenTtsUrl
             };
 
             return MigrateApiKeys(mergedSettings);

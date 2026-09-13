@@ -1,7 +1,17 @@
 import 'dotenv/config';
 import http from 'http';
 import https from 'https';
-import { Client, GatewayIntentBits, MessageFlags, Routes, PermissionsBitField } from 'discord.js';
+import {
+  ActionRowBuilder,
+  Client,
+  GatewayIntentBits,
+  MessageFlags,
+  ModalBuilder,
+  PermissionsBitField,
+  Routes,
+  TextInputBuilder,
+  TextInputStyle,
+} from 'discord.js';
 import {
   joinVoiceChannel,
   createAudioPlayer,
@@ -33,6 +43,7 @@ import {
 import { shouldAcceptVoiceStart } from './voice-focus.js';
 import { DISCORD_VOICE_AUDIO_FILTER } from './audio-encoding.js';
 import { createDiscordPcmStream, inspectDiscordPcm } from './voice-playback.js';
+import { voiceMetadataFromWav } from './voice-message.js';
 
 const DEBUG_MODE = (process.env.DEBUG || 'false').toLowerCase() === 'true';
 function debugLog(...args) {
@@ -1442,19 +1453,6 @@ client.once('clientReady', async () => {
               name: 'say',
               description: 'Make Tsuki speak text directly',
               type: 1,
-              options: [
-                {
-                  name: 'destination',
-                  description: 'Where to send the voice',
-                  type: 3,
-                  required: true,
-                  choices: [
-                    { name: 'Voice channel', value: 'vc' },
-                    { name: 'Chat voice message', value: 'c' },
-                  ],
-                },
-                { name: 'text', description: 'Text to synthesize', type: 3, required: true },
-              ],
             },
           ],
         },
@@ -1504,7 +1502,8 @@ async function resolveUserName(guild, userId) {
 }
 
 client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
+  const isSayModal = interaction.isModalSubmit() && interaction.customId === 't_say_modal';
+  if (!isSayModal && !interaction.isChatInputCommand()) return;
 
   // GUARDRAIL: only members with Manage Channels can control Tsuki.
   if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageChannels)) {
@@ -1513,7 +1512,33 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   const guild = interaction.guild;
-  if (!guild || interaction.commandName !== 't') return;
+  if (!guild) return;
+
+  if (isSayModal) {
+    try {
+      const rawText = interaction.fields.getTextInputValue('t_say_text');
+      const text = limitDirectTtsText(rawText);
+      if (!text) {
+        await interaction.reply({ content: 'Text is empty after validation.', ephemeral: true });
+        return;
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+      const pcm = await requestDirectTts(text);
+      await sendVoiceMessage(interaction.channelId, pcmToWav(pcm), 'Voice message from Tsuki');
+      await interaction.editReply('Voice message sent here.');
+    } catch (error) {
+      console.error('[SLASH] Direct voice message failed:', error.message);
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: 'I could not create an audible voice message.' }).catch(() => {});
+      } else {
+        await interaction.reply({ content: 'I could not create an audible voice message.', ephemeral: true }).catch(() => {});
+      }
+    }
+    return;
+  }
+
+  if (interaction.commandName !== 't') return;
 
   const subcommand = interaction.options.getSubcommand();
   const arg = interaction.options.getString('channel_id') || interaction.options.getString('user_id') || '';
@@ -1601,28 +1626,17 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
       case 'say': {
-        const destination = interaction.options.getString('destination', true);
-        const rawText = interaction.options.getString('text', true);
-        const text = limitDirectTtsText(rawText);
-        if (!text) {
-          await interaction.reply({ content: 'Text is empty after validation.', ephemeral: true });
-          return;
-        }
-
-        if (destination === 'vc' && !currentConnection) {
-          await interaction.reply({ content: 'I am not in a voice channel. Use `/t join` first.', ephemeral: true });
-          return;
-        }
-
-        await interaction.deferReply({ ephemeral: true });
-        const pcm = await requestDirectTts(text);
-        if (destination === 'vc') {
-          await enqueuePlayback('slash-say-vc', pcm, { priority: 0 });
-          await interaction.editReply(`Speaking in <#${currentConnection.joinConfig.channelId}>.`);
-        } else {
-          await sendVoiceMessage(interaction.channelId, pcmToWav(pcm), 'Voice message from Tsuki');
-          await interaction.editReply('Voice message sent.');
-        }
+        const modal = new ModalBuilder()
+          .setCustomId('t_say_modal')
+          .setTitle('Tsuki voice message');
+        const textInput = new TextInputBuilder()
+          .setCustomId('t_say_text')
+          .setLabel('What should Tsuki say?')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMaxLength(DIRECT_TTS_MAX_CHARS);
+        modal.addComponents(new ActionRowBuilder().addComponents(textInput));
+        await interaction.showModal(modal);
         return;
       }
     }
@@ -1666,52 +1680,6 @@ function wantsVoiceReply(text) {
 
 let textTurnInFlight = false;
 const lastTextTurnAt = new Map(); // userId -> epoch ms
-
-// Discord voice-message attachments require duration + waveform metadata
-// (base64 amplitude samples). The API computes both from the synthesized WAV.
-function voiceMetadataFromWav(wavBuffer, fallbackDuration) {
-  let duration = fallbackDuration || 1;
-  let sampleRate = 24000;
-  try {
-    duration = wavBuffer.readDoubleLE ? duration : duration; // noop guard
-    sampleRate = wavBuffer.readUInt32LE(24);
-    const byteRate = wavBuffer.readUInt32LE(28);
-    // locate the data chunk (standard 44-byte layout, scan to be safe)
-    let pos = 12;
-    while (pos + 8 <= wavBuffer.length) {
-      const id = wavBuffer.toString("ascii", pos, pos + 4);
-      const size = wavBuffer.readUInt32LE(pos + 4);
-      if (id === "data") {
-        duration = Math.max(0.5, Math.round((size / byteRate) * 10) / 10);
-        break;
-      }
-      pos += 8 + size + (size % 2);
-    }
-  } catch { /* keep fallback */ }
-
-  // waveform: peak amplitude per bin over 16-bit samples (skip 44-byte header)
-  const bins = 64;
-  const dataStart = 44;
-  const bytesPerSample = 2;
-  const sampleCount = Math.floor((wavBuffer.length - dataStart) / bytesPerSample);
-  const step = Math.max(1, Math.floor(sampleCount / bins));
-  const amps = [];
-  let max = 1;
-  for (let b = 0; b < bins; b++) {
-    let peak = 0;
-    const s0 = dataStart + b * step * bytesPerSample;
-    for (let i = 0; i < step; i++) {
-      const off = s0 + i * bytesPerSample;
-      if (off + 1 >= wavBuffer.length) break;
-      const v = Math.abs(wavBuffer.readInt16LE(off));
-      if (v > peak) peak = v;
-    }
-    amps.push(peak);
-    if (peak > max) max = peak;
-  }
-  const waveform = Buffer.from(amps.map((a) => Math.round((a / max) * 255))).toString("base64");
-  return { durationSecs: duration, waveform };
-}
 
 // Convert the synthesized WAV to ogg/opus for Discord voice messages. The WAV
 // goes in raw (ffmpeg probes it and resamples 24k->48k mono with high quality).

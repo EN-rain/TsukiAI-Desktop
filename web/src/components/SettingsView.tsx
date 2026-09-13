@@ -193,21 +193,21 @@ export function SettingsView() {
         </h2>
         <div className="mt-3 grid gap-4 sm:grid-cols-3">
           <Field label="TTS mode">
-            <input type="text" value="OpenVoice V2" readOnly className={inputClass} />
+            <input type="text" value="Qwen3-TTS 0.6B (full ICL)" readOnly className={inputClass} />
           </Field>
-          <Field label="OpenVoice endpoint" hint="The protected /health and /tts service URL">
+          <Field label="Qwen3-TTS endpoint" hint="The protected /health and /tts service URL">
             <input
               type="url"
-              value={settings.tts.openvoice_url}
-              onChange={(e) => patch((d) => (d.tts.openvoice_url = e.target.value))}
+              value={settings.tts.qwen_tts_url}
+              onChange={(e) => patch((d) => (d.tts.qwen_tts_url = e.target.value))}
               className={inputClass}
             />
           </Field>
         </div>
         <p className="mt-2 text-xs text-mist-500">
-          {settings.tts.openvoice_configured
-            ? "OpenVoice V2 configured."
-            : "Set the OpenVoice endpoint and server API key before using voice output."}
+          {settings.tts.qwen_tts_configured
+            ? "Qwen3-TTS full-ICL voice cloning is configured."
+            : "Set the Qwen3-TTS endpoint and server API key before using voice output."}
         </p>
       </section>
 

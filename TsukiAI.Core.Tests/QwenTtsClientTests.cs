@@ -6,23 +6,23 @@ using Xunit;
 
 namespace TsukiAI.Core.Tests;
 
-public sealed class OpenVoiceTtsClientTests
+public sealed class QwenTtsClientTests
 {
     [Fact]
-    public async Task SynthesizeWavAsync_checks_health_sends_openvoice_payload_and_validates_wav()
+    public async Task SynthesizeWavAsync_checks_health_sends_qwen_payload_and_validates_wav()
     {
         var wav = MinimalWav();
         var handler = new RecordingHandler(
             new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{\"ok\":true,\"engine\":\"openvoice-v2\"}", Encoding.UTF8, "application/json")
+                Content = new StringContent("{\"status\":\"ready\",\"mode\":\"full-icl\"}", Encoding.UTF8, "application/json")
             },
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(wav)
             });
-        using var client = new OpenVoiceTtsClient(
-            "http://127.0.0.1:8000",
+        using var client = new QwenTtsClient(
+            "http://127.0.0.1:8100",
             "test-api-key",
             handler: handler,
             maxAttempts: 1);
@@ -31,14 +31,14 @@ public sealed class OpenVoiceTtsClientTests
 
         Assert.Equal(wav, result);
         Assert.Equal(2, handler.Requests.Count);
-        Assert.Equal("http://127.0.0.1:8000/health", handler.Requests[0].Request.RequestUri?.ToString());
+        Assert.Equal("http://127.0.0.1:8100/health", handler.Requests[0].Request.RequestUri?.ToString());
         Assert.Equal("test-api-key", handler.Requests[0].Request.Headers.GetValues("X-Api-Key").Single());
-        Assert.Equal("http://127.0.0.1:8000/tts", handler.Requests[1].Request.RequestUri?.ToString());
+        Assert.Equal("http://127.0.0.1:8100/tts", handler.Requests[1].Request.RequestUri?.ToString());
         Assert.Equal("corr-1", handler.Requests[1].Request.Headers.GetValues("X-Correlation-ID").Single());
 
         using var body = JsonDocument.Parse(handler.Requests[1].Body);
         Assert.Equal("Hello there", body.RootElement.GetProperty("text").GetString());
-        Assert.Equal("EN", body.RootElement.GetProperty("language").GetString());
+        Assert.Equal("English", body.RootElement.GetProperty("language").GetString());
     }
 
     [Fact]
@@ -54,19 +54,33 @@ public sealed class OpenVoiceTtsClientTests
         var handler = new RecordingHandler(
             new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{\"ok\":true}", Encoding.UTF8, "application/json")
+                Content = new StringContent("{\"status\":\"ready\"}", Encoding.UTF8, "application/json")
             },
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent("not-a-wav")
             });
-        using var client = new OpenVoiceTtsClient(
-            "http://127.0.0.1:8000",
+        using var client = new QwenTtsClient(
+            "http://127.0.0.1:8100",
             "test-api-key",
             handler: handler,
             maxAttempts: 1);
 
         await Assert.ThrowsAsync<InvalidDataException>(() => client.SynthesizeWavAsync("Hello", "EN"));
+    }
+
+    [Fact]
+    public async Task SynthesizeWavAsync_rejects_unknown_language_before_network_call()
+    {
+        using var handler = new RecordingHandler();
+        using var client = new QwenTtsClient(
+            "http://127.0.0.1:8100",
+            "test-api-key",
+            handler: handler,
+            maxAttempts: 1);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => client.SynthesizeWavAsync("Hello", "French"));
+        Assert.Empty(handler.Requests);
     }
 
     private static byte[] MinimalWav() =>

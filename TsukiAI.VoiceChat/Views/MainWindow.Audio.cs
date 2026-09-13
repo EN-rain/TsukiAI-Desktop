@@ -49,8 +49,8 @@ public partial class MainWindow
 
         _settings = EnvConfiguration.ApplyToSettings(SettingsService.Load());
         var deviceNumber = _settings.VoiceOutputDeviceNumber;
-        DevLog.WriteLine("[PlayHere] device={0}, tts_engine=OpenVoiceV2, openvoice_url={1}",
-            deviceNumber, string.IsNullOrWhiteSpace(_settings.OpenVoiceUrl) ? "(empty)" : _settings.OpenVoiceUrl);
+        DevLog.WriteLine("[PlayHere] device={0}, tts_engine=Qwen3TtsFullIcl, qwen_tts_url={1}",
+            deviceNumber, string.IsNullOrWhiteSpace(_settings.QwenTtsUrl) ? "(empty)" : _settings.QwenTtsUrl);
         await PlayVoicePreviewAsync(text, deviceNumber);
     }
 
@@ -114,8 +114,8 @@ public partial class MainWindow
 
     private async Task<byte[]> SynthesizePreviewWavAsync(string text, CancellationToken ct)
     {
-        using var openVoice = new OpenVoiceTtsClient(_settings.OpenVoiceUrl, _settings.OpenVoiceApiKey);
-        return await openVoice.SynthesizeWavAsync(text, TtsLanguageDetector.Detect(text), ct);
+        using var qwenTts = new QwenTtsClient(_settings.QwenTtsUrl, _settings.QwenTtsApiKey);
+        return await qwenTts.SynthesizeWavAsync(text, TtsLanguageDetector.Detect(text), ct);
     }
 
     private void LoadVoiceReceptionSettings()

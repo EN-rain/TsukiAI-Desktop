@@ -25,6 +25,16 @@ test('the registered guild command is /t and no active handler text points to /t
   assert.doesNotMatch(bridgeSource, /\/tsuki\b/);
 });
 
+test('direct /t say opens a modal and always sends the voice message to the invoking chat', () => {
+  assert.match(bridgeSource, /ModalBuilder/);
+  assert.match(bridgeSource, /TextInputBuilder/);
+  assert.match(bridgeSource, /interaction\.isModalSubmit\(\)/);
+  assert.match(bridgeSource, /setCustomId\(['"]t_say_modal['"]\)/);
+  assert.match(bridgeSource, /sendVoiceMessage\(interaction\.channelId, pcmToWav\(pcm\)/);
+  assert.doesNotMatch(bridgeSource, /name:\s*['"]destination['"]/);
+  assert.doesNotMatch(bridgeSource, /name:\s*['"]text['"],\s*description:\s*['"]Text to synthesize/);
+});
+
 test('the raw PCM playback guard is wired into the player path', () => {
   assert.match(bridgeSource, /inspectDiscordPcm\(audioBuffer/);
   assert.match(bridgeSource, /sampleRate:\s*CONFIG\.SAMPLE_RATE/);

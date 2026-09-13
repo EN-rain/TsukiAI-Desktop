@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$OpenVoiceUrl = $env:TSUKI_OPENVOICE_URL,
+    [string]$QwenTtsUrl = $env:TSUKI_QWEN_TTS_URL,
     [int]$ApiPort = 5000,
     [int]$BridgePort = 3001
 )
@@ -61,11 +61,11 @@ $startedApi = $false
 $localApiKey = $env:TSUKI_API_KEY
 
 try {
-    if ([string]::IsNullOrWhiteSpace($OpenVoiceUrl)) {
-        throw 'Set TSUKI_OPENVOICE_URL in this PowerShell session before starting the stack.'
+    if ([string]::IsNullOrWhiteSpace($QwenTtsUrl)) {
+        throw 'Set TSUKI_QWEN_TTS_URL in this PowerShell session before starting the stack.'
     }
-    if ([string]::IsNullOrWhiteSpace($env:TSUKI_OPENVOICE_API_KEY)) {
-        throw 'Set TSUKI_OPENVOICE_API_KEY in this PowerShell session before starting the stack.'
+    if ([string]::IsNullOrWhiteSpace($env:TSUKI_QWEN_TTS_API_KEY)) {
+        throw 'Set TSUKI_QWEN_TTS_API_KEY in this PowerShell session before starting the stack.'
     }
 
     $discordToken = $env:DISCORD_TOKEN
@@ -82,7 +82,7 @@ try {
     if (-not $apiAlreadyListening) {
         $localApiKey = 'local-' + [Guid]::NewGuid().ToString('N')
         $env:TSUKI_API_KEY = $localApiKey
-        $env:TSUKI_OPENVOICE_URL = $OpenVoiceUrl
+        $env:TSUKI_QWEN_TTS_URL = $QwenTtsUrl
         $env:TSUKI_VOICE_RUNTIME_V2 = 'true'
         $env:TSUKI_VOICE_API_CONTROLLER = 'true'
         $env:TSUKI_SEMANTIC_MEMORY_ENABLED = 'false'
@@ -150,7 +150,7 @@ finally {
     Remove-Item Env:BRIDGE_HTTP_PORT -ErrorAction SilentlyContinue
     if ($startedApi) {
         Remove-Item Env:TSUKI_API_KEY -ErrorAction SilentlyContinue
-        Remove-Item Env:TSUKI_OPENVOICE_URL -ErrorAction SilentlyContinue
+        Remove-Item Env:TSUKI_QWEN_TTS_URL -ErrorAction SilentlyContinue
         Remove-Item Env:TSUKI_VOICE_RUNTIME_V2 -ErrorAction SilentlyContinue
         Remove-Item Env:TSUKI_VOICE_API_CONTROLLER -ErrorAction SilentlyContinue
         Remove-Item Env:TSUKI_SEMANTIC_MEMORY_ENABLED -ErrorAction SilentlyContinue

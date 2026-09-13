@@ -1104,10 +1104,10 @@
                 </StackPanel>
             </Border>
             
-            <!-- ═══ Voice (OpenVoice V2) ═══ -->
+            <!-- ═══ Voice (Qwen3-TTS) ═══ -->
             <Border Style="{StaticResource CardBorder}">
                 <StackPanel>
-                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice (OpenVoice V2)"/>
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Voice (Qwen3-TTS)"/>
 
                     <StackPanel Margin="0,0,0,12">
                         <CheckBox Style="{StaticResource SettingsCheckBox}"
@@ -1117,17 +1117,17 @@
 
                     <StackPanel Margin="0,0,0,12">
                         <TextBlock Style="{StaticResource FieldLabel}" Text="TTS engine"/>
-                        <TextBlock Style="{StaticResource FieldHint}" Text="OpenVoice V2 CPU inference is the only configured TTS backend."/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="Qwen3-TTS 0.6B full-ICL CPU inference is the only configured TTS backend."/>
                     </StackPanel>
 
-                    <StackPanel x:Name="OpenVoiceTtsPanel" Margin="0,0,0,12">
-                        <TextBlock Style="{StaticResource FieldLabel}" Text="OpenVoice V2 URL"/>
-                        <TextBlock Style="{StaticResource FieldHint}" Text="Enter the protected OpenVoice API root (for example, http://127.0.0.1:8000)"/>
+                    <StackPanel x:Name="QwenTtsPanel" Margin="0,0,0,12">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Qwen3-TTS URL"/>
+                        <TextBlock Style="{StaticResource FieldHint}" Text="Enter the protected Qwen3-TTS API root (for example, http://127.0.0.1:8100)"/>
                         <TextBox Style="{StaticResource SettingsTextBox}"
-                                 Text="{Binding OpenVoiceUrl, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="OpenVoice V2 endpoint URL"/>
-                        <Button x:Name="TestOpenVoiceButton"
-                                Click="TestOpenVoice_Click"
+                                 Text="{Binding QwenTtsUrl, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Qwen3-TTS endpoint URL"/>
+                        <Button x:Name="TestQwenTtsButton"
+                                Click="TestQwenTts_Click"
                                 Style="{StaticResource SettingsButton}" 
                                 Content="Test Connection"
                                 Margin="0,8,0,0"

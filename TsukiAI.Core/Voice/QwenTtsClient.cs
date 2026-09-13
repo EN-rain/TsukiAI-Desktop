@@ -6,11 +6,11 @@ using TsukiAI.Core.Services;
 namespace TsukiAI.VoiceChat.Services;
 
 /// <summary>
-/// Client for the private OpenVoice V2 CPU service. The service owns the
-/// reference audio and cached speaker embedding; this client sends only text
-/// and a normalized language code.
+/// Client for the private Qwen3-TTS 0.6B CPU service. The service owns the
+/// reference audio and cached full-ICL voice prompt; this client sends text
+/// and an explicit target language only.
 /// </summary>
-public sealed class OpenVoiceTtsClient : ITtsClient
+public sealed class QwenTtsClient : ITtsClient
 {
     private const int MaxWavBytes = 16 * 1024 * 1024;
     private readonly HttpClient _http;
@@ -21,7 +21,7 @@ public sealed class OpenVoiceTtsClient : ITtsClient
     private DateTimeOffset _lastHealthyAt = DateTimeOffset.MinValue;
     private string? _lastHealthyBaseUrl;
 
-    public string Name => "OpenVoice V2";
+    public string Name => "Qwen3-TTS 0.6B Base (full ICL)";
 
     public string BaseUrl => GetConfiguration().BaseUrl;
 
@@ -42,7 +42,7 @@ public sealed class OpenVoiceTtsClient : ITtsClient
         }
     }
 
-    public OpenVoiceTtsClient(
+    public QwenTtsClient(
         string baseUrl,
         string? apiKey = null,
         HttpMessageHandler? handler = null,
@@ -58,7 +58,7 @@ public sealed class OpenVoiceTtsClient : ITtsClient
     {
     }
 
-    public OpenVoiceTtsClient(
+    public QwenTtsClient(
         Func<(string BaseUrl, string ApiKey)> configuration,
         HttpMessageHandler? handler = null,
         TimeSpan? timeout = null,
@@ -82,7 +82,7 @@ public sealed class OpenVoiceTtsClient : ITtsClient
         if (text.Length == 0)
             return Array.Empty<byte>();
 
-        var payload = new OpenVoiceTtsRequest(text, NormalizeLanguage(language));
+        var payload = new QwenTtsRequest(text, NormalizeLanguage(language));
         Exception? lastError = null;
 
         for (var attempt = 1; attempt <= _maxAttempts; attempt++)
@@ -117,14 +117,14 @@ public sealed class OpenVoiceTtsClient : ITtsClient
 
                 var body = await response.Content.ReadAsStringAsync(ct);
                 lastError = new HttpRequestException(
-                    $"OpenVoice returned {(int)response.StatusCode} {response.ReasonPhrase}: {Truncate(body)}");
+                    $"Qwen TTS returned {(int)response.StatusCode} {response.ReasonPhrase}: {Truncate(body)}");
                 retryableFailure = IsRetryable(response.StatusCode);
                 if (!retryableFailure || attempt == _maxAttempts)
                     throw lastError;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested && attempt < _maxAttempts)
             {
-                lastError = new TimeoutException("OpenVoice request timed out.");
+                lastError = new TimeoutException("Qwen TTS request timed out.");
             }
             catch (HttpRequestException ex) when (attempt < _maxAttempts && retryableFailure)
             {
@@ -133,14 +133,14 @@ public sealed class OpenVoiceTtsClient : ITtsClient
 
             var delay = TimeSpan.FromMilliseconds(350 * Math.Pow(2, attempt - 1));
             DevLog.WriteLine(
-                "[OpenVoice][Retry] attempt={0}, delay_ms={1:F0}, error={2}",
+                "[QwenTTS][Retry] attempt={0}, delay_ms={1:F0}, error={2}",
                 attempt,
                 delay.TotalMilliseconds,
                 lastError?.Message ?? "unknown");
             await Task.Delay(delay, ct);
         }
 
-        throw lastError ?? new HttpRequestException("OpenVoice request failed.");
+        throw lastError ?? new HttpRequestException("Qwen TTS request failed.");
     }
 
     public async Task<bool> IsAliveAsync(CancellationToken ct = default)
@@ -182,7 +182,7 @@ public sealed class OpenVoiceTtsClient : ITtsClient
             {
                 var body = await response.Content.ReadAsStringAsync(ct);
                 throw new HttpRequestException(
-                    $"OpenVoice health check returned {(int)response.StatusCode} {response.ReasonPhrase}: {Truncate(body)}");
+                    $"Qwen TTS health check returned {(int)response.StatusCode} {response.ReasonPhrase}: {Truncate(body)}");
             }
 
             _lastHealthyAt = DateTimeOffset.UtcNow;
@@ -223,7 +223,7 @@ public sealed class OpenVoiceTtsClient : ITtsClient
             wav[8] != (byte)'W' || wav[9] != (byte)'A' ||
             wav[10] != (byte)'V' || wav[11] != (byte)'E')
         {
-            throw new InvalidDataException("OpenVoice returned a non-WAV response.");
+            throw new InvalidDataException("Qwen TTS returned a non-WAV response.");
         }
     }
 
@@ -233,7 +233,7 @@ public sealed class OpenVoiceTtsClient : ITtsClient
         CancellationToken ct)
     {
         if (content.Headers.ContentLength.HasValue && content.Headers.ContentLength.Value > maxBytes)
-            throw new InvalidDataException($"OpenVoice response exceeds the {maxBytes} byte limit.");
+            throw new InvalidDataException($"Qwen TTS response exceeds the {maxBytes} byte limit.");
 
         await using var stream = await content.ReadAsStreamAsync(ct);
         using var output = new MemoryStream();
@@ -245,7 +245,7 @@ public sealed class OpenVoiceTtsClient : ITtsClient
                 break;
 
             if (output.Length + read > maxBytes)
-                throw new InvalidDataException($"OpenVoice response exceeds the {maxBytes} byte limit.");
+                throw new InvalidDataException($"Qwen TTS response exceeds the {maxBytes} byte limit.");
 
             output.Write(buffer, 0, read);
         }
@@ -256,16 +256,16 @@ public sealed class OpenVoiceTtsClient : ITtsClient
     private static string NormalizeLanguage(string language) =>
         (language ?? string.Empty).Trim().ToUpperInvariant() switch
         {
-            "JA" or "JP" or "JAPANESE" or "日本語" => "JA",
-            "EN" or "ENGLISH" or "英文" => "EN",
-            _ => throw new ArgumentException("OpenVoice language must be EN or JA.", nameof(language))
+            "JA" or "JP" or "JAPANESE" => "Japanese",
+            "EN" or "ENGLISH" => "English",
+            _ => throw new ArgumentException("Qwen TTS language must be EN or JA.", nameof(language))
         };
 
     private static string NormalizeBaseUrl(string baseUrl)
     {
         var value = (baseUrl ?? string.Empty).Trim().TrimEnd('/');
         if (value.Length == 0)
-            value = "http://127.0.0.1:8000";
+            value = "http://127.0.0.1:8100";
         if (!value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
             !value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
@@ -290,7 +290,7 @@ public sealed class OpenVoiceTtsClient : ITtsClient
     }
 }
 
-public sealed record OpenVoiceTtsRequest(string Text, string Language);
+public sealed record QwenTtsRequest(string Text, string Language);
 
 public static class TtsLanguageDetector
 {

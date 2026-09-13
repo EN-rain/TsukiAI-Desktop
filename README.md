@@ -21,7 +21,7 @@ TsukiAI is a .NET 8 + WPF desktop voice assistant with a local HTTP API, multi-p
 - WPF
 - ASP.NET Core minimal host (local API for bridge and tooling)
 - Node.js bridge for Discord voice I/O
-- OpenVoice V2 CPU service for English and Japanese character TTS
+- Qwen3-TTS 0.6B CPU service for full-ICL English and Japanese character TTS
 
 ## Repository Layout
 
@@ -75,20 +75,21 @@ fallback.
 dotnet run --project TsukiAI.VoiceChat/TsukiAI.VoiceChat.csproj
 ```
 
-For the Azure deployment, provision the private OpenVoice V2 service described
-in [voice/openvoice-api/README.md](voice/openvoice-api/README.md), then set
-`TSUKI_OPENVOICE_URL` and `TSUKI_OPENVOICE_API_KEY` in the root `.env` and run:
+For the Azure deployment, provision the private Qwen3-TTS service described
+in [voice/qwen3-tts/README.md](voice/qwen3-tts/README.md), then set
+`TSUKI_QWEN_TTS_URL` and `TSUKI_QWEN_TTS_API_KEY` in the root `.env` and run:
 
 ```bash
 docker compose up -d --build
 ```
 
-The OpenVoice reference audio is processed once on the VM into a cached speaker
-embedding. Runtime requests contain only text and language.
+The Japanese Tsuki reference is processed once on the VM into a cached full-ICL
+voice prompt. Runtime requests contain only text and target language; no
+training or fine-tuning is used.
 
 The Discord voice bridge can use the realtime path documented in
 `discord-voice-bridge/README.md`: Discord PCM -> AssemblyAI Streaming v3 ->
-TsukiAI LLM -> private OpenVoice V2 -> Discord playback. AssemblyAI is enabled
+TsukiAI LLM -> private Qwen3-TTS -> Discord playback. AssemblyAI is enabled
 only while the bot is connected and at least one human is in the voice channel;
 its external key file is rotated without committing secrets.
 
@@ -104,12 +105,12 @@ cd discord-voice-bridge && npm test
 cd ../web && npm run build
 ```
 
-The .NET test project covers the OpenVoice synthesis response contract.
+The .NET test project covers the Qwen3-TTS synthesis response contract.
 
 ## Discord Voice Bridge
 
-For the Azure OpenVoice deployment, see
-[voice/openvoice-api/README.md](voice/openvoice-api/README.md) and
+For the Azure Qwen3-TTS deployment, see
+[voice/qwen3-tts/README.md](voice/qwen3-tts/README.md) and
 [tasks/plan.md](tasks/plan.md).
 
 See [discord-voice-bridge/README.md](discord-voice-bridge/README.md) for bridge setup and `.env` keys.
@@ -123,5 +124,5 @@ See [discord-voice-bridge/README.md](discord-voice-bridge/README.md) for bridge 
   - verify bot permissions and voice channel IDs
   - verify `CSHARP_API_URL` in bridge `.env`
 - TTS/STT issues:
-  - verify the private OpenVoice `/health` endpoint and API key
+  - verify the private Qwen3-TTS `/health` endpoint and API key
   - validate local API is reachable on `http://localhost:5000`

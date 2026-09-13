@@ -9,7 +9,7 @@ Discord user speaks
   -> AssemblyAI v3 realtime WebSocket
   -> partial + final Turn events
   -> TsukiAI C# API (LLM)
-  -> private OpenVoice V2 CPU service
+  -> private Qwen3-TTS 0.6B full-ICL CPU service
   -> Discord bot playback
 ```
 
@@ -123,18 +123,17 @@ The bridge registers one grouped command. Members need **Manage Channels**:
 ```text
 /t join [channel_id]
 /t leave [channel_id]
-/t say destination:vc text:"Hello from Tsuki"
-/t say destination:c text:"Hello in the chat"
+/t say
 /t focus user_id:<user-id>
 /t unfocus user_id:<user-id>
 /t focuslist
 ```
 
-`destination:vc` speaks in the currently joined voice channel. `destination:c`
-sends a Discord voice message in the text channel where the command was used.
-Direct speech is limited to 280 characters and uses the C# TTS pipeline. The
-pipeline has one backend: the private OpenVoice V2 CPU service configured with
-`TSUKI_OPENVOICE_URL` and `TSUKI_OPENVOICE_API_KEY`.
+`/t say` opens a short text modal and sends the resulting Discord voice message
+directly to the text channel where the command was used. There is no destination
+selector. Direct speech is limited to 280 characters and uses the C# TTS
+pipeline. The pipeline has one backend: the private Qwen3-TTS 0.6B full-ICL
+CPU service configured with `TSUKI_QWEN_TTS_URL` and `TSUKI_QWEN_TTS_API_KEY`.
 
 ## Run
 

@@ -48,7 +48,7 @@ $secretKeys = @(
     "GeminiApiKey",
     "GitHubApiKey",
     "MistralApiKey",
-    "OpenVoiceApiKey",
+    "QwenTtsApiKey",
     "DeepLApiKey",
     "AssemblyAIApiKey",
     "DiscordBotToken"
@@ -84,7 +84,7 @@ foreach ($key in $stripped) {
         "GeminiApiKey"          { "TSUKI_GEMINI_API_KEY" }
         "GitHubApiKey"          { "TSUKI_GITHUB_API_KEY" }
         "MistralApiKey"         { "TSUKI_MISTRAL_API_KEY" }
-        "OpenVoiceApiKey"       { "TSUKI_OPENVOICE_API_KEY" }
+        "QwenTtsApiKey"         { "TSUKI_QWEN_TTS_API_KEY" }
         "DeepLApiKey"           { "TSUKI_DEEPL_API_KEY" }
         "AssemblyAIApiKey"      { "TSUKI_ASSEMBLYAI_API_KEY" }
         "DiscordBotToken"       { "TSUKI_DISCORD_BOT_TOKEN" }

@@ -38,36 +38,36 @@ public partial class SettingsWindow
 
     private void RadioTtsMode_Changed(object sender, RoutedEventArgs e)
     {
-        UpdateTtsPanelVisibility(TtsMode.OpenVoice);
+        UpdateTtsPanelVisibility(TtsMode.Qwen3Tts);
     }
 
     private void UpdateTtsPanelVisibility(TtsMode mode)
     {
-        if (OpenVoiceTtsPanel == null)
+        if (QwenTtsPanel == null)
         {
             return;
         }
 
-        OpenVoiceTtsPanel.Visibility = Visibility.Visible;
+        QwenTtsPanel.Visibility = Visibility.Visible;
     }
 
-    private async void TestOpenVoice_Click(object sender, RoutedEventArgs e)
+    private async void TestQwenTts_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not SettingsVm vm)
         {
             return;
         }
 
-        var url = NormalizeOpenVoiceUrl(vm.OpenVoiceUrl);
-        vm.OpenVoiceUrl = url;
+        var url = NormalizeQwenTtsUrl(vm.QwenTtsUrl);
+        vm.QwenTtsUrl = url;
         if (string.IsNullOrWhiteSpace(url))
         {
-            MessageBox.Show(this, "Please enter an OpenVoice V2 URL first.", "No URL", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "Please enter a Qwen3-TTS URL first.", "No URL", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        TestOpenVoiceButton.IsEnabled = false;
-        TestOpenVoiceButton.Content = "Testing...";
+        TestQwenTtsButton.IsEnabled = false;
+        TestQwenTtsButton.Content = "Testing...";
 
         try
         {
@@ -82,10 +82,10 @@ public partial class SettingsWindow
                     language = "EN"
                 })
             };
-            if (!string.IsNullOrWhiteSpace(runtimeSettings.OpenVoiceApiKey))
-                request.Headers.TryAddWithoutValidation("X-Api-Key", runtimeSettings.OpenVoiceApiKey);
+            if (!string.IsNullOrWhiteSpace(runtimeSettings.QwenTtsApiKey))
+                request.Headers.TryAddWithoutValidation("X-Api-Key", runtimeSettings.QwenTtsApiKey);
             request.Headers.TryAddWithoutValidation("X-Correlation-ID", Guid.NewGuid().ToString("N"));
-            using var synthResp = await OpenVoiceTestClient.SendAsync(
+            using var synthResp = await QwenTtsTestClient.SendAsync(
                 request,
                 System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
             var wavBytes = await synthResp.Content.ReadAsByteArrayAsync();
@@ -97,14 +97,14 @@ public partial class SettingsWindow
                 var synthBody = string.Empty;
                 try { synthBody = System.Text.Encoding.UTF8.GetString(wavBytes); } catch { }
                 var details = BuildRemoteTtsErrorDetails(url, synthResp.StatusCode, synthResp.ReasonPhrase, synthBody, "/tts");
-                MessageBox.Show(this, details, "OpenVoice Connection", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(this, details, "Qwen TTS Connection", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
             MessageBox.Show(
                 this,
-                $"Connection successful.\nOpenVoice V2 synthesis: OK ({wavBytes.Length} bytes)",
-                "OpenVoice Connection",
+                $"Connection successful.\nQwen3-TTS full-ICL synthesis: OK ({wavBytes.Length} bytes)",
+                "Qwen TTS Connection",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -114,8 +114,8 @@ public partial class SettingsWindow
         }
         finally
         {
-            TestOpenVoiceButton.IsEnabled = true;
-            TestOpenVoiceButton.Content = "Test Connection";
+            TestQwenTtsButton.IsEnabled = true;
+            TestQwenTtsButton.Content = "Test Connection";
         }
     }
 }

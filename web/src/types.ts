@@ -45,8 +45,8 @@ export interface WebSettings {
   };
   tts: {
     mode: string;
-    openvoice_url: string;
-    openvoice_configured: boolean;
+    qwen_tts_url: string;
+    qwen_tts_configured: boolean;
   };
   translation: {
     voice_translate_to_japanese: boolean;
