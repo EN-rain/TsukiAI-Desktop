@@ -87,6 +87,22 @@ The Japanese Tsuki reference is processed once on the VM into a cached full-ICL
 voice prompt. Runtime requests contain only text and target language; no
 training or fine-tuning is used.
 
+To fan a multi-sentence reply across three private Qwen/Colab workers, create
+an external file with mode `600` and set
+`TSUKI_QWEN_TTS_WORKERS_FILE`:
+
+```text
+A|https://worker-a.example|worker-a-api-key
+B|https://worker-b.example|worker-b-api-key
+C|https://worker-c.example|worker-c-api-key
+```
+
+Sentence 1 routes to A, sentence 2 to B, sentence 3 to C, then the sequence
+repeats. Each worker is serialized locally, failed workers are tried in the
+next available order, and completed WAV segments are reassembled in sentence
+order. If the worker file is absent, the existing single
+`TSUKI_QWEN_TTS_URL` path remains active.
+
 The Discord voice bridge can use the realtime path documented in
 `discord-voice-bridge/README.md`: Discord PCM -> AssemblyAI Streaming v3 ->
 TsukiAI LLM -> private Qwen3-TTS -> Discord playback. AssemblyAI is enabled

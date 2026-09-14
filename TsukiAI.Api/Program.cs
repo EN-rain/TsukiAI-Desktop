@@ -123,11 +123,22 @@ else
         !string.IsNullOrWhiteSpace(chromaUrl));
 }
 
-builder.Services.AddSingleton<ITtsClient>(sp => new QwenTtsClient(() =>
+var qwenWorkers = QwenTtsWorkerConfiguration.LoadFromFileOrValue(
+    EnvConfiguration.Get("TSUKI_QWEN_TTS_WORKERS_FILE"),
+    EnvConfiguration.Get("TSUKI_QWEN_TTS_WORKERS"));
+if (qwenWorkers.Count > 0)
 {
-    var current = EnvConfiguration.ApplyToSettings(SettingsService.Load());
-    return (current.QwenTtsUrl, current.QwenTtsApiKey);
-}));
+    builder.Services.AddSingleton<ITtsClient>(_ => new RoundRobinQwenTtsClient(qwenWorkers));
+    DevLog.WriteLine("Api: Qwen TTS sentence worker pool loaded ({0} workers)", qwenWorkers.Count);
+}
+else
+{
+    builder.Services.AddSingleton<ITtsClient>(_ => new QwenTtsClient(() =>
+    {
+        var current = EnvConfiguration.ApplyToSettings(SettingsService.Load());
+        return (current.QwenTtsUrl, current.QwenTtsApiKey);
+    }));
+}
 builder.Services.AddSingleton<TranslationService>();
 builder.Services.AddSingleton<AudioProcessingService>();
 

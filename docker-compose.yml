@@ -37,12 +37,16 @@ services:
       # reaches it through the host gateway. Fail fast if its API key is absent.
       - TSUKI_QWEN_TTS_URL=${TSUKI_QWEN_TTS_URL:-http://host.docker.internal:8100}
       - TSUKI_QWEN_TTS_API_KEY=${TSUKI_QWEN_TTS_API_KEY:?Set TSUKI_QWEN_TTS_API_KEY in .env}
+      # Optional sentence-level worker pool. Set this to the container path
+      # /run/secrets/qwen-workers when QWEN_TTS_WORKERS_HOST_PATH is configured.
+      - TSUKI_QWEN_TTS_WORKERS_FILE=${TSUKI_QWEN_TTS_WORKERS_FILE:-}
       - TSUKI_SEMANTIC_MEMORY_ENABLED=true
       # API-side Groq STT uses the same read-only key pool as the bridge.
       - TSUKI_GROQ_API_KEYS_FILE=/run/secrets/tsuki-groq-keys
     volumes:
       - tsuki-data:/data
       - ${GROQ_KEYS_HOST_PATH:-./discord-voice-bridge/groq.keys}:/run/secrets/tsuki-groq-keys:ro
+      - ${QWEN_TTS_WORKERS_HOST_PATH:-./qwen-workers.env}:/run/secrets/qwen-workers:ro
     depends_on:
       - chromadb
 

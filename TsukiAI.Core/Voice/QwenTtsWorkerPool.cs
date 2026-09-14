@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Net;
 using System.Text;
 using TsukiAI.Core.Services;
 
@@ -375,9 +374,10 @@ public static class QwenTtsWavConcatenator
 
         var parsed = segments.Select(Parse).ToArray();
         var first = parsed[0].Format;
-        var dataLength = parsed.Sum(segment => segment.Data.Length);
-        if (dataLength > MaxCombinedWavBytes - 44)
+        var dataLengthLong = parsed.Sum(segment => (long)segment.Data.Length);
+        if (dataLengthLong > MaxCombinedWavBytes - 44 || dataLengthLong > int.MaxValue - 44)
             throw new InvalidDataException("Combined Qwen TTS audio exceeds the size limit.");
+        var dataLength = (int)dataLengthLong;
 
         foreach (var segment in parsed.Skip(1))
         {
@@ -450,7 +450,8 @@ public static class QwenTtsWavConcatenator
         }
 
         if (format is null || data is null || format.Value.AudioFormat != 1 ||
-            format.Value.Channels == 0 || format.Value.BitsPerSample != 16 || data.Length == 0)
+            format.Value.Channels != 1 || format.Value.SampleRate != 24000 ||
+            format.Value.BitsPerSample != 16 || data.Length == 0)
             throw new InvalidDataException("Qwen TTS returned unsupported WAV audio.");
 
         return new ParsedWav(format.Value, data);

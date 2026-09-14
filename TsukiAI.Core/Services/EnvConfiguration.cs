@@ -30,6 +30,8 @@ public static class EnvConfiguration
         "TSUKI_MISTRAL_API_KEY",
         "TSUKI_QWEN_TTS_URL",
         "TSUKI_QWEN_TTS_API_KEY",
+        "TSUKI_QWEN_TTS_WORKERS_FILE",
+        "TSUKI_QWEN_TTS_WORKERS",
         "TSUKI_MODEL_NAME",
         "TSUKI_USE_DEEPL_TRANSLATE",
         "TSUKI_USE_DEEPL_FREE_API",
@@ -241,6 +243,11 @@ public static class EnvConfiguration
         if (string.IsNullOrWhiteSpace(value))
         {
             return "Not set";
+        }
+
+        if (key.Equals("TSUKI_QWEN_TTS_WORKERS", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Configured (redacted)";
         }
 
         var sensitive = key.Contains("TOKEN", StringComparison.OrdinalIgnoreCase)
