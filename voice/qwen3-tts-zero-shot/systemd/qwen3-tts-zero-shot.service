@@ -1,0 +1,26 @@
+[Unit]
+Description=Qwen3-TTS Base vLLM-Omni inference server (tsukis-bedroom)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qwen
+Group=qwen
+WorkingDirectory=/opt/tsuki-qwen-zero-shot/vllm-omni
+EnvironmentFile=/etc/tsukis-bedroom/qwen-zero-shot.env
+Environment=HF_HOME=/opt/tsuki-qwen-zero-shot/huggingface
+Environment=TOKENIZERS_PARALLELISM=false
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/tsuki-qwen-zero-shot/venv/bin/vllm serve Qwen/Qwen3-TTS-12Hz-0.6B-Base --deploy-config /opt/tsuki-qwen-zero-shot/vllm-omni/vllm_omni/deploy/qwen3_tts_ibm.yaml --omni --host 127.0.0.1 --port 8091 --trust-remote-code
+Restart=always
+RestartSec=10
+LimitNOFILE=65535
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/tsuki-qwen-zero-shot/huggingface /opt/tsuki-qwen-zero-shot/voices
+
+[Install]
+WantedBy=multi-user.target

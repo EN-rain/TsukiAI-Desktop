@@ -33,9 +33,9 @@ services:
       # missing instead of starting an unreachable localhost-only container.
       - TSUKI_WEB_PASSWORD=${TSUKI_WEB_PASSWORD:?Set TSUKI_WEB_PASSWORD in .env}
       - TSUKI_API_KEY=${TSUKI_API_KEY:?Set TSUKI_API_KEY in .env}
-      # Qwen3-TTS runs privately on the Azure VM host; the API container
-      # reaches it through the host gateway. Fail fast if its API key is absent.
-      - TSUKI_QWEN_TTS_URL=${TSUKI_QWEN_TTS_URL:-http://host.docker.internal:8100}
+      # Qwen3-TTS runs privately on IBM; the Azure API/bridge reaches it through
+      # the configured private/restricted endpoint. Fail fast if its API key is absent.
+      - TSUKI_QWEN_TTS_URL=${TSUKI_QWEN_TTS_URL:?Set TSUKI_QWEN_TTS_URL in .env}
       - TSUKI_QWEN_TTS_API_KEY=${TSUKI_QWEN_TTS_API_KEY:?Set TSUKI_QWEN_TTS_API_KEY in .env}
       # Optional sentence-level worker pool. Set this to the container path
       # /run/secrets/qwen-workers when QWEN_TTS_WORKERS_HOST_PATH is configured.

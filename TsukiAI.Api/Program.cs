@@ -126,6 +126,7 @@ else
 var qwenWorkers = QwenTtsWorkerConfiguration.LoadFromFileOrValue(
     EnvConfiguration.Get("TSUKI_QWEN_TTS_WORKERS_FILE"),
     EnvConfiguration.Get("TSUKI_QWEN_TTS_WORKERS"));
+var qwenTtsExpectedMode = EnvConfiguration.Get("TSUKI_QWEN_TTS_EXPECTED_MODE", "trained-custom");
 if (qwenWorkers.Count > 0)
 {
     builder.Services.AddSingleton<ITtsClient>(_ => new RoundRobinQwenTtsClient(qwenWorkers));
@@ -137,7 +138,7 @@ else
     {
         var current = EnvConfiguration.ApplyToSettings(SettingsService.Load());
         return (current.QwenTtsUrl, current.QwenTtsApiKey);
-    }));
+    }, expectedMode: qwenTtsExpectedMode));
 }
 builder.Services.AddSingleton<TranslationService>();
 builder.Services.AddSingleton<AudioProcessingService>();
@@ -519,9 +520,11 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
                 ttsText = (cut > 0 ? ttsText[..cut] : ttsText[..contentLimit]) + suffix;
             }
 
-            // The selected TTS provider owns its voice/reference configuration;
-            // the request carries only generated text and detected language.
-            var language = TtsLanguageDetector.Detect(ttsText);
+            // The trained custom worker owns the speaker identity. Language is
+            // selected by Tsuki's explicit pronunciation policy.
+            var language = TsukiPronunciationPolicy.Resolve(
+                ttsText,
+                EnvConfiguration.Get("TSUKI_QWEN_ENGLISH_LANGUAGE", "English"));
             var wav = await ttsClient.SynthesizeWavAsync(ttsText, language, ctx.RequestAborted);
             engineUsed = ttsClient.Name;
 

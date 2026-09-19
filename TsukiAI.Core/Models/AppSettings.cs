@@ -60,8 +60,8 @@ public sealed record AppSettings(
     string GitHubApiKey = "",
     string MistralApiKey = "",
     
-    // Qwen3-TTS is the only TTS backend. The service owns the reference audio
-    // and cached full-ICL voice prompt; the application sends text only.
+    // Qwen3-TTS is the only TTS backend. The service owns the approved trained
+    // Tsukihime checkpoint; the application sends text and policy language only.
     bool VoiceEnabled = false,
     TtsMode TtsMode = TtsMode.Qwen3Tts,
     string QwenTtsUrl = "http://127.0.0.1:8100",

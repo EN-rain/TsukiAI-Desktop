@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "notes": [
+    "Restart the Qwen worker between variants; PyTorch inter-op thread count is process-global and must be set before inference.",
+    "Do not change sampling parameters between variants.",
+    "Gate 2 token variants are evaluated after selecting the safest Gate 1 runtime configuration.",
+    "Gate 1/2 evidence requires a verified trained-custom artifact; unverified runs are rehearsal evidence only."
+  ],
+  "variants": [
+    {
+      "id": "gate1-A",
+      "gate": 1,
+      "description": "FP32 eager, 4 intra-op threads, reference inter-op policy.",
+      "env": {
+        "QWEN_TTS_ATTN_IMPLEMENTATION": "eager",
+        "QWEN_TTS_INTRA_OP_THREADS": "4",
+        "QWEN_TTS_INTER_OP_THREADS": "4",
+        "QWEN_TTS_MAX_NEW_TOKENS": "2048"
+      },
+      "expected_runtime": {
+        "precision": "float32",
+        "attention_implementation": "eager",
+        "intra_op_threads": 4,
+        "inter_op_threads": 4,
+        "max_new_tokens": 2048,
+        "sampling_profile": "trained-custom-v2"
+      }
+    },
+    {
+      "id": "gate1-B",
+      "gate": 1,
+      "description": "FP32 SDPA, 4 intra-op threads, 1 inter-op thread.",
+      "env": {
+        "QWEN_TTS_ATTN_IMPLEMENTATION": "sdpa",
+        "QWEN_TTS_INTRA_OP_THREADS": "4",
+        "QWEN_TTS_INTER_OP_THREADS": "1",
+        "QWEN_TTS_MAX_NEW_TOKENS": "2048"
+      },
+      "expected_runtime": {
+        "precision": "float32",
+        "attention_implementation": "sdpa",
+        "intra_op_threads": 4,
+        "inter_op_threads": 1,
+        "max_new_tokens": 2048,
+        "sampling_profile": "trained-custom-v2"
+      }
+    },
+    {
+      "id": "gate1-C",
+      "gate": 1,
+      "description": "FP32 SDPA, 3 intra-op threads, 1 inter-op thread.",
+      "env": {
+        "QWEN_TTS_ATTN_IMPLEMENTATION": "sdpa",
+        "QWEN_TTS_INTRA_OP_THREADS": "3",
+        "QWEN_TTS_INTER_OP_THREADS": "1",
+        "QWEN_TTS_MAX_NEW_TOKENS": "2048"
+      },
+      "expected_runtime": {
+        "precision": "float32",
+        "attention_implementation": "sdpa",
+        "intra_op_threads": 3,
+        "inter_op_threads": 1,
+        "max_new_tokens": 2048,
+        "sampling_profile": "trained-custom-v2"
+      }
+    },
+    {
+      "id": "gate1-D",
+      "gate": 1,
+      "description": "FP32 SDPA, 2 intra-op threads, 1 inter-op thread.",
+      "env": {
+        "QWEN_TTS_ATTN_IMPLEMENTATION": "sdpa",
+        "QWEN_TTS_INTRA_OP_THREADS": "2",
+        "QWEN_TTS_INTER_OP_THREADS": "1",
+        "QWEN_TTS_MAX_NEW_TOKENS": "2048"
+      },
+      "expected_runtime": {
+        "precision": "float32",
+        "attention_implementation": "sdpa",
+        "intra_op_threads": 2,
+        "inter_op_threads": 1,
+        "max_new_tokens": 2048,
+        "sampling_profile": "trained-custom-v2"
+      }
+    },
+    {
+      "id": "gate1-E",
+      "gate": 1,
+      "description": "FP32 eager, 4 intra-op threads, 1 inter-op thread.",
+      "env": {
+        "QWEN_TTS_ATTN_IMPLEMENTATION": "eager",
+        "QWEN_TTS_INTRA_OP_THREADS": "4",
+        "QWEN_TTS_INTER_OP_THREADS": "1",
+        "QWEN_TTS_MAX_NEW_TOKENS": "2048"
+      },
+      "expected_runtime": {
+        "precision": "float32",
+        "attention_implementation": "eager",
+        "intra_op_threads": 4,
+        "inter_op_threads": 1,
+        "max_new_tokens": 2048,
+        "sampling_profile": "trained-custom-v2"
+      }
+    },
+    {
+      "id": "gate2-2048",
+      "gate": 2,
+      "description": "Reference token ceiling on the selected Gate 1 runtime.",
+      "env": {"QWEN_TTS_MAX_NEW_TOKENS": "2048"},
+      "expected_runtime": {"max_new_tokens": 2048, "sampling_profile": "trained-custom-v2"}
+    },
+    {
+      "id": "gate2-1536",
+      "gate": 2,
+      "description": "1536 token ceiling on the selected Gate 1 runtime.",
+      "env": {"QWEN_TTS_MAX_NEW_TOKENS": "1536"},
+      "expected_runtime": {"max_new_tokens": 1536, "sampling_profile": "trained-custom-v2"}
+    },
+    {
+      "id": "gate2-1024",
+      "gate": 2,
+      "description": "1024 token ceiling on the selected Gate 1 runtime.",
+      "env": {"QWEN_TTS_MAX_NEW_TOKENS": "1024"},
+      "expected_runtime": {"max_new_tokens": 1024, "sampling_profile": "trained-custom-v2"}
+    },
+    {
+      "id": "gate2-768",
+      "gate": 2,
+      "description": "768 token ceiling on the selected Gate 1 runtime.",
+      "env": {"QWEN_TTS_MAX_NEW_TOKENS": "768"},
+      "expected_runtime": {"max_new_tokens": 768, "sampling_profile": "trained-custom-v2"}
+    },
+    {
+      "id": "gate2-512",
+      "gate": 2,
+      "description": "512 token ceiling on the selected Gate 1 runtime.",
+      "env": {"QWEN_TTS_MAX_NEW_TOKENS": "512"},
+      "expected_runtime": {"max_new_tokens": 512, "sampling_profile": "trained-custom-v2"}
+    }
+  ]
+}

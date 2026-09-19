@@ -21,7 +21,7 @@ TsukiAI is a .NET 8 + WPF desktop voice assistant with a local HTTP API, multi-p
 - WPF
 - ASP.NET Core minimal host (local API for bridge and tooling)
 - Node.js bridge for Discord voice I/O
-- Qwen3-TTS 0.6B CPU service for full-ICL English and Japanese character TTS
+- Qwen3-TTS 0.6B CPU service for the trained Tsukihime English/Japanese voice
 
 ## Repository Layout
 
@@ -75,17 +75,18 @@ fallback.
 dotnet run --project TsukiAI.VoiceChat/TsukiAI.VoiceChat.csproj
 ```
 
-For the Azure deployment, provision the private Qwen3-TTS service described
-in [voice/qwen3-tts/README.md](voice/qwen3-tts/README.md), then set
+For the Azure bridge/API deployment, provision the private IBM Qwen3-TTS
+service described in [voice/qwen3-tts/README.md](voice/qwen3-tts/README.md), then set
 `TSUKI_QWEN_TTS_URL` and `TSUKI_QWEN_TTS_API_KEY` in the root `.env` and run:
 
 ```bash
 docker compose up -d --build
 ```
 
-The Japanese Tsuki reference is processed once on the VM into a cached full-ICL
-voice prompt. Runtime requests contain only text and target language; no
-training or fine-tuning is used.
+The IBM service loads the approved trained Tsukihime custom checkpoint directly and
+runtime requests contain only text plus the explicit pronunciation policy.
+Reference-audio/full-ICL cloning is not part of the production path. The
+checkpoint manifest, approval state, and hashes must pass startup validation.
 
 To fan a multi-sentence reply across three private Qwen/Colab workers, create
 an external file with mode `600` and set
@@ -125,7 +126,7 @@ The .NET test project covers the Qwen3-TTS synthesis response contract.
 
 ## Discord Voice Bridge
 
-For the Azure Qwen3-TTS deployment, see
+For the Azure bridge/API plus IBM Qwen3-TTS deployment, see
 [voice/qwen3-tts/README.md](voice/qwen3-tts/README.md) and
 [tasks/plan.md](tasks/plan.md).
 

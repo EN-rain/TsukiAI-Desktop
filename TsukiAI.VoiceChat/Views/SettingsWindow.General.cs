@@ -103,7 +103,7 @@ public partial class SettingsWindow
 
             MessageBox.Show(
                 this,
-                $"Connection successful.\nQwen3-TTS full-ICL synthesis: OK ({wavBytes.Length} bytes)",
+                $"Connection successful.\nTrained Tsukihime Qwen3-TTS synthesis: OK ({wavBytes.Length} bytes)",
                 "Qwen TTS Connection",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);

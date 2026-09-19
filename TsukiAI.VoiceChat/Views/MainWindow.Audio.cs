@@ -115,7 +115,12 @@ public partial class MainWindow
     private async Task<byte[]> SynthesizePreviewWavAsync(string text, CancellationToken ct)
     {
         using var qwenTts = new QwenTtsClient(_settings.QwenTtsUrl, _settings.QwenTtsApiKey);
-        return await qwenTts.SynthesizeWavAsync(text, TtsLanguageDetector.Detect(text), ct);
+        return await qwenTts.SynthesizeWavAsync(
+            text,
+            TsukiPronunciationPolicy.Resolve(
+                text,
+                EnvConfiguration.Get("TSUKI_QWEN_ENGLISH_LANGUAGE", "English")),
+            ct);
     }
 
     private void LoadVoiceReceptionSettings()

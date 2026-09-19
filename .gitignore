@@ -63,17 +63,36 @@ bld/
 *.nuget.props
 *.nuget.targets
 
-# Node modules (for discord-voice-bridge)
-node_modules/
-package-lock.json
-discord-voice-bridge/*.keys
+# Node dependencies, generated web builds, and local caches
+**/node_modules/
+**/.next/
+**/.vercel/
+**/dist/
+**/coverage/
+**/.turbo/
+**/.cache/
+**/*.tsbuildinfo
+*.keys
 
-# Environment files
+# Keep package-lock.json files tracked for reproducible npm installs.
+
+# Environment files and local credentials
 .env
 .env.local
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Python cache (for semantic memory scripts)
 __pycache__/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
 *.py[cod]
 *$py.class
 *.so
@@ -104,3 +123,26 @@ screenshots/
 /models/
 .zcode/
 TsukiAI.Api/wwwroot/
+
+# Generated model/training/deployment outputs and duplicate working copies
+/artifacts/
+/.kaggle-current-src/
+**/evidence/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.gguf
+*.onnx
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.zip
+*.tar
+*.tar.gz
+**/.ipynb_checkpoints/
+
+# Windows/device artefacts
+/NUL

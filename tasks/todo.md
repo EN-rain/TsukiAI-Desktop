@@ -1,5 +1,8 @@
 # Qwen3-TTS 0.6B CPU Deployment Tasks
 
+> **HISTORICAL / SUPERSEDED:** The unchecked Base/full-ICL tasks below are not
+> an active deployment checklist. Use `voice/qwen3-tts/TRAINED_CUSTOM_VOICE_PRODUCTION_FIX_PLAN.md`.
+
 - [x] Add the isolated Qwen3-TTS full-ICL API and pure validation tests.
 - [x] Wire the .NET API, desktop app, web settings, compose, and bridge docs to
       the Qwen contract.

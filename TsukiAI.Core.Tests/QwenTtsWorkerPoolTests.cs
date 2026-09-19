@@ -181,7 +181,26 @@ public sealed class QwenTtsWorkerPoolTests
                     ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
                     : new HttpResponseMessage(HttpStatusCode.OK)
                     {
-                        Content = new StringContent("{\"status\":\"ready\"}")
+                        Content = new StringContent("""
+                            {
+                              "status": "ready",
+                              "mode": "trained-custom",
+                              "speaker": "tsukihime",
+                              "model": "/opt/tsuki/checkpoint-epoch-1",
+                              "checkpoint_id": "tsuki-test-checkpoint",
+                              "deployment_stage": "production",
+                              "approval_status": "APPROVED_FOR_PRODUCTION",
+                              "reference_required": false,
+                              "runtime_lora_loaded": false,
+                              "artifact_tree_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                              "conditioning": {
+                                "reference_required": false,
+                                "reference_sha256": null,
+                                "x_vector_only_mode": null
+                              }
+                            }
+                            """)
                     };
             }
 

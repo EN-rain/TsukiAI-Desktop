@@ -1,5 +1,5 @@
 [Unit]
-Description=TsukiAI Qwen3-TTS 0.6B CPU service
+Description=TsukiAI trained Tsukihime Qwen3-TTS custom voice service
 After=network-online.target
 Wants=network-online.target
 

@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 
-SUPPORTED_LANGUAGES = {"english": "English", "en": "English", "japanese": "Japanese", "ja": "Japanese", "jp": "Japanese"}
+SUPPORTED_LANGUAGES = {
+    "auto": "Auto",
+    "english": "English",
+    "en": "English",
+    "japanese": "Japanese",
+    "ja": "Japanese",
+    "jp": "Japanese",
+}
 
 
 def normalize_language(value: str | None) -> str:
@@ -11,7 +18,7 @@ def normalize_language(value: str | None) -> str:
     try:
         return SUPPORTED_LANGUAGES[normalized]
     except KeyError as exc:
-        raise ValueError("language must be English or Japanese") from exc
+        raise ValueError("language must be Auto, English, or Japanese") from exc
 
 
 def validate_text(value: str | None, max_chars: int) -> str:

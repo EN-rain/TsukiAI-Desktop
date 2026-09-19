@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tsukiai.local/schemas/qwen-tts-benchmark-result.schema.json",
+  "title": "TsukiAI Qwen TTS benchmark result row",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "timestamp",
+    "run_id",
+    "corpus_version",
+    "host",
+    "cloud",
+    "region",
+    "vm_sku",
+    "cpu_model",
+    "backend",
+    "backend_version",
+    "checkpoint_id",
+    "evidence_scope",
+    "gate0_qualified",
+    "gate0_attestation",
+    "variant_id",
+    "precision_quantization",
+    "attention_implementation",
+    "intra_op_threads",
+    "inter_op_threads",
+    "max_new_tokens",
+    "sampling_profile",
+    "model_load_seconds",
+    "idle_rss_mb",
+    "text_id",
+    "corpus_bucket",
+    "language",
+    "iteration",
+    "character_count",
+    "word_count",
+    "generation_seconds",
+    "request_seconds",
+    "audio_duration_seconds",
+    "rtf",
+    "ttfa_seconds",
+    "peak_rss_mb",
+    "swap_mb",
+    "cpu_average_pct",
+    "cpu_peak_pct",
+    "cache_state",
+    "cache_miss_mode",
+    "evidence_valid",
+    "status",
+    "http_status",
+    "quality_result",
+    "audio_path",
+    "evidence_note",
+    "error"
+  ],
+  "properties": {
+    "timestamp": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "corpus_version": {
+      "type": "string"
+    },
+    "host": {
+      "type": "string"
+    },
+    "cloud": {
+      "type": "string"
+    },
+    "region": {
+      "type": "string"
+    },
+    "vm_sku": {
+      "type": "string"
+    },
+    "cpu_model": {
+      "type": "string"
+    },
+    "backend": {
+      "type": "string"
+    },
+    "backend_version": {
+      "type": "string"
+    },
+    "checkpoint_id": {
+      "type": "string"
+    },
+    "evidence_scope": {
+      "type": "string",
+      "enum": [
+        "trained_custom_rehearsal",
+        "trained_custom_verified_identity"
+      ]
+    },
+    "gate0_qualified": {
+      "type": "boolean"
+    },
+    "gate0_attestation": {
+      "type": "string"
+    },
+    "variant_id": {
+      "type": "string"
+    },
+    "precision_quantization": {
+      "type": "string"
+    },
+    "attention_implementation": {
+      "type": "string"
+    },
+    "intra_op_threads": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "inter_op_threads": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "max_new_tokens": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "sampling_profile": {
+      "type": "string"
+    },
+    "model_load_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "idle_rss_mb": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "text_id": {
+      "type": "string"
+    },
+    "corpus_bucket": {
+      "type": "string"
+    },
+    "language": {
+      "type": "string"
+    },
+    "iteration": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "character_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "word_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "generation_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "request_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "audio_duration_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "rtf": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "ttfa_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "peak_rss_mb": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "swap_mb": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "cpu_average_pct": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "cpu_peak_pct": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "cache_state": {
+      "type": "string"
+    },
+    "cache_miss_mode": {
+      "type": "string",
+      "enum": [
+        "observe",
+        "force-miss",
+        "direct-inference"
+      ]
+    },
+    "evidence_valid": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "success",
+        "failure"
+      ]
+    },
+    "http_status": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "quality_result": {
+      "type": "string"
+    },
+    "audio_path": {
+      "type": "string"
+    },
+    "evidence_note": {
+      "type": "string"
+    },
+    "error": {
+      "type": "string"
+    }
+  }
+}

@@ -219,7 +219,7 @@ public sealed class RoundRobinQwenTtsClient : ITtsClient
             .ToArray();
     }
 
-    public string Name => $"Qwen3-TTS 0.6B Base (full ICL, {_workers.Length}-worker sentence pool)";
+    public string Name => $"Qwen3-TTS 0.6B trained Tsukihime custom voice ({_workers.Length}-worker sentence pool)";
 
     public bool IsConfigured => _workers.Any(worker => worker.Client.IsConfigured);
 

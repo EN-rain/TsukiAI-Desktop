@@ -1,0 +1,15 @@
+{
+  "english": {
+    "path": "C:/Users/LENOVO/Downloads/goodoutputtts.ogg",
+    "sha256": "62465ca6357c3bbf7bff7d5f83d5f153407fe380493fef6e8e21977d1f670b82",
+    "transcript_sha256": "b026ea1217e757f10ec195689c8eca96e680c089d9c33092672a7fe28fadef60",
+    "transcript": "This is the three sentence Azure and the Colab voice test. The custom domain is carrying the request to Colab. The Discord bridge is sending the result as a real voice message."
+  },
+  "japanese": {
+    "path": "C:/Users/LENOVO/Downloads/tsuki_25s_clip.mp3",
+    "sha256": "ce93bb53f197f0683d46ab4ad240e3d434ef6e2b2340190be98dfe382a0f6530",
+    "transcript_sha256": "bd3e849d943b80e75f62243c85c3d75dabe2716c2d1b12535b39960d9406949e",
+    "transcript_file": "reference/tsuki_ref_text.txt"
+  },
+  "interpretation": "The Japanese MP3 and transcript are the explicit full-ICL reference. The listed OGG files are prohibited from training, reference conditioning, and style conditioning."
+}

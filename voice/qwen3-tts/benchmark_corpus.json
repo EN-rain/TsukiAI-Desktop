@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "description": "Deterministic TsukiAI Qwen3-TTS benchmark corpus for Gates 1, 2, 18, and 19.",
+  "rules": {
+    "cache": "Call the private Qwen worker directly so every request is an inference request.",
+    "sampling": "Do not change production sampling parameters between variants.",
+    "text_counts": {
+      "very_short": 10,
+      "one_sentence": 10,
+      "two_sentence": 10,
+      "three_sentence": 10,
+      "long_detail": 5,
+      "japanese": 5,
+      "mixed_language": 5
+    }
+  },
+  "items": [
+    {"id":"vs-01","category":"very_short","language":"English","text":"Good morning."},
+    {"id":"vs-02","category":"very_short","language":"English","text":"I'm right here."},
+    {"id":"vs-03","category":"very_short","language":"English","text":"That sounds nice."},
+    {"id":"vs-04","category":"very_short","language":"English","text":"Give me a second."},
+    {"id":"vs-05","category":"very_short","language":"English","text":"We can do that."},
+    {"id":"vs-06","category":"very_short","language":"English","text":"Are you okay?"},
+    {"id":"vs-07","category":"very_short","language":"English","text":"I remember."},
+    {"id":"vs-08","category":"very_short","language":"English","text":"Let's keep going."},
+    {"id":"vs-09","category":"very_short","language":"English","text":"That was close."},
+    {"id":"vs-10","category":"very_short","language":"English","text":"Tell me more."},
+
+    {"id":"os-01","category":"one_sentence","language":"English","text":"I can stay with you while you finish the last part."},
+    {"id":"os-02","category":"one_sentence","language":"English","text":"The rain is getting heavier, so bring an umbrella before you leave."},
+    {"id":"os-03","category":"one_sentence","language":"English","text":"You sounded tired earlier, and I hope you get some rest tonight."},
+    {"id":"os-04","category":"one_sentence","language":"English","text":"Let's check the plan once more before we change anything important."},
+    {"id":"os-05","category":"one_sentence","language":"English","text":"I think the second option fits what you described a little better."},
+    {"id":"os-06","category":"one_sentence","language":"English","text":"Your package should arrive tomorrow if the delivery estimate stays the same."},
+    {"id":"os-07","category":"one_sentence","language":"English","text":"Please save the file first, because I do not want you to lose your progress."},
+    {"id":"os-08","category":"one_sentence","language":"English","text":"That joke was terrible, but it still made me laugh."},
+    {"id":"os-09","category":"one_sentence","language":"English","text":"I can explain the difference in a simpler way if that would help."},
+    {"id":"os-10","category":"one_sentence","language":"English","text":"The quiet part at the end makes the whole song feel more emotional."},
+
+    {"id":"ts-01","category":"two_sentence","language":"English","text":"I found the setting you meant. It is under the audio section near the bottom."},
+    {"id":"ts-02","category":"two_sentence","language":"English","text":"The first route is faster right now. The second route is usually less crowded after dinner."},
+    {"id":"ts-03","category":"two_sentence","language":"English","text":"You do not need to decide immediately. We can compare the choices again after you sleep on it."},
+    {"id":"ts-04","category":"two_sentence","language":"English","text":"I heard the notification too. It sounded like the same alert you received earlier."},
+    {"id":"ts-05","category":"two_sentence","language":"English","text":"The download finished successfully. I would verify the checksum before installing it."},
+    {"id":"ts-06","category":"two_sentence","language":"English","text":"Your explanation makes sense to me. The missing detail is how the service behaves after a restart."},
+    {"id":"ts-07","category":"two_sentence","language":"English","text":"The room sounds quieter now. I can hear the fan, but the background noise is much lower."},
+    {"id":"ts-08","category":"two_sentence","language":"English","text":"I like that idea. It keeps the response short without making it sound abrupt."},
+    {"id":"ts-09","category":"two_sentence","language":"English","text":"We have enough time for one more test. After that, I would keep the best stable result."},
+    {"id":"ts-10","category":"two_sentence","language":"English","text":"The number is forty-two point seven five. Please read it back once so we know it was heard correctly."},
+
+    {"id":"3s-01","category":"three_sentence","language":"English","text":"I checked the notes from earlier. The cache path is already working. The next useful test is uncached generation speed."},
+    {"id":"3s-02","category":"three_sentence","language":"English","text":"The first request may be slower after startup. Let the model warm up once. Then record the repeated runs separately."},
+    {"id":"3s-03","category":"three_sentence","language":"English","text":"I would keep the current fallback available. Try the faster configuration in isolation. Promote it only after the quality check passes."},
+    {"id":"3s-04","category":"three_sentence","language":"English","text":"The sentence ended clearly this time. I did not hear clipping or a missing final consonant. Keep that sample for comparison."},
+    {"id":"3s-05","category":"three_sentence","language":"English","text":"CPU usage rose during synthesis. Memory stayed steady. That makes the thread experiment more interesting than a memory reduction right now."},
+    {"id":"3s-06","category":"three_sentence","language":"English","text":"The answer is short enough for realtime speech. It still sounds natural when spoken. That is the balance I want to preserve."},
+    {"id":"3s-07","category":"three_sentence","language":"English","text":"Please say the name Akari exactly once. Then say version two point one. Finish with a normal question so we can hear the intonation."},
+    {"id":"3s-08","category":"three_sentence","language":"English","text":"The weather changed quickly today. It was sunny before lunch. Now the wind sounds strong enough to shake the windows."},
+    {"id":"3s-09","category":"three_sentence","language":"English","text":"I know this is frustrating. We can narrow it down one test at a time. Start with the setting that changed most recently."},
+    {"id":"3s-10","category":"three_sentence","language":"English","text":"That result is faster than the reference. Listen to the ending carefully. If the voice still matches, mark it as a candidate rather than a winner."},
+
+    {"id":"ld-01","category":"long_detail","language":"English","text":"Before you deploy the new runtime, record the exact checkpoint, attention mode, thread counts, token ceiling, and machine type, then run the same short and long phrases so the speed difference can be reproduced later."},
+    {"id":"ld-02","category":"long_detail","language":"English","text":"When a voice system becomes faster, I still want to hear stable pitch, natural rhythm, clean sentence endings, and the same recognizable character voice, because a performance win is not useful if the speaker suddenly sounds different."},
+    {"id":"ld-03","category":"long_detail","language":"English","text":"A useful realtime pipeline should begin speaking soon, keep enough audio buffered to avoid starvation, discard stale speech after interruption, and continue to behave correctly when several requests arrive over a longer session."},
+    {"id":"ld-04","category":"long_detail","language":"English","text":"For this benchmark, keep every sampling parameter fixed and change only the intended runtime variable, otherwise a faster result could come from a different generation behavior and the comparison would no longer be trustworthy."},
+    {"id":"ld-05","category":"long_detail","language":"English","text":"Check the model identity first. Record the thread settings. Run the same fixed text. Save the timing and memory. Listen for missing endings. Keep the result only if every check passes."},
+
+    {"id":"ja-01","category":"japanese","language":"Japanese","text":"おはよう。今日は少し早起きできたね。"},
+    {"id":"ja-02","category":"japanese","language":"Japanese","text":"大丈夫？無理しないで、少し休んでもいいんだよ。"},
+    {"id":"ja-03","category":"japanese","language":"Japanese","text":"今夜は月がきれいだね。静かな時間を一緒に過ごそう。"},
+    {"id":"ja-04","category":"japanese","language":"Japanese","text":"その設定を変える前に、今の結果をちゃんと記録しておこう。"},
+    {"id":"ja-05","category":"japanese","language":"Japanese","text":"質問があるならゆっくり話してね。最後までちゃんと聞いているから。"},
+
+    {"id":"mx-01","category":"mixed_language","language":"English","text":"Good morning, おはよう。I hope you slept well."},
+    {"id":"mx-02","category":"mixed_language","language":"English","text":"The build is ready, でもまだ本番には出さないでね。Let's test it first."},
+    {"id":"mx-03","category":"mixed_language","language":"English","text":"I saved the file as Tsuki version two, 月バージョン2, so it is easy to find later."},
+    {"id":"mx-04","category":"mixed_language","language":"Japanese","text":"今日はgood timingだね。テストが終わったら、一緒に結果を確認しよう。"},
+    {"id":"mx-05","category":"mixed_language","language":"Japanese","text":"CPUはfour coresのままだけど、response timeが少し速くなったか確認してみよう。"}
+  ]
+}

@@ -231,7 +231,7 @@ public partial class App : System.Windows.Application
         if (settings.VoiceRuntimeV2Enabled)
         {
             _serviceProvider.GetRequiredService<VoiceConversationPipeline>().Start();
-            DevLog.WriteLine("App: Qwen3-TTS full-ICL synthesis selected; no alternate TTS engine startup.");
+            DevLog.WriteLine("App: trained Tsukihime Qwen3-TTS synthesis selected; no alternate TTS engine startup.");
         }
 
         // Start local mic capture for the voice runtime (desktop app is a

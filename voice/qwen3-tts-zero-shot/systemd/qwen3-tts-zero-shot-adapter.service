@@ -1,0 +1,23 @@
+[Unit]
+Description=Tsuki's Bedroom Qwen3-TTS zero-shot API adapter
+After=network-online.target qwen3-tts-zero-shot.service
+Wants=network-online.target
+Requires=qwen3-tts-zero-shot.service
+
+[Service]
+Type=simple
+User=qwen
+Group=qwen
+WorkingDirectory=/opt/tsuki-qwen-zero-shot/adapter
+EnvironmentFile=/etc/tsukis-bedroom/qwen-zero-shot.env
+ExecStart=/opt/tsuki-qwen-zero-shot/venv/bin/uvicorn adapter:app --host 127.0.0.1 --port 8102 --no-access-log
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tsukiai
+
+[Install]
+WantedBy=multi-user.target
