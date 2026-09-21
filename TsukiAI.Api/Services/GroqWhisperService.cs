@@ -17,6 +17,7 @@ public sealed class GroqWhisperService : IWhisperService, IDisposable
 
     private readonly HttpClient _http;
     private readonly GroqApiKeyPool _keyPool;
+    private readonly GroqUsageLedger _usage;
     private readonly string _model;
     private readonly AudioProcessingService _audioProcessing;
 
@@ -25,9 +26,11 @@ public sealed class GroqWhisperService : IWhisperService, IDisposable
     {
     }
 
-    public GroqWhisperService(GroqApiKeyPool keyPool, string? model = null, AudioProcessingService? audioProcessing = null)
+    public GroqWhisperService(GroqApiKeyPool keyPool, string? model = null,
+        AudioProcessingService? audioProcessing = null, GroqUsageLedger? usage = null)
     {
         _keyPool = keyPool ?? throw new ArgumentNullException(nameof(keyPool));
+        _usage = usage ?? GroqUsageLedger.Default;
         _model = string.IsNullOrWhiteSpace(model) ? DefaultModel : model!.Trim();
         _audioProcessing = audioProcessing ?? new AudioProcessingService();
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
@@ -62,6 +65,8 @@ public sealed class GroqWhisperService : IWhisperService, IDisposable
                 };
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
+                ct.ThrowIfCancellationRequested();
+                _usage.RecordAttempt(apiKey, "stt");
                 using var resp = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
                 if (!resp.IsSuccessStatusCode)
                 {

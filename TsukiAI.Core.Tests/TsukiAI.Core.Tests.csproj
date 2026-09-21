@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TsukiAI.Core\TsukiAI.Core.csproj" />
+    <Compile Include="..\TsukiAI.Api\Infrastructure\LoginAttemptGuard.cs" Link="LoginAttemptGuard.cs" />
   </ItemGroup>
 
 </Project>

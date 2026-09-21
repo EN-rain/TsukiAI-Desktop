@@ -14,6 +14,7 @@ services:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./profile-site:/srv/profile:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
@@ -45,6 +46,10 @@ services:
       - TSUKI_GROQ_API_KEYS_FILE=/run/secrets/tsuki-groq-keys
     volumes:
       - tsuki-data:/data
+      # The dashboard edits the existing Modelfile SYSTEM block. Bind it
+      # read-only so an API recreation picks up the real VPS source without
+      # rebuilding the image or mutating it from inside the container.
+      - ./assets/Modelfile:/app/assets/Modelfile:ro
       - ${GROQ_KEYS_HOST_PATH:-./discord-voice-bridge/groq.keys}:/run/secrets/tsuki-groq-keys:ro
       - ${QWEN_TTS_WORKERS_HOST_PATH:-./qwen-workers.env}:/run/secrets/qwen-workers:ro
     depends_on:
@@ -61,7 +66,8 @@ services:
   # be set in the root .env so the bridge can authenticate to the API.
   bridge:
     build: ./discord-voice-bridge
-    restart: on-failure:5
+    # Start with Docker after VPS boot, even if previously stopped manually.
+    restart: always
     stop_grace_period: 30s
     env_file: ./discord-voice-bridge/.env
     environment:
@@ -77,6 +83,9 @@ services:
     volumes:
       # The host-side file is created with mode 600 and is excluded from the
       # image build context. The container only receives a read-only mount.
+      # Share durable, non-secret Groq attempt records with the C# API.
+      # Each service writes its own JSONL file to avoid cross-process appends.
+      - tsuki-data:/data
       - ${GROQ_KEYS_HOST_PATH:-./discord-voice-bridge/groq.keys}:/run/secrets/tsuki-groq-keys:ro
       # Set ASSEMBLYAI_KEYS_HOST_PATH in the root .env to the host-side key
       # file (for example C:/Users/.../assembly.txt). Never commit the file.

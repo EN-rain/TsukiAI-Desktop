@@ -40,8 +40,14 @@ export function inspectDiscordPcm(
   };
 }
 
-export function createDiscordPcmStream(audioBuffer) {
-  // Wrapping the Buffer in an array guarantees one binary chunk. This avoids
-  // iterable handling differences between Node stream implementations.
-  return Readable.from([audioBuffer]);
+export function createDiscordPcmStream(audioBuffer, { tailPaddingMs = 0 } = {}) {
+  // Keep the binary input as a Buffer, not an iterable of individual bytes.
+  // A little trailing silence gives Discord's RTP/Opus packetizer time to
+  // deliver the last voiced frame before a following utterance starts.
+  if (!Number.isInteger(tailPaddingMs) || tailPaddingMs < 0 || tailPaddingMs > 500) {
+    throw new RangeError('Invalid Discord playback tail padding');
+  }
+  const bytesPerFrame = 2 * 2; // PCM 48 kHz stereo, 16-bit samples
+  const tailBytes = Math.round(48000 * tailPaddingMs / 1000) * bytesPerFrame;
+  return Readable.from(tailBytes ? [audioBuffer, Buffer.alloc(tailBytes)] : [audioBuffer]);
 }

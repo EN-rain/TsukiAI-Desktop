@@ -13,10 +13,10 @@ public sealed class ProviderSwitchingService
     private ProviderState _state;
     private readonly object _lock = new();
 
-    public ProviderSwitchingService()
+    public ProviderSwitchingService(string? statePath = null)
     {
         var baseDir = SettingsService.GetBaseDir();
-        _statePath = Path.Combine(baseDir, "provider-state.json");
+        _statePath = statePath ?? Path.Combine(baseDir, "provider-state.json");
         _state = LoadState();
     }
 
@@ -27,6 +27,9 @@ public sealed class ProviderSwitchingService
     {
         lock (_lock)
         {
+            // Voice and chat each hold their own switcher instance. Reload so a
+            // switch made by one becomes visible to the live inference client.
+            _state = LoadState();
             var providers = ParseProviders(providersCsv);
             if (providers.Count == 0)
                 return "groq"; // Default fallback
@@ -54,6 +57,7 @@ public sealed class ProviderSwitchingService
     {
         lock (_lock)
         {
+            _state = LoadState();
             var providers = ParseProviders(providersCsv);
             if (providers.Count == 0)
                 return null;
@@ -87,6 +91,7 @@ public sealed class ProviderSwitchingService
             "gemini" => "https://generativelanguage.googleapis.com/v1beta",
             "github" => "https://models.github.ai",
             "mistral" => "https://api.mistral.ai/v1",
+            "literouter" => "https://api.literouter.com/v1",
             _ => "https://api.groq.com/openai/v1"
         };
     }
@@ -103,6 +108,7 @@ public sealed class ProviderSwitchingService
             "gemini" => settings.GeminiApiKey,
             "github" => settings.GitHubApiKey,
             "mistral" => settings.MistralApiKey,
+            "literouter" => EnvConfiguration.Get("TSUKI_LITEROUTER_API_KEY"),
             _ => settings.RemoteInferenceApiKey
         };
     }
@@ -116,13 +122,28 @@ public sealed class ProviderSwitchingService
     {
         return providerName.ToLowerInvariant() switch
         {
-            "groq" => "openai/gpt-oss-120b",
+            "groq" => EnvConfiguration.Get("TSUKI_GROQ_MODEL", "openai/gpt-oss-120b"),
             "cerebras" => "llama3.1-8b",
             "gemini" => "gemini-2.0-flash",
             "github" => "openai/gpt-4o-mini",
             "mistral" => "mistral-small-latest",
+            "literouter" => ResolveLiteRouterModel(),
             _ => "openai/gpt-oss-120b"
         };
+    }
+
+    /// <summary>LiteRouter model IDs must be selected from the account's /v1/models catalog.</summary>
+    public static string ResolveLiteRouterModel(string? configuredModel = null)
+    {
+        var model = EnvConfiguration.Get("TSUKI_LITEROUTER_MODEL");
+        if (string.IsNullOrWhiteSpace(model) &&
+            !string.IsNullOrWhiteSpace(configuredModel) &&
+            !configuredModel.Equals("tsuki-lora", StringComparison.OrdinalIgnoreCase))
+            model = configuredModel.Trim();
+        if (string.IsNullOrWhiteSpace(model))
+            throw new InvalidOperationException(
+                "Set TSUKI_LITEROUTER_MODEL to a model ID from https://api.literouter.com/v1/models.");
+        return model;
     }
 
     private List<string> ParseProviders(string csv)

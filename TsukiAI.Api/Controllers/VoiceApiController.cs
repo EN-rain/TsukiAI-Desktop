@@ -150,13 +150,17 @@ public sealed class VoiceApiController : ControllerBase
         try
         {
             var totalSw = Stopwatch.StartNew();
+            if (!DiscordContext.TryFormat(request.ContextTurns, out _))
+                return BadRequest(new { error = "Invalid short-lived Discord context", correlation_id = correlationId });
             var result = await _pipeline.ProcessTextAsync(
                 request.UserId ?? string.Empty,
                 request.Text,
                 correlationId,
                 ct,
                 synthesizeAudio: request.Audio,
-                memoryScope: request.MemoryScope);
+                memoryScope: request.MemoryScope,
+                molabVoiceReply: request.MolabVoice,
+                contextTurns: request.ContextTurns);
             totalSw.Stop();
             DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process, duration_ms={1}, status={2}",
                 correlationId, totalSw.ElapsedMilliseconds, result.Success ? "ok" : "error");
@@ -197,12 +201,15 @@ public sealed class VoiceApiController : ControllerBase
         try
         {
             var totalSw = Stopwatch.StartNew();
+            if (!DiscordContext.TryFormat(request.ContextTurns, out _))
+                return BadRequest(new { error = "Invalid short-lived Discord context", correlation_id = correlationId });
             var result = await _pipeline.ProcessTextAsync(
                 request.UserId ?? string.Empty,
                 request.Text,
                 correlationId,
                 ct,
-                memoryScope: request.MemoryScope);
+                memoryScope: request.MemoryScope,
+                contextTurns: request.ContextTurns);
             totalSw.Stop();
             DevLog.WriteLine("[VoiceAPI] correlation_id={0}, operation=process_binary, duration_ms={1}, status={2}",
                 correlationId, totalSw.ElapsedMilliseconds, result.Success ? "ok" : "error");
@@ -270,7 +277,10 @@ public sealed class ProcessRequest
     public string Text { get; set; } = string.Empty;
     // Text-only clients (Discord text replies, web chat) can skip TTS synthesis.
     public bool Audio { get; set; } = true;
+    // Only the Molab Discord voice-channel path opts into longer text-only replies.
+    public bool MolabVoice { get; set; }
     public string? MemoryScope { get; set; }
+    public List<DiscordContextTurn>? ContextTurns { get; set; }
 }
 
 public sealed class TestTtsRequest

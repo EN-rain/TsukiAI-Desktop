@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using TsukiAI.Core.Models;
 using TsukiAI.Core.Services;
+using TsukiAI.VoiceChat.Services;
 
 namespace TsukiAI.Api.Services;
 
@@ -46,6 +47,38 @@ public sealed class TextChatService
 
     public int RetentionDays => _retentionDays;
 
+    /// <summary>
+    /// Delete dormant per-user history files after their last write exceeds
+    /// retention. Active histories are pruned on each load/save; scanning only
+    /// last-write times does not read or expose their conversation contents.
+    /// </summary>
+    public int DeleteInactiveHistories()
+    {
+        var root = SettingsService.GetBaseDir();
+        if (!Directory.Exists(root)) return 0;
+        var cutoff = DateTime.UtcNow.AddDays(-_retentionDays);
+        var deleted = 0;
+        foreach (var path in Directory.EnumerateFiles(root, "text_history_*.json",
+                     SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(path) >= cutoff) continue;
+                File.Delete(path);
+                deleted++;
+            }
+            catch (IOException ex)
+            {
+                DevLog.WriteLine("TextChat: inactive history cleanup failed: {0}", ex.GetType().Name);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                DevLog.WriteLine("TextChat: inactive history cleanup denied");
+            }
+        }
+        return deleted;
+    }
+
     public TextChatService(IInferenceClient llm, ISemanticMemoryService memory, AppSettings settings)
     {
         _llm = llm;
@@ -53,8 +86,11 @@ public sealed class TextChatService
         _retentionDays = Math.Clamp(GetIntEnv("TSUKI_MEMORY_RETENTION_DAYS", 30), 1, 3650);
     }
 
-    public async Task<string> ReplyAsync(string userId, string displayName, string text, CancellationToken ct = default)
+    public async Task<string> ReplyAsync(string userId, string displayName, string text,
+        CancellationToken ct = default, IReadOnlyList<DiscordContextTurn>? contextTurns = null)
     {
+        if (!DiscordContext.TryFormat(contextTurns, out var contextPreface))
+            throw new ArgumentException("Invalid short-lived Discord context", nameof(contextTurns));
         userId = userId?.Trim() ?? string.Empty;
         text = text?.Trim() ?? string.Empty;
         if (userId.Length == 0)
@@ -111,15 +147,16 @@ public sealed class TextChatService
             // addressed by name every single message feels robotic.
             var useName = Random.Shared.NextDouble() < 0.15;
             var nameRule = useName
-                ? $"You may use {name}'s name once in this reply, only if it fits naturally."
-                : "Do not use their name in this reply.";
+                ? "You may use the speaker’s display name once if natural."
+                : "Do not use the speaker’s display name in this reply.";
 
+            // Display names are user-controlled Discord data. Keep the name
+            // in the user/history role; never interpolate it into system text.
             var systemInstructions =
-                $"\nThe person you are talking to right now is {name}." +
                 $"\n{nameRule}" +
                 "\nYou CAN send voice messages in this chat: when the user asks for a voice, a voice chat, or to hear you, " +
-                "confirm happily — the system automatically attaches your spoken reply as a Discord voice message. " +
-                "Never claim you cannot send voice or audio." +
+                "only promise audio when the selected voice service is available; otherwise offer text. " +
+                "Do not falsely claim audio was sent." +
                 memoryContext;
 
             var llmHistory = history.Turns
@@ -130,6 +167,11 @@ public sealed class TextChatService
                     ("assistant", TrimForPrompt(t.Assistant, 1200))
                 })
                 .ToList();
+
+            // Keep observed excerpts outside userText: RemoteInferenceClient can
+            // write userText to memory, whereas history is prompt-only.
+            if (contextPreface.Length > 0)
+                llmHistory.Add(("user", contextPreface));
 
             var reply = await _llm.ChatWithEmotionAsync(
                 $"{name}: {text}",

@@ -1,5 +1,6 @@
 using System.Linq;
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using TsukiAI.Core.Models;
 
@@ -32,6 +33,10 @@ public sealed class PromptBuilder
         var modelfileLine = string.IsNullOrWhiteSpace(ModelfileHint.Value)
             ? string.Empty
             : $"\nModelfile style anchor: {ModelfileHint.Value}";
+        var dashboardPersonality = ReadDashboardPersonality();
+        var dashboardLine = string.IsNullOrEmpty(dashboardPersonality)
+            ? string.Empty
+            : $"\nDashboard personality instructions (operator-authored, higher priority than default conversational style; keep output format and safety rules):\n{dashboardPersonality}";
 
         var sentenceRule = oneToTwoSentences
             ? "Respond in 1-2 short, natural sentences."
@@ -89,6 +94,7 @@ Length constraints:
 {fewShot}
 {emotionLine}
 {customLine}
+{dashboardLine}
 """;
     }
 
@@ -369,6 +375,27 @@ Assistant: "Fair. I'll keep it plain and natural from now on."
             : "neutral";
     }
 
+    /// <summary>
+    /// Operator-authored dashboard instructions travel in the SYSTEM message,
+    /// never in user history or long-term memory. Empty or invalid data leaves
+    /// the bundled personality intact. Read per request so local changes can
+    /// take effect without rebuilding a PromptBuilder instance.
+    /// </summary>
+    public static string ReadDashboardPersonality()
+    {
+        var encoded = Environment.GetEnvironmentVariable("TSUKI_PERSONALITY_INJECTION_B64");
+        if (string.IsNullOrEmpty(encoded) || encoded.Length > 16384)
+            return string.Empty;
+        try
+        {
+            var text = new UTF8Encoding(false, true).GetString(Convert.FromBase64String(encoded)).Trim();
+            return text.Length <= 4000 && !text.Any(c => (char.IsControl(c) && c != '\n' && c != '\t' && c != '\r'))
+                ? text : string.Empty;
+        }
+        catch (FormatException) { return string.Empty; }
+        catch (DecoderFallbackException) { return string.Empty; }
+    }
+
     private static string LoadModelfileHint()
     {
         try
@@ -384,23 +411,20 @@ Assistant: "Fair. I'll keep it plain and natural from now on."
             if (string.IsNullOrWhiteSpace(path))
                 return string.Empty;
 
+            // Use the actual existing Modelfile SYSTEM instructions, not a
+            // condensed four-field approximation. The dashboard edits this
+            // precise source and recreates the API to refresh the cached prompt.
             var text = File.ReadAllText(path);
-            var personality = Regex.Match(text, @"PERSONALITY:\s*(.+)", RegexOptions.IgnoreCase).Groups[1].Value.Trim();
-            var speech = Regex.Match(text, @"SPEECH:\s*(.+)", RegexOptions.IgnoreCase).Groups[1].Value.Trim();
-            var noQuestions = Regex.IsMatch(text, @"RARELY ask questions", RegexOptions.IgnoreCase);
-            var noEmoji = Regex.IsMatch(text, @"NEVER use emojis", RegexOptions.IgnoreCase);
-
-            var parts = new List<string>();
-            if (!string.IsNullOrWhiteSpace(personality))
-                parts.Add(personality);
-            if (!string.IsNullOrWhiteSpace(speech))
-                parts.Add(speech);
-            if (noQuestions)
-                parts.Add("prefer statements over questions");
-            if (noEmoji)
-                parts.Add("no emojis");
-
-            return string.Join("; ", parts.Take(4));
+            const string marker = "SYSTEM \"\"\"";
+            var start = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (start < 0)
+                return string.Empty;
+            start += marker.Length;
+            var end = text.IndexOf("\"\"\"", start, StringComparison.Ordinal);
+            if (end < 0)
+                return string.Empty;
+            var system = text[start..end].Trim();
+            return system.Length is > 0 and <= 4000 ? system : string.Empty;
         }
         catch
         {

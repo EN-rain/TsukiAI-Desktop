@@ -10,7 +10,7 @@ const bridgeSource = fs.readFileSync(path.join(testDirectory, '..', 'index.js'),
 
 test('voice playback subscribes before starting raw PCM and keeps a subscriber playable', () => {
   assert.match(bridgeSource, /createAudioPlayer\(\{[\s\S]*noSubscriber:\s*NoSubscriberBehavior\.Play/);
-  assert.match(bridgeSource, /createDiscordPcmStream\(audioBuffer\)/);
+  assert.match(bridgeSource, /createDiscordPcmStream\(audioBuffer, \{ tailPaddingMs: 200 \}\)/);
 
   const subscribeIndex = bridgeSource.indexOf('connection.subscribe(audioPlayer)');
   const playIndex = bridgeSource.indexOf('audioPlayer.play(resource)');
@@ -19,20 +19,34 @@ test('voice playback subscribes before starting raw PCM and keeps a subscriber p
   assert.ok(subscribeIndex < playIndex, 'the connection must be subscribed before play()');
 });
 
-test('the registered guild command is /t and no active handler text points to /tsuki', () => {
-  assert.match(bridgeSource, /name:\s*'t',\s*\n\s*description:/);
-  assert.match(bridgeSource, /interaction\.commandName !== 't'/);
-  assert.doesNotMatch(bridgeSource, /\/tsuki\b/);
+test('all seven guild slash commands are flat, without /t subcommands', () => {
+  for (const name of ['tjoin', 'tleave', 'tfocus', 'tunfocus', 'tfocuslist', 'tsayvc', 'tsayc']) {
+    assert.match(bridgeSource, new RegExp("name:\\s*'" + name + "',\\s*\\n\\s*description:"));
+    assert.match(bridgeSource, new RegExp("case '" + name + "':|interaction\\.commandName === '" + name + "'"));
+  }
+  assert.doesNotMatch(bridgeSource, /name:\s*'t',\s*\n\s*description:/);
+  assert.doesNotMatch(bridgeSource, /interaction\.options\.getSubcommand\(/);
+  assert.doesNotMatch(bridgeSource, /\/t (join|leave|focus|unfocus|focuslist)\b/);
 });
 
-test('direct /t say opens a modal and always sends the voice message to the invoking chat', () => {
-  assert.match(bridgeSource, /ModalBuilder/);
-  assert.match(bridgeSource, /TextInputBuilder/);
-  assert.match(bridgeSource, /interaction\.isModalSubmit\(\)/);
-  assert.match(bridgeSource, /setCustomId\(['"]t_say_modal['"]\)/);
-  assert.match(bridgeSource, /sendVoiceMessage\(interaction\.channelId, pcmToWav\(pcm\)/);
-  assert.doesNotMatch(bridgeSource, /name:\s*['"]destination['"]/);
-  assert.doesNotMatch(bridgeSource, /name:\s*['"]text['"],\s*description:\s*['"]Text to synthesize/);
+test('/tsayvc and /tsayc use required inline text without a modal and separate audio destinations', () => {
+  assert.match(bridgeSource, /name:\s*'text', description: 'What Tsuki should say in voice chat'/);
+  assert.match(bridgeSource, /name:\s*'text', description: 'What Tsuki should say in this chat'/);
+  assert.match(bridgeSource, /type:\s*3, required:\s*true, max_length:\s*DIRECT_TTS_MAX_CHARS/);
+  assert.match(bridgeSource, /interaction\.options\.getString\('text', true\)/);
+  assert.match(bridgeSource, /const speech = await synthesizeSelectedSpeech\(text\)/);
+  assert.match(bridgeSource, /if \(isSayVc\) \{\s*await enqueuePlayback\('slash-tsayvc', speech\.pcm, \{ priority: 0 \}\);/);
+  assert.match(bridgeSource, /\} else \{\s*await sendVoiceMessage\(interaction\.channelId, pcmToWav\(speech\.pcm\), 'Voice message from Tsuki'\);/);
+  assert.match(bridgeSource, /if \(isSayVc && !currentConnection\)/);
+  assert.doesNotMatch(bridgeSource, /showModal\(|isModalSubmit\(|ModalBuilder|TextInputBuilder/);
+});
+
+test('AI inference failures have distinct voice/text feedback and do not mark Molab TTS offline', () => {
+  assert.match(bridgeSource, /llm:\s*\{\s*down:\s*'Speech was understood/);
+  assert.match(bridgeSource, /await reportInferenceFailureVoiceTurn\(\);\s*error\.llmFailed = true/);
+  assert.match(bridgeSource, /if \(!error\.llmFailed\) reportVoiceStatus\('voice', false\)/);
+  assert.match(bridgeSource, /enqueuePlayback\('llm-unavailable-prompt'/);
+  assert.match(bridgeSource, /lastInferenceFailureFeedbackAt < 30000/);
 });
 
 test('the raw PCM playback guard is wired into the player path', () => {
@@ -61,6 +75,19 @@ test('the playback guard reports non-silent stereo PCM accurately', () => {
   assert.equal(stats.durationSecs, 2 / 48000);
   assert.equal(stats.peak, 4000);
   assert.equal(Math.round(stats.rms), 2739);
+});
+
+test('playback adds 200 ms of frame-aligned silence without altering voiced PCM', async () => {
+  const voiced = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
+  const chunks = [];
+  for await (const chunk of createDiscordPcmStream(voiced, { tailPaddingMs: 200 })) {
+    chunks.push(chunk);
+  }
+  assert.equal(chunks.length, 2);
+  assert.strictEqual(chunks[0], voiced);
+  assert.equal(chunks[1].length, 48000 * 0.2 * 4);
+  assert.ok(chunks[1].every(value => value === 0));
+  assert.throws(() => createDiscordPcmStream(voiced, { tailPaddingMs: 600 }), /padding/);
 });
 
 test('raw PCM is exposed as one binary stream chunk', async () => {

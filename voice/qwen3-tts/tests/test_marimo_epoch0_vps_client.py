@@ -1,4 +1,5 @@
 import ast
+import re
 import unittest
 from pathlib import Path
 
@@ -39,6 +40,15 @@ class MarimoEpoch0VpsClientTests(unittest.TestCase):
         self.assertIn("marimo.App", self.source)
         self.assertIn("@app.cell", self.source)
         self.assertIn("app.run()", self.source)
+
+    def test_generate_uses_run_button(self):
+        self.assertIn("mo.ui.run_button", self.source)
+        self.assertNotIn('mo.ui.button(label="Generate voice")', self.source)
+
+    def test_health_and_tts_cells_do_not_share_response_variable(self):
+        self.assertIsNone(re.search(r"(?m)^\s+response\s*=", self.source))
+        self.assertIn("health_response = requests.get", self.source)
+        self.assertIn("tts_response = requests.post", self.source)
 
 
 if __name__ == "__main__":

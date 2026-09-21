@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -29,6 +31,7 @@ var settings = EnvConfiguration.ApplyToSettings(SettingsService.Load() with
 });
 
 var webPassword = Environment.GetEnvironmentVariable("TSUKI_WEB_PASSWORD")?.Trim();
+var loginGuard = new TsukiAI.Api.Infrastructure.LoginAttemptGuard();
 var publicMode = !string.IsNullOrWhiteSpace(webPassword);
 
 // Keep public request bodies bounded. Audio uploads use the largest part of
@@ -65,7 +68,7 @@ builder.Services
     {
         options.Cookie.Name = "tsuki_web";
         options.Cookie.HttpOnly = true;
-        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SameSite = SameSiteMode.Strict;
         options.Cookie.SecurePolicy = publicMode ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
         options.ExpireTimeSpan = TimeSpan.FromDays(30);
         options.SlidingExpiration = true;
@@ -89,6 +92,8 @@ builder.Services.AddAuthorization(options =>
 // Core services (same wiring shape as the desktop app, minus WPF-only pieces)
 // ---------------------------------------------------------------------------
 builder.Services.AddSingleton(settings);
+var groqUsageLedger = GroqUsageLedger.Default;
+builder.Services.AddSingleton(groqUsageLedger);
 
 var chromaUrl = Environment.GetEnvironmentVariable("TSUKI_CHROMA_URL")?.Trim();
 var supermemoryKey = EnvConfiguration.Get("TSUKI_SUPERMEMORY_API_KEY");
@@ -161,7 +166,8 @@ builder.Services.AddSingleton(sp =>
     return new GroqWhisperService(
         sp.GetRequiredService<GroqApiKeyPool>(),
         model,
-        sp.GetRequiredService<AudioProcessingService>());
+        sp.GetRequiredService<AudioProcessingService>(),
+        sp.GetRequiredService<GroqUsageLedger>());
 });
 builder.Services.AddSingleton<IWhisperService>(sp => sp.GetRequiredService<GroqWhisperService>());
 
@@ -172,7 +178,7 @@ builder.Services.AddSingleton<IVoiceConversationPipeline>(sp => sp.GetRequiredSe
 // provider-switching client WITHOUT global semantic memory — TextChatService
 // scopes all memory writes/recall per user itself.
 builder.Services.AddSingleton<TextChatService>(sp => new TextChatService(
-    new SwitchingInferenceClient(settings),
+    InferenceClientFactory.Create(settings, null),
     sp.GetRequiredService<ISemanticMemoryService>(),
     settings));
 builder.Services.AddHostedService<MemoryRetentionWorker>();
@@ -186,6 +192,35 @@ var app = builder.Build();
 app.UseStaticFiles();
 
 app.UseAuthentication();
+// Cookie-authenticated writes require an explicit non-simple browser header.
+// The Discord bridge uses its machine API key and is not a browser CSRF target.
+app.Use(async (ctx, next) =>
+{
+    if (HttpMethods.IsPost(ctx.Request.Method) ||
+        HttpMethods.IsPut(ctx.Request.Method) ||
+        HttpMethods.IsPatch(ctx.Request.Method) ||
+        HttpMethods.IsDelete(ctx.Request.Method))
+    {
+        var origin = ctx.Request.Headers.Origin.ToString();
+        if (!string.IsNullOrEmpty(origin) &&
+            (!Uri.TryCreate(origin, UriKind.Absolute, out var originUri) ||
+             !string.Equals(originUri.Host, ctx.Request.Host.Host, StringComparison.OrdinalIgnoreCase) ||
+             (publicMode && !string.Equals(originUri.Scheme, "https", StringComparison.OrdinalIgnoreCase))))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
+        var machineAuthenticated = ctx.User.Identity?.IsAuthenticated == true &&
+            ctx.User.Identity.AuthenticationType == ApiKeyAuthenticationHandler.SchemeName;
+        if (publicMode && !machineAuthenticated &&
+            ctx.Request.Headers["X-Tsuki-Client"].ToString() != "web")
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
+    }
+    await next();
+});
 app.UseAuthorization();
 
 // ---------------------------------------------------------------------------
@@ -195,16 +230,23 @@ app.MapPost("/auth/login", async (HttpContext ctx, JsonElement body) =>
 {
     if (publicMode)
     {
+        var loginClient = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        if (!loginGuard.TryAcquire(loginClient))
+            return Results.StatusCode(StatusCodes.Status429TooManyRequests);
         var password = body.ValueKind == JsonValueKind.Object &&
                        body.TryGetProperty("password", out var p) && p.ValueKind == JsonValueKind.String
             ? p.GetString()
             : null;
 
-        if (string.IsNullOrWhiteSpace(password) || password != webPassword)
+        if (string.IsNullOrWhiteSpace(password) ||
+            !CryptographicOperations.FixedTimeEquals(
+                SHA256.HashData(Encoding.UTF8.GetBytes(password)),
+                SHA256.HashData(Encoding.UTF8.GetBytes(webPassword!))))
         {
-            DevLog.WriteLine("Auth: failed login attempt from {0}", ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+            DevLog.WriteLine("Auth: failed login attempt");
             return Results.Unauthorized();
         }
+        loginGuard.Succeeded(loginClient);
     }
 
     var claimsPrincipal = new System.Security.Claims.ClaimsPrincipal(
@@ -310,6 +352,20 @@ app.MapPost("/api/chat", async (HttpContext ctx, IVoiceConversationPipeline pipe
 // ---------------------------------------------------------------------------
 // Settings (non-secret subset only — API keys are never readable via the API)
 // ---------------------------------------------------------------------------
+// Fallback authorization requires the browser session or X-Api-Key. The
+// response contains fingerprint IDs and masked labels; no credential bytes.
+app.MapGet("/api/groq/usage", (string? date, GroqUsageLedger ledger, GroqApiKeyPool keys) =>
+{
+    var utcToday = DateOnly.FromDateTime(DateTime.UtcNow);
+    var selected = utcToday;
+    if (date is not null && (!DateOnly.TryParseExact(date, "yyyy-MM-dd",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out selected) || selected > utcToday))
+        return Results.BadRequest(new { error = "date must be YYYY-MM-DD in UTC, no later than today" });
+
+    return Results.Ok(ledger.Snapshot(selected, keys.GetAllKeys()));
+});
+
 app.MapGet("/api/settings", () =>
 {
     var s = EnvConfiguration.ApplyToSettings(SettingsService.Load());
@@ -483,11 +539,13 @@ app.MapPost("/api/chat/discord", async (HttpContext ctx, TextChatService textCha
         return Results.BadRequest(new { error = "userId and text are required" });
     if (payload.UserId.Length > 64 || payload.Text.Length > 4000 || (payload.UserName?.Length ?? 0) > 128)
         return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    if (!DiscordContext.TryFormat(payload.ContextTurns, out _))
+        return Results.BadRequest(new { error = "Invalid short-lived Discord context" });
 
     string reply;
     try
     {
-        reply = await textChat.ReplyAsync(payload.UserId, payload.UserName ?? "someone", payload.Text, ctx.RequestAborted);
+        reply = await textChat.ReplyAsync(payload.UserId, payload.UserName ?? "someone", payload.Text, ctx.RequestAborted, payload.ContextTurns);
     }
     catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested)
     {
@@ -682,6 +740,7 @@ sealed class DiscordChatRequest
     public string? UserName { get; set; }
     public string Text { get; set; } = string.Empty;
     public bool Voice { get; set; }
+    public List<DiscordContextTurn>? ContextTurns { get; set; }
 }
 
 /// <summary>Falls back to a no-op memory service when semantic memory is disabled.</summary>

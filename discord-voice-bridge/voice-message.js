@@ -36,6 +36,16 @@ function readWavDataChunk(wavBuffer) {
   return { ...data, byteRate };
 }
 
+// Return the exact playable WAV duration, or null when the WAV header/data
+// cannot be trusted. Display-oriented metadata rounds and clamps duration;
+// it must not be used to decide whether speech generation is incomplete.
+export function readWavDurationSeconds(wavBuffer) {
+  const chunk = readWavDataChunk(wavBuffer);
+  if (!chunk || chunk.size <= 0 || chunk.byteRate <= 0) return null;
+  const seconds = chunk.size / chunk.byteRate;
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
 export function voiceMetadataFromWav(wavBuffer, fallbackDuration = 1) {
   const chunk = readWavDataChunk(wavBuffer);
   const duration = chunk

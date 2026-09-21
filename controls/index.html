@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <title>TsukiAI · Control Room</title>
+  <link rel="stylesheet" href="/style.css?v=persona-source-layout-22">
+  <link rel="stylesheet" href="/layout-v22.css?v=exclusive-folds-28">
+</head>
+<body>
+  <aside class="sidebar" id="sidebar" aria-label="Control room navigation">
+    <a class="side-brand" href="#overview" aria-label="TsukiAI overview">
+      <span class="side-brand-mark" aria-hidden="true">☾</span>
+      <span><strong>TsukiAI</strong><small>CONTROL ROOM</small></span>
+    </a>
+    <span class="nav-heading">MONITOR / MANAGE</span>
+    <nav class="side-nav" aria-label="Dashboard tabs">
+      <a href="#overview" data-tab="overview" aria-current="page"><span class="nav-icon" aria-hidden="true">⌂</span>Overview</a>
+      <a href="#discord-voice" data-tab="discord-voice"><span class="nav-icon" aria-hidden="true">◎</span>Discord &amp; Voice</a>
+      <a href="#ai" data-tab="ai"><span class="nav-icon" aria-hidden="true">✳</span>AI &amp; Personality</a>
+      <a href="#vps" data-tab="vps"><span class="nav-icon" aria-hidden="true">▦</span>VPS Overview</a>
+      <a href="#account" data-tab="account"><span class="nav-icon" aria-hidden="true">⚙</span>Settings &amp; Account</a>
+    </nav>
+    <div class="side-bottom">
+      <span class="sidebar-moon" aria-hidden="true">☾</span>
+      <p>More than a bot.<br>A presence.</p>
+      <small>月のように、いつもそばに。<br>ALWAYS WITH YOU, LIKE THE MOON.</small>
+    </div>
+  </aside>
+  <div class="shell">
+    <header class="topbar">
+      <div class="topbar-title">
+        <button type="button" class="menu-toggle quiet" id="menu-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">☰</button>
+        <div class="topbar-wordmark"><strong>TsukiAI</strong><small>CONTROL ROOM</small></div>
+      </div>
+      <div class="topbar-actions">
+        <div class="jump-search" role="search">
+          <label class="sr-only" for="page-search">Find a page or control</label>
+          <span class="search-glyph" aria-hidden="true">⌕</span>
+          <input id="page-search" type="search" autocomplete="off" aria-controls="search-results" aria-expanded="false" placeholder="Find pages or controls…">
+          <div id="search-results" class="search-results" role="listbox" aria-label="Matching pages" hidden></div>
+          <kbd>/</kbd>
+        </div>
+        <span class="header-health" id="header-health"><span class="private-dot" aria-hidden="true"></span>Checking system status</span>
+        <button type="button" id="header-account" class="header-account quiet" aria-label="Open account settings"><span class="header-account-icon" aria-hidden="true">月</span><span>Tsuki<small>Private dashboard</small></span></button>
+      </div>
+    </header>
+
+    <main>
+      <section id="login" class="login-view">
+        <div class="login-copy">
+          <span class="eyebrow">PRIVATE OPERATIONS</span>
+          <h1>Tsuki control room<span class="accent">.</span></h1>
+          <p>Voice routing, Discord presence, and VPS services. One private place to keep the bot running.</p>
+        </div>
+        <form id="login-form" class="login-form">
+          <span class="eyebrow">SIGN IN</span>
+          <h2>Welcome back.</h2>
+          <label for="password">Control password</label>
+          <input id="password" type="password" autocomplete="current-password" required autofocus>
+          <label class="remember-device"><input id="remember-device" type="checkbox" checked> Remember this browser for 30 days <small>Only enable on a private device. Sign out to revoke it.</small></label>
+          <button type="submit">Open control room <span aria-hidden="true">↗</span></button>
+          <p class="error" id="login-error" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="dashboard" data-active-tab="overview" hidden>
+        <div class="page-head">
+          <div>
+            <span class="eyebrow" id="page-eyebrow">CONTROL ROOM / OVERVIEW</span>
+            <h1 id="page-title">Overview</h1>
+            <p class="lede" id="page-description">Live status and controls for the Discord bot, voice route and VPS.</p>
+          </div>
+          <div class="head-actions">
+            <span class="timestamp" id="updated">Waiting for snapshot</span>
+            <button type="button" id="refresh" class="quiet">Refresh</button>
+            <button type="button" id="logout" class="quiet">Sign out</button>
+          </div>
+        </div>
+
+        <section aria-label="Current operational snapshot" class="snapshot" data-view="overview">
+          <div class="snapshot-item"><span class="metric-label">DISCORD BRIDGE</span><strong id="bridge-summary">Checking</strong><small id="bridge-detail">Container status</small></div>
+          <div class="snapshot-item"><span class="metric-label">ACTIVE VOICE ROUTE</span><strong id="voice-summary">Checking</strong><small id="voice-detail">Only the selected notebook is checked</small></div>
+          <div class="snapshot-item"><span class="metric-label">SERVERS &amp; CHANNELS</span><strong id="guilds-summary">Checking</strong><small id="guilds-detail">Joined Discord guilds</small></div>
+          <div class="snapshot-item"><span class="metric-label">VPS CONTAINERS</span><strong id="services-summary">Checking</strong><small id="services-detail">Docker state, not Discord connection</small></div>
+        </section>
+
+        <section id="attention" class="attention" data-view="overview" aria-live="polite">
+          <span class="attention-mark" id="attention-mark" aria-hidden="true">i</span>
+          <div><strong id="attention-title">Reading runtime status…</strong><p id="attention-copy">This panel reflects the most recent status check.</p></div>
+          <a id="attention-link" href="#voice">View voice route <span aria-hidden="true">↗</span></a>
+        </section>
+
+        <div class="overview-workspace" data-view="overview">
+          <section class="panel overview-bridge">
+            <header class="panel-head"><div><span class="eyebrow">DISCORD / BRIDGE</span><h2>Bridge status</h2></div><a class="panel-link" href="#discord">View details ↗</a></header>
+            <p class="panel-intro" id="overview-bridge-note">Checking the bot container. Discord connectivity is reported separately.</p>
+            <div class="overview-facts">
+              <div><span>Docker bridge</span><strong id="overview-bridge-state">Checking</strong></div>
+              <div><span>Configured guild</span><strong id="overview-guild">Checking</strong></div>
+              <div><span>Voice channel</span><strong id="overview-channel">Checking</strong></div>
+            </div>
+          </section>
+          <section class="panel overview-voice">
+            <header class="panel-head"><div><span class="eyebrow">VOICE / ACTIVE ROUTE</span><h2>Voice connection</h2></div><a class="panel-link" href="#voice">Manage voice ↗</a></header>
+            <div class="voice-connection-status"><span class="signal-ring" aria-hidden="true">◉</span><div><strong id="overview-voice-state">Checking</strong><small id="overview-voice-note">Reading the selected notebook and voice channel.</small></div></div>
+            <p class="panel-intro">Notebook availability and Discord voice connection are checked separately.</p>
+          </section>
+          <section class="panel overview-actions">
+            <header class="panel-head"><div><span class="eyebrow">SHORTCUTS</span><h2>Quick actions</h2></div></header>
+            <div class="action-links">
+              <a href="#voice"><span aria-hidden="true">◖</span><span>Voice route<small>Choose Molab or Colab</small></span><b aria-hidden="true">↗</b></a>
+              <a href="#discord-settings"><span aria-hidden="true">▤</span><span>Configure channels<small>Server, reply mode and custom TTS</small></span><b aria-hidden="true">↗</b></a>
+              <a href="#discord"><span aria-hidden="true">◎</span><span>Bot runtime<small>Inspect or reconnect the bridge</small></span><b aria-hidden="true">↗</b></a>
+              <a href="#personality"><span aria-hidden="true">✳</span><span>Personality<small>View and edit the existing Tsuki prompt</small></span><b aria-hidden="true">↗</b></a>
+              <a href="#vps"><span aria-hidden="true">▦</span><span>VPS containers<small>Inspect status and restart services</small></span><b aria-hidden="true">↗</b></a>
+            </div>
+          </section>
+          <section class="panel overview-health">
+            <header class="panel-head"><div><span class="eyebrow">SYSTEM / LIVE CHECKS</span><h2>Health checks</h2></div></header>
+            <div class="health-check"><span>Docker services</span><strong id="overview-health-services">Checking</strong></div>
+            <div class="health-check"><span>Selected notebook</span><strong id="overview-health-provider">Checking</strong></div>
+            <div class="health-check"><span>Discord voice session</span><strong id="overview-health-voice">Checking</strong></div>
+            <p class="micro">Container status does not confirm Discord connectivity.</p>
+          </section>
+        </div>
+        <nav class="discord-voice-jump" data-view="discord-voice" aria-label="Discord and voice sections">
+          <a href="#voice">Voice route</a><a href="#discord">Bot runtime</a><a href="#discord-settings">Servers &amp; channels</a>
+        </nav>
+        <nav class="discord-voice-jump" data-view="ai" aria-label="AI settings sections">
+          <a href="#personality">Personality</a><a href="#llm">LLM route</a><a href="#context-awareness">Awareness</a>
+        </nav>
+        <div class="primary-grid" data-view="discord-voice">
+          <div class="voice-workspace" data-view="discord-voice">
+          <section class="panel voice-panel" id="voice" aria-labelledby="voice-title">
+            <header class="panel-head">
+              <div><span class="eyebrow">01 / VOICE</span><h2 id="voice-title">Choose the voice route</h2></div>
+              <span class="panel-tag">NO FALLBACK</span>
+            </header>
+            <p class="panel-intro">Choose one runtime. Changes save immediately; offline notebooks do not trigger fallback.</p>
+            <form id="provider-form" class="provider-switch" role="radiogroup" aria-label="TTS provider">
+              <label class="provider-option"><input type="radio" name="tts_provider" value="molab"><span><b>Molab</b><small>Duration-aware batching</small></span><i id="molab-status">Checking</i></label>
+              <label class="provider-option"><input type="radio" name="tts_provider" value="colab"><span><b>Colab</b><small>Standalone notebook</small></span><i id="colab-status">Standby</i></label>
+              <label class="provider-option"><input type="radio" name="tts_provider" value="off"><span><b>Off</b><small>Text replies only</small></span><i>Silent</i></label>
+            </form>
+            <div class="route-feedback"><span class="route-feedback-dot" aria-hidden="true"></span><p id="provider-feedback" role="status" aria-live="polite">Select a provider to switch immediately.</p></div>
+            <div class="voice-health-line" aria-live="polite"><span id="voice-health-indicator" class="voice-health-indicator">○</span><span id="voice-health-text">Checking the selected connection…</span><span id="voice-health-checked">Waiting for check</span></div>
+          </section>
+          <details class="panel voice-analytics" aria-labelledby="analytics-title">
+            <summary id="analytics-title">Voice analytics · optional diagnostics</summary>
+            <button class="quiet" type="button" id="reload-analytics">Refresh metrics</button>
+            <div id="voice-analytics-results" class="metric-grid" aria-live="polite">Select Refresh metrics to read actual observations.</div>
+            <p class="section-hint" id="voice-analytics-source">Measured current-session information only.</p>
+          </details>
+          </div>
+
+          <section class="panel discord-panel" data-view="discord-voice" id="discord" aria-labelledby="discord-title">
+            <header class="panel-head">
+              <div><span class="eyebrow">02 / DISCORD</span><h2 id="discord-title">Bot runtime</h2></div>
+              <span id="bridge-badge" class="status-badge">Checking</span>
+            </header>
+            <p class="panel-intro">The bridge starts with the VPS. Reconnecting interrupts active speech.</p>
+            <div class="discord-identity">
+              <img id="avatar-image" class="avatar" alt="Current Discord bot avatar">
+              <div><strong id="avatar-name">Tsukihime</strong><span class="identity-label">Discord bot</span><small>Container state does not confirm Discord gateway or voice connection.</small></div>
+            </div>
+            <div class="runtime-information"><h3>Runtime information</h3><div id="bot" class="facts"></div></div>
+            <div class="runtime-actions">
+              <h3>Runtime controls</h3>
+              <button type="button" data-action="restart_bridge" class="quiet">Reconnect bridge</button>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel guilds-panel" data-view="discord-voice" id="discord-settings" aria-labelledby="guilds-title">
+          <header class="panel-head">
+            <div><span class="eyebrow">03 / DISCORD SETTINGS</span><h2 id="guilds-title">Servers &amp; channels</h2></div>
+            <div class="guild-head-actions"><button type="button" class="invite-button" id="copy-invite" aria-label="Copy Discord bot invite link" title="Copy bot invite link">+<span class="invite-button-label">Invite bot</span></button><button type="button" class="quiet" id="reload-guilds">Detect servers &amp; channels</button></div>
+          </header>
+          <p class="panel-intro">Choose a joined server to manage its channels and replies. Detect servers &amp; channels also discovers newly created voice and text channels without changing saved settings.</p>
+          <div id="guild-list" class="guild-list" role="group" aria-label="Discord servers joined by the bot">
+            <p class="section-hint">Detecting joined servers…</p>
+          </div>
+          <div class="guild-config" id="guild-config" hidden>
+            <div class="guild-config-heading">
+              <div><span class="eyebrow" id="guild-config-label">SERVER SETTINGS</span><h3 id="guild-config-name">Choose a server</h3><p id="guild-config-hint" class="section-hint"></p></div>
+              <span class="panel-tag" id="guild-config-state">NOT CONFIGURED</span>
+            </div>
+            <section class="live-voice-controls" aria-labelledby="live-voice-title">
+              <div class="live-voice-heading"><div><span class="eyebrow">LIVE / NO RESTART</span><h4 id="live-voice-title">Live voice</h4></div><button type="button" class="quiet" id="reload-voice-session">Check connection</button></div>
+              <p class="section-hint" id="live-voice-status" role="status" aria-live="polite">Checking the bot’s live voice connection…</p>
+              <button type="button" class="quiet danger" id="leave-voice" disabled>Leave voice channel</button>
+              <details class="voice-focus-disclosure" id="voice-focus-disclosure">
+                <summary>Who Tsuki listens to · /tfocus /tunfocus</summary>
+              <section class="voice-focus-controls" aria-labelledby="voice-focus-title">
+                <h4 id="voice-focus-title">Voice focus</h4>
+                <p class="section-hint">Same behavior as /tfocus and /tunfocus. An empty focus list means everyone. Live changes do not restart the bot.</p>
+                <p id="voice-focus-status" role="status" aria-live="polite">Check focus to see current listeners.</p>
+                <div id="voice-focus-list" class="voice-focus-list"></div>
+                <label for="voice-focus-user">Select a user currently in voice, or enter their Discord ID</label>
+                <select id="voice-focus-user"><option value="">Choose a listener…</option></select>
+                <input id="voice-focus-id" type="text" inputmode="numeric" maxlength="20" pattern="[0-9]{17,20}" placeholder="Discord user ID (optional)" aria-label="Discord user ID">
+                <div class="voice-focus-actions"><button type="button" class="quiet" id="focus-add">Listen only to selected user(s)</button><button type="button" class="quiet" id="focus-clear" disabled>Listen to everyone</button><button type="button" class="quiet" id="focus-refresh">Refresh focus</button></div>
+              </section>
+              </details>
+              <form id="custom-tts-form" class="custom-tts-form">
+                <label for="custom-tts-text">Custom TTS · say this in voice</label>
+                <textarea id="custom-tts-text" rows="3" maxlength="280" placeholder="Type what Tsuki should say…" required></textarea>
+                <div class="custom-tts-footer"><small>1–280 characters · uses selected Molab or Colab · no AI reply</small><button type="submit" class="quiet strong" disabled>Speak in voice</button></div>
+              </form>
+              <p class="micro">Leaving is immediate, but the saved channel stays configured. Reconnecting or restarting the bridge may auto-join that channel.</p>
+            </section>
+            <form id="bot-settings" class="settings-grid">
+              <input id="guild_id" type="hidden">
+              <label><span class="field-caption">Voice channel</span><select id="voice_channel_id" required><option value="">Choose a voice channel</option></select></label>
+              <label><span class="field-caption">Text channel <small class="optional-inline">(optional)</small></span><select id="text_channel_id"><option value="">None · use voice-channel chat</option></select></label>
+              <p class="channel-scope-note" id="channel-scope-note" role="status" aria-live="polite">Checking where Tsuki listens…</p>
+              <fieldset class="choice-group" id="text_reply_mode">
+                <legend>Text reply mode</legend>
+                <p class="choice-intro">Choose when Tsuki replies to eligible channel messages.</p>
+                <div class="choice-options">
+                  <label class="choice-option"><input type="radio" name="text_reply_mode" value="mention" checked><span class="choice-copy"><strong>Only @mentions</strong><small>Reply when someone mentions Tsuki.</small></span></label>
+                  <label class="choice-option"><input type="radio" name="text_reply_mode" value="any"><span class="choice-copy"><strong id="reply-any-label">All messages in voice-channel chat</strong><small id="reply-any-detail">Reply in the selected voice chat.</small></span></label>
+                </div>
+              </fieldset>
+              <fieldset class="choice-group" id="text_voice_mode">
+                <legend>Text-chat voice</legend>
+                <p class="choice-intro">Choose when a text reply also produces audio.</p>
+                <div class="choice-options">
+                  <label class="choice-option"><input type="radio" name="text_voice_mode" value="keywords" checked><span class="choice-copy"><strong>Keywords only</strong><small>Speak when incoming text contains a trigger.</small></span></label>
+                  <label class="choice-option"><input type="radio" name="text_voice_mode" value="off"><span class="choice-copy"><strong>Off</strong><small>Text replies stay silent.</small></span></label>
+                </div>
+              </fieldset>
+              <label class="voice-keywords-row" id="voice-keywords-row" hidden>Voice trigger words (comma-separated)
+                <input id="text_voice_keywords" type="text" maxlength="240" autocomplete="off" spellcheck="false" placeholder="voice,say it,say this,say that,speak,talk,sing,read it">
+                <span class="section-hint">These triggers select audio delivery only after Tsuki has decided to reply. A keyword never overrides mention-only eligibility. Save to apply.</span>
+              </label>
+              <div class="guild-config-footer">
+                <span id="guild-save-note" class="section-hint">Review the configuration before saving.</span>
+                <button type="submit" class="quiet strong">Save server settings</button>
+              </div>
+            </form>
+
+          </div>
+        </section>
+
+        <section class="panel ai-panel" data-view="ai" id="personality" aria-labelledby="personality-title">
+          <header class="panel-head"><div><h2 id="personality-title">Tsuki’s personality</h2></div><span class="panel-tag" id="personality-source">assets/Modelfile</span></header>
+          <form id="personality-settings" class="form-stack">
+            <label for="personality-editor">Personality instructions</label>
+            <textarea id="personality-editor" name="base_personality" rows="15" maxlength="4000" spellcheck="true" disabled required placeholder="Reading the existing personality…"></textarea>
+            <div class="persona-toolbar">
+              <p id="personality-status" class="section-hint" role="status" aria-live="polite">Loading existing personality…</p>
+              <span id="personality-counter" class="section-hint">0 / 4000</span>
+            </div>
+            <div class="guild-config-footer"><span class="section-hint">Save backs up the original and restarts the API.</span><div><button id="personality-reset" type="button" class="quiet" disabled>Revert edits</button> <button id="personality-reload" type="button" class="quiet" disabled>Reload VPS</button> <button id="personality-save" type="submit" class="quiet strong" disabled>Save personality</button></div></div>
+          </form>
+          <details class="persona-advanced" id="personality-advanced">
+            <summary>Additional personality override <span id="personality-override-tag" class="panel-tag">OFF</span></summary>
+            <p class="section-hint">Clear and save to use only the base personality.</p>
+            <form id="personality-override-settings" class="form-stack">
+              <label for="personality-override-editor">Additional instructions</label>
+              <textarea id="personality-override-editor" rows="5" maxlength="4000" disabled placeholder="No additional override"></textarea>
+              <p id="personality-override-status" class="section-hint" role="status">Loading optional override…</p>
+              <div class="guild-config-footer"><span id="personality-override-counter" class="section-hint">0 / 4000</span><div><button id="personality-override-clear" type="button" class="quiet" disabled>Clear override</button> <button id="personality-override-save" type="submit" class="quiet strong" disabled>Save override</button></div></div>
+            </form>
+          </details>
+        </section>
+
+        <section class="panel context-awareness-plan" data-view="ai" id="llm" aria-labelledby="llm-title">
+          <span class="eyebrow">TEXT &amp; VOICE / INFERENCE</span>
+          <div class="provider-fold-shell">
+          <details class="provider-fold" id="groq-provider-details" open>
+            <summary><strong id="llm-title">Groq API keys</strong><small id="groq-provider-state">Checking…</small></summary>
+            <div class="provider-fold-body groq-provider-section">
+              <p class="panel-intro">Keys are masked, for example <code>sk-...23hew</code>. New keys are stored privately and never returned to your browser. Adding or removing a key reconnects the API and bridge.</p>
+            <p class="section-hint">“Available models” reads the provider’s model catalog without sending a test prompt or chat completion.</p>
+            <div class="inference-model-row" data-inference-model="groq">
+              <label for="groq-model-select">Groq LLM model</label>
+              <small id="groq-model-current">Current: reading saved model…</small>
+              <div class="inference-model-controls">
+                <button type="button" class="quiet" id="groq-model-load">Available models</button>
+                <select id="groq-model-select" disabled><option value="">Fetch available models first</option></select>
+                <button type="button" class="quiet strong" id="groq-model-save" disabled>Save Groq model</button>
+              </div>
+              <p id="groq-model-status" class="section-hint" role="status">Model availability unverified.</p>
+            </div>
+          <div id="groq-key-list" class="groq-key-list" role="list" aria-label="Groq API key inventory"></div>
+          <form id="groq-add-form" class="groq-add-form" autocomplete="off">
+            <label for="groq-new-key">Add Groq API key</label>
+            <input id="groq-new-key" type="password" maxlength="260" autocomplete="new-password" spellcheck="false" placeholder="gsk_… or sk-…" required>
+            <button class="quiet strong" type="submit">Add key</button>
+          </form>
+          <p id="groq-key-status" role="status" class="section-hint">Loading Groq keys…</p>
+            <div class="inference-usage" aria-label="Daily Groq API calls"><div class="usage-summary"><span>Total API calls today</span><strong id="groq-total-calls">Unavailable</strong><small id="groq-calls-coverage">Reading actual usage…</small></div></div>
+            </div>
+          </details>
+          <button type="button" class="quiet provider-enable" id="groq-provider-toggle" aria-pressed="false" aria-label="Enable Groq" disabled>Disabled</button>
+          </div>
+          <div class="provider-fold-shell">
+          <details class="provider-key-section provider-fold" id="literouter-provider-details">
+            <summary><strong id="literouter-keys-heading">LiteRouter API keys</strong><small id="literouter-provider-state">Checking…</small></summary>
+            <div class="provider-fold-body">
+            <div class="provider-key-heading"><button type="button" class="quiet key-add-toggle" id="literouter-key-toggle" aria-controls="literouter-key-form" aria-expanded="false" aria-label="Add LiteRouter API key"><span aria-hidden="true">+</span> Add key</button></div>
+            <p class="section-hint">Keys are masked. Adding a key checks its free-model catalog without sending a chat prompt. On each successful LiteRouter request, the API rotates to the next key; rejected keys cool down. Provider account-level cooldowns still apply.</p>
+            <div id="literouter-key-list" class="groq-key-list" role="list" aria-label="LiteRouter API key inventory"></div>
+            <p id="literouter-key-preview" class="section-hint" role="status">Loading LiteRouter keys…</p>
+            <form id="literouter-key-form" class="groq-add-form inference-key-form" autocomplete="off" hidden>
+              <label for="literouter-model-key">Add LiteRouter API key</label>
+              <input id="literouter-model-key" type="password" autocomplete="new-password" spellcheck="false" maxlength="512" placeholder="Private LiteRouter API key" required>
+              <button type="submit" class="quiet">Save key</button>
+            </form>
+            <p class="section-hint">“Available models” reads the provider’s model catalog without sending a test prompt or chat completion.</p>
+            <div class="inference-model-row" data-inference-model="literouter">
+              <label for="literouter-model-select">LiteRouter LLM model · free only</label>
+              <small id="literouter-model-current">Current: reading saved model…</small>
+              <div class="inference-model-controls">
+                <button type="button" class="quiet" id="literouter-model-load">Available models</button>
+                <select id="literouter-model-select" disabled><option value="">Fetch available models first</option></select>
+                <button type="button" class="quiet strong" id="literouter-model-save" disabled>Save LiteRouter model</button>
+              </div>
+              <p id="literouter-model-status" class="section-hint" role="status">Model availability unverified.</p>
+            </div>
+            </div>
+          </details>
+          <button type="button" class="quiet provider-enable" id="literouter-provider-toggle" aria-pressed="false" aria-label="Enable LiteRouter" disabled>Disabled</button>
+          </div>
+          <details class="provider-routing-details" id="inference-provider-settings">
+            <summary>LLM provider routing &amp; order <small>Advanced</small></summary>
+            <p class="section-hint">Choose the reply-model provider order. The C# API keeps the current provider when it remains in the list and may rotate after rate limits. Voice/TTS routing remains separate.</p>
+          <div id="inference-provider-list" class="inference-provider-list" role="list" aria-label="Ordered LLM API providers"></div>
+          <div class="inference-add-row">
+            <label for="inference-add-provider">Add provider</label>
+            <select id="inference-add-provider"><option value="">Choose an API provider…</option></select>
+            <button type="button" class="quiet" id="inference-add">Add</button>
+          </div>
+          <div class="guild-config-footer"><span class="section-hint" id="inference-status" role="status">Reading configured inference providers…</span><button type="button" class="quiet strong" id="inference-save" disabled>Save LLM providers</button></div>
+          </details>
+        </section>
+
+        <section class="panel context-awareness-plan" data-view="ai" id="context-awareness" aria-labelledby="context-awareness-title">
+          <header class="panel-head"><div><span class="eyebrow">VOICE &amp; TEXT CHAT / CONFIGURATION</span><h2 id="context-awareness-title">Conversation awareness</h2></div><span class="panel-tag">DISCORD ONLY</span></header>
+          <p class="panel-intro">Direct requests and short same-speaker follow-ups can receive replies. Background conversation is observed briefly in process memory and does not call the reply model or speech system.</p>
+          <form id="engagement-settings">
+            <label for="voice_engagement_mode">Voice engagement mode</label>
+            <select id="voice_engagement_mode" name="voice_engagement_mode">
+              <option value="wake_only">Wake only · direct address</option>
+              <option value="context_aware">Context aware · direct address + follow-ups</option>
+              <option value="proactive">Proactive · opt-in room invitations</option>
+            </select>
+            <label for="chat_engagement_mode">Eligible text chat engagement mode</label>
+            <select id="chat_engagement_mode" name="chat_engagement_mode">
+              <option value="wake_only">Wake only · direct address</option>
+              <option value="context_aware">Context aware · direct address + follow-ups</option>
+              <option value="proactive">Proactive · opt-in room invitations</option>
+            </select>
+            <p class="section-hint">Text reply mode “Only @mentions” still requires an actual @mention or reply to Tsuki. Select “All messages” under Server settings to consider contextual chat turns. Manual /tfocus and selected channels always take priority.</p>
+            <label for="engagement_aliases">Spoken names / aliases (comma-separated)</label>
+            <input id="engagement_aliases" name="engagement_aliases" type="text" maxlength="240" autocomplete="off" spellcheck="false" value="tsuki,tsukihime">
+            <label for="engagement_followup_ms">Follow-up window in milliseconds (0–30000)</label>
+            <input id="engagement_followup_ms" name="engagement_followup_ms" type="number" min="0" max="30000" step="1000" value="10000">
+            <label for="classifier_model">Optional Groq classifier model ID</label>
+            <input id="classifier_model" name="classifier_model" type="text" maxlength="100" autocomplete="off" spellcheck="false" placeholder="Groq model ID · leave empty to disable">
+            <p class="section-hint" id="engagement-classifier-status">Checking optional classifier configuration…</p>
+            <p class="section-hint">The classifier uses the existing private Groq key pool and runs only for ambiguous eligible turns. A model ID does not prove API-key or model availability; errors abstain. Clear the ID and use wake-only or context-aware modes to disable it.</p>
+            <div class="guild-config-footer"><span id="engagement-save-note" class="section-hint">Checking current settings…</span><button type="submit" class="quiet strong">Apply awareness settings</button></div>
+          </form>
+          <div id="engagement-metrics" class="metric-grid" aria-live="polite">Observed counters unavailable until the bridge reports them. Select Refresh metrics above.</div>
+          <p class="section-hint">These changes reconnect the bridge and reset ephemeral context. No microphone monitoring outside Discord, Molab model changes, or permanent overheard-memory writes.</p>
+        </section>
+
+        <section class="panel infra-panel" data-view="vps" id="vps" aria-labelledby="vps-title">
+          <header class="panel-head infra-head">
+            <div><span class="eyebrow">04 / INFRASTRUCTURE</span><h2 id="vps-title">VPS overview</h2></div>
+            <span class="panel-tag">LATEST SNAPSHOT</span>
+          </header>
+          <div id="system" class="system-stats"></div>
+          <div class="infra-main">
+            <div>
+              <h3>Containers</h3>
+              <p class="section-hint">State and consumption reported by Docker. Missing metrics are shown as unavailable.</p>
+              <div id="services" class="service-list"></div>
+            </div>
+            <aside class="service-actions">
+              <h3>Service actions</h3>
+              <p>Restarts may briefly interrupt replies. Bridge controls are above.</p>
+              <button type="button" data-action="restart_api" class="quiet">Restart API</button>
+              <button type="button" data-action="restart_caddy" class="quiet">Restart gateway</button>
+              <button type="button" data-action="restart_chromadb" class="quiet">Restart memory DB</button>
+            </aside>
+          </div>
+        </section>
+
+        <section class="secondary" data-view="account" id="account" aria-label="Account settings">
+
+          <div class="secondary-grid">
+            <div class="account-settings-stack">
+            <details class="panel disclosure account-identity">
+              <summary><img id="avatar-editor-image" class="avatar avatar-large" alt="Current Discord bot avatar"><span><strong>Bot identity</strong><small>Preview or replace the Discord avatar</small></span><span aria-hidden="true" class="disclosure-icon">+</span></summary>
+              <div class="avatar-editor">
+                <div><strong id="avatar-editor-name">Tsukihime</strong><p>PNG, JPEG, or WebP · up to 1 MiB</p><label class="upload-button" for="avatar-file">Replace image</label><input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden></div>
+              </div>
+            </details>
+            <details class="panel disclosure account-security">
+              <summary><span class="account-card-icon" aria-hidden="true">✳</span><span><strong>Dashboard access</strong><small>Change your control-room password</small></span><span aria-hidden="true" class="disclosure-icon">+</span></summary>
+              <form id="password-form" class="form-stack">
+                <label for="current-password">Current password</label><input id="current-password" type="password" autocomplete="current-password" required>
+                <label for="new-password">New password</label><input id="new-password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+                <label for="confirm-password">Confirm new password</label><input id="confirm-password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+                <button type="submit" class="quiet strong">Change password</button>
+                <p class="micro">Changes only this private dashboard password. Supports symbols and spaces. Signs out all control sessions; the API web password is unchanged.</p>
+              </form>
+            </details>
+            </div>
+            <section class="panel account-session" aria-labelledby="account-session-title">
+              <div class="panel-head"><div><span class="eyebrow">CONTROL ROOM</span><h2 id="account-session-title">Session</h2></div><span class="session-lock" aria-hidden="true">◈</span></div>
+              <p class="panel-intro">Private dashboard access and current service status.</p>
+              <p class="section-hint"><a href="#personality">Edit personality instructions ↗</a> · <a href="#context-awareness">Configure conversation awareness ↗</a></p>
+              <div class="session-actions"><button type="button" class="quiet" id="session-refresh">Refresh status</button><button type="button" class="quiet" id="session-logout">Sign out</button></div>
+              <p class="micro">No public status data. Dashboard access is separate from your Discord account.</p>
+            </section>
+          </div>
+        </section>
+        <div id="status-message" class="status-message" role="status" aria-live="polite" hidden><span id="toast-text"></span><button id="dismiss-toast" type="button" class="toast-dismiss" aria-label="Dismiss notification">×</button></div>
+      </section>
+    </main>
+    <footer><span>TSUKIAI / EAST ASIA</span><span>PRIVATE OPERATIONS · NO PUBLIC STATUS DATA</span></footer>
+  </div>
+  <script type="module" src="/app.js?v=personality-copy-30"></script>
+</body>
+</html>

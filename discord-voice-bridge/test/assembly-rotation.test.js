@@ -156,6 +156,94 @@ test('emits partial and final transcript data and returns the final text', async
   assert.equal(result.language, 'en');
 });
 
+test('buffers 20 ms Discord chunks into AssemblyAI-safe 100 ms sends', async () => {
+  const sent = [];
+  const session = new AssemblyRealtimeSession({
+    keyPool: new AssemblyKeyPool(['key']),
+    transcriberFactory: () => ({
+      on() {},
+      async connect() { return { id: 'mock' }; },
+      sendAudio(buffer) {
+        if (buffer.length < 1600 || buffer.length > 32000) {
+          throw new Error('Input Duration Error');
+        }
+        sent.push(Buffer.from(buffer));
+      },
+      async close() {},
+    }),
+  });
+  await session.connect();
+  for (let i = 0; i < 11; i++) session.sendAudio(Buffer.alloc(640, i + 1));
+  assert.deepEqual(sent.map(buffer => buffer.length), [3200, 3200]);
+  await session.close();
+  assert.deepEqual(sent.map(buffer => buffer.length), [3200, 3200, 1600]);
+  assert.deepEqual(sent.map(buffer => buffer[0]), [1, 6, 11]);
+  assert.equal(sent[2].subarray(640).every(value => value === 0), true);
+});
+
+test('batches audio accumulated while realtime socket is connecting', async () => {
+  const sent = [];
+  let releaseConnect;
+  const waiting = new Promise(resolve => { releaseConnect = resolve; });
+  const session = new AssemblyRealtimeSession({
+    keyPool: new AssemblyKeyPool(['key']),
+    transcriberFactory: () => ({
+      on() {},
+      async connect() { await waiting; return { id: 'mock' }; },
+      sendAudio(buffer) {
+        assert.ok(buffer.length >= 1600);
+        sent.push(Buffer.from(buffer));
+      },
+      async close() {},
+    }),
+  });
+  const connecting = session.connect();
+  for (let i = 0; i < 6; i++) session.sendAudio(Buffer.alloc(640, 3));
+  releaseConnect();
+  await connecting;
+  assert.deepEqual(sent.map(buffer => buffer.length), [3200]);
+  await session.close();
+  assert.deepEqual(sent.map(buffer => buffer.length), [3200, 1600]);
+});
+
+test('a final short realtime frame is padded to the provider minimum', async () => {
+  const sent = [];
+  const session = new AssemblyRealtimeSession({
+    keyPool: new AssemblyKeyPool(['key']),
+    transcriberFactory: () => ({
+      on() {},
+      async connect() { return { id: 'mock' }; },
+      sendAudio(buffer) { sent.push(Buffer.from(buffer)); },
+      async close() {},
+    }),
+  });
+  await session.connect();
+  session.sendAudio(Buffer.alloc(640, 7));
+  await session.close();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].length, 1600);
+  assert.equal(sent[0].subarray(0, 640).every(value => value === 7), true);
+  assert.equal(sent[0].subarray(640).every(value => value === 0), true);
+});
+
+test('AssemblyAI send failure during final flush is visible for STT fallback', async () => {
+  const errors = [];
+  const session = new AssemblyRealtimeSession({
+    keyPool: new AssemblyKeyPool(['key']),
+    onError: error => errors.push(error.message),
+    transcriberFactory: () => ({
+      on() {},
+      async connect() { return { id: 'mock' }; },
+      sendAudio() { throw new Error('provider rejected final chunk'); },
+      async close() {},
+    }),
+  });
+  await session.connect();
+  session.sendAudio(Buffer.alloc(640));
+  await assert.rejects(session.close(), /provider rejected final chunk/);
+  assert.deepEqual(errors, ['provider rejected final chunk']);
+});
+
 test('downsamples split Discord PCM chunks to 16 kHz mono', () => {
   const convert = createPcm48StereoTo16Mono();
   const first = Buffer.alloc(2 * 4);

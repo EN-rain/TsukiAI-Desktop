@@ -60,24 +60,24 @@ def _(API_URL, mo, requests, tts_key_input):
             kind="warn",
         )
     else:
-        response = requests.get(
+        health_response = requests.get(
             f"{API_URL}/health",
             headers={"X-Api-Key": TTS_API_KEY},
             timeout=30,
         )
 
         try:
-            payload = response.json()
+            payload = health_response.json()
         except ValueError:
             payload = {}
 
         health_output = mo.callout(
             mo.md(
-                f"HTTP `{response.status_code}`  \n"
+                f"HTTP `{health_response.status_code}`  \n"
                 f"Mode: `{payload.get('mode', 'unknown')}`  \n"
                 f"Profile: `{payload.get('profile', 'unknown')}`"
             ),
-            kind="success" if response.ok else "danger",
+            kind="success" if health_response.ok else "danger",
         )
 
     health_output
@@ -97,7 +97,7 @@ def _(mo):
         value="English",
         label="Language",
     )
-    generate_button = mo.ui.button(label="Generate voice")
+    generate_button = mo.ui.run_button(label="Generate voice")
 
     mo.vstack([text_input, language_input, generate_button])
 
@@ -119,7 +119,7 @@ def _(
     elif not TTS_API_KEY:
         result = mo.callout("TTS API key is missing.", kind="danger")
     else:
-        response = requests.post(
+        tts_response = requests.post(
             f"{API_URL}/tts",
             headers={"X-Api-Key": TTS_API_KEY},
             json={
@@ -129,16 +129,16 @@ def _(
             timeout=120,
         )
 
-        if response.ok:
+        if tts_response.ok:
             result = mo.vstack(
                 [
-                    mo.md(f"Generated `{len(response.content):,}` audio bytes."),
-                    mo.audio(response.content),
+                    mo.md(f"Generated `{len(tts_response.content):,}` audio bytes."),
+                    mo.audio(tts_response.content),
                 ]
             )
         else:
             result = mo.callout(
-                f"TTS request failed: HTTP {response.status_code}",
+                f"TTS request failed: HTTP {tts_response.status_code}",
                 kind="danger",
             )
 

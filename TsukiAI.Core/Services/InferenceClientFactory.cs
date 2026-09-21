@@ -9,7 +9,34 @@ namespace TsukiAI.Core.Services;
 /// </summary>
 public static class InferenceClientFactory
 {
+    public const string QwenAbliteratedModel = "lukey03/Qwen3.5-9B-abliterated";
+    private const string MolabLlmUrl = "https://molab-tts.tsukihime.dpdns.org/v1";
+    private const string ColabLlmUrl = "https://colab-tts.tsukihime.dpdns.org/v1";
+
+    // This is independent of the selected speech synthesizer. Existing API
+    // credentials/models remain untouched when TSUKI_LLM_PROVIDER=api.
+    public static IInferenceClient CreateForProvider(
+        AppSettings settings, string provider, string? llmApiKey,
+        ISemanticMemoryService? semanticMemory = null)
+    {
+        var normalized = (provider ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized == "api") return CreateApiProvider(settings, semanticMemory);
+        if (normalized is not ("molab" or "colab"))
+            throw new ArgumentException("LLM provider must be api, molab or colab", nameof(provider));
+        if (string.IsNullOrWhiteSpace(llmApiKey))
+            throw new InvalidOperationException("TSUKI_LLM_API_KEY must be configured for notebook LLM serving");
+        return new RemoteInferenceClient(
+            normalized == "molab" ? MolabLlmUrl : ColabLlmUrl,
+            llmApiKey.Trim(), QwenAbliteratedModel, semanticMemory,
+            settings.GetGenerationTuning(), settings.ReplyTonePreset);
+    }
+
     public static IInferenceClient Create(AppSettings settings, ISemanticMemoryService? semanticMemory = null)
+        => CreateForProvider(settings,
+            EnvConfiguration.Get("TSUKI_LLM_PROVIDER", "api"),
+            EnvConfiguration.Get("TSUKI_LLM_API_KEY"), semanticMemory);
+
+    private static IInferenceClient CreateApiProvider(AppSettings settings, ISemanticMemoryService? semanticMemory)
     {
         var generationTuning = settings.GetGenerationTuning();
 
@@ -30,6 +57,39 @@ public static class InferenceClientFactory
             effectiveRemoteUrl = ResolveStartupRemoteUrl(settings.RemoteInferenceUrl);
             effectiveRemoteApiKey = ResolveEffectiveRemoteApiKey(settings, effectiveRemoteUrl);
             effectiveModelName = settings.ModelName;
+        }
+
+        // A single Groq inference provider still needs key rotation: multi-
+        // provider switching must not be required for 401/403/429 failover.
+        if (settings.InferenceMode == InferenceMode.RemoteColab &&
+            effectiveRemoteUrl.Contains("api.groq.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var groqKeys = GroqApiKeyPool.LoadFromFileOrValues(
+                EnvConfiguration.Get("TSUKI_GROQ_API_KEYS_FILE"),
+                EnvConfiguration.Get("GROQ_API_KEYS_FILE"),
+                EnvConfiguration.Get("GROQ_KEYS_HOST_PATH"),
+                EnvConfiguration.Get("TSUKI_GROQ_API_KEYS"),
+                effectiveRemoteApiKey);
+            DevLog.WriteLine("InferenceClientFactory: Groq inference rotation loaded ({0} keys)", groqKeys.Count);
+            return new GroqRotatingInferenceClient(
+                effectiveRemoteUrl, EnvConfiguration.Get("TSUKI_GROQ_MODEL", effectiveModelName), groqKeys,
+                effectiveRemoteApiKey, semanticMemory,
+                generationTuning, settings.ReplyTonePreset);
+        }
+
+        if (settings.InferenceMode == InferenceMode.RemoteColab &&
+            IsLiteRouterUrl(effectiveRemoteUrl))
+        {
+            var keys = GroqApiKeyPool.LoadFromFileOrValues(
+                EnvConfiguration.Get("TSUKI_LITEROUTER_API_KEYS_FILE"),
+                EnvConfiguration.Get("TSUKI_LITEROUTER_API_KEYS"),
+                EnvConfiguration.Get("TSUKI_LITEROUTER_API_KEY"),
+                effectiveRemoteApiKey).WithRoundRobin();
+            return new LiteRouterRotatingInferenceClient(
+                "https://api.literouter.com/v1",
+                ProviderSwitchingService.ResolveLiteRouterModel(effectiveModelName),
+                keys, semanticMemory: semanticMemory,
+                tuning: generationTuning, replyTonePreset: settings.ReplyTonePreset);
         }
 
         return settings.InferenceMode switch
@@ -60,6 +120,10 @@ public static class InferenceClientFactory
     private static string ResolveEffectiveRemoteApiKey(AppSettings settings, string remoteUrl)
     {
         var url = (remoteUrl ?? string.Empty).Trim().ToLowerInvariant();
+        // Never reuse another provider's generic remote credential for LiteRouter.
+        // Its secrets are exclusively TSUKI_LITEROUTER_API_KEY / _API_KEYS(_FILE).
+        if (IsLiteRouterUrl(remoteUrl))
+            return NormalizeApiKey(EnvConfiguration.Get("TSUKI_LITEROUTER_API_KEY"));
         string providerKey = string.Empty;
 
         if (url.Contains("cerebras.ai"))
@@ -86,6 +150,10 @@ public static class InferenceClientFactory
         var selected = string.IsNullOrWhiteSpace(providerKey) ? settings.RemoteInferenceApiKey : providerKey;
         return NormalizeApiKey(selected);
     }
+
+    private static bool IsLiteRouterUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+        uri.Host.Equals("api.literouter.com", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeApiKey(string? value)
     {

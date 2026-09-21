@@ -5,6 +5,8 @@ const DEFAULT_SAMPLE_RATE = 16000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 12000;
 const DEFAULT_CLOSE_TIMEOUT_MS = 8000;
 const DEFAULT_MAX_PENDING_AUDIO_BYTES = 4 * 1024 * 1024;
+const MIN_STREAM_CHUNK_MS = 50;
+const TARGET_STREAM_CHUNK_MS = 100;
 
 function withTimeout(promise, timeoutMs, message) {
   let timer;
@@ -59,6 +61,9 @@ export class AssemblyRealtimeSession {
   #fatalError = null;
   #pendingAudio = [];
   #pendingAudioBytes = 0;
+  #streamAudio = Buffer.alloc(0);
+  #minStreamChunkBytes;
+  #targetStreamChunkBytes;
   #finalTurns = new Map();
   #notifiedFinalTurns = new Set();
   #language = '';
@@ -97,6 +102,10 @@ export class AssemblyRealtimeSession {
     this.#connectTimeoutMs = connectTimeoutMs;
     this.#closeTimeoutMs = closeTimeoutMs;
     this.#maxPendingAudioBytes = maxPendingAudioBytes;
+    // 16-bit mono PCM: the SDK requires 50–1000 ms per sendAudio call.
+    // Discord's decoded frame is normally 20 ms, so emit 100 ms chunks.
+    this.#minStreamChunkBytes = Math.ceil(sampleRate * MIN_STREAM_CHUNK_MS / 1000) * 2;
+    this.#targetStreamChunkBytes = Math.ceil(sampleRate * TARGET_STREAM_CHUNK_MS / 1000) * 2;
     this.#onPartial = onPartial;
     this.#onFinal = onFinal;
     this.#onError = onError;
@@ -131,7 +140,7 @@ export class AssemblyRealtimeSession {
     }
 
     try {
-      this.#transcriber.sendAudio(chunk);
+      this.#sendBufferedAudio(chunk);
     } catch (error) {
       this.#fatalError = error;
       this.#recordActiveFailure(error);
@@ -150,6 +159,15 @@ export class AssemblyRealtimeSession {
           await this.#safeClose(transcriber, false);
         } else {
           try {
+            this.#flushStreamAudio();
+          } catch (error) {
+            this.#fatalError = error;
+            this.#recordActiveFailure(error);
+            safeInvokeError(this.#onError, error);
+            await this.#safeClose(transcriber, false);
+            throw error;
+          }
+          try {
             await withTimeout(
               transcriber.close(true),
               this.#closeTimeoutMs,
@@ -167,6 +185,7 @@ export class AssemblyRealtimeSession {
       this.#activeFailureReported = false;
       this.#pendingAudio = [];
       this.#pendingAudioBytes = 0;
+      this.#streamAudio = Buffer.alloc(0);
     }
 
     return this.result();
@@ -268,8 +287,32 @@ export class AssemblyRealtimeSession {
     this.#pendingAudio = [];
     this.#pendingAudioBytes = 0;
     for (const chunk of pending) {
-      this.#transcriber.sendAudio(chunk);
+      this.#sendBufferedAudio(chunk);
     }
+  }
+
+  #sendBufferedAudio(chunk) {
+    this.#streamAudio = this.#streamAudio.length
+      ? Buffer.concat([this.#streamAudio, chunk])
+      : chunk;
+    while (this.#streamAudio.length >= this.#targetStreamChunkBytes) {
+      this.#transcriber.sendAudio(this.#streamAudio.subarray(0, this.#targetStreamChunkBytes));
+      this.#streamAudio = this.#streamAudio.subarray(this.#targetStreamChunkBytes);
+    }
+  }
+
+  #flushStreamAudio() {
+    if (!this.#streamAudio.length) return;
+    // End-of-utterance tails smaller than 50 ms must be padded, not sent as
+    // raw 20 ms Discord frames (AssemblyAI rejects those synchronously).
+    const tail = this.#streamAudio.length < this.#minStreamChunkBytes
+      ? Buffer.concat([
+          this.#streamAudio,
+          Buffer.alloc(this.#minStreamChunkBytes - this.#streamAudio.length),
+        ])
+      : this.#streamAudio;
+    this.#transcriber.sendAudio(tail);
+    this.#streamAudio = Buffer.alloc(0);
   }
 
   #handleTurn(event) {

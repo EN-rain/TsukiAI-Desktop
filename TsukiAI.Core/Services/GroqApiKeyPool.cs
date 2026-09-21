@@ -11,16 +11,24 @@ public sealed class GroqApiKeyPool
     private const int TransientFailureCooldownSeconds = 5;
 
     private readonly string[] _keys;
+    private readonly bool _rotateOnSuccess;
     private readonly object _gate = new();
     private readonly Dictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.Ordinal);
     private int _cursor;
 
-    public GroqApiKeyPool(IEnumerable<string>? keys)
+    public GroqApiKeyPool(IEnumerable<string>? keys, bool rotateOnSuccess = false)
     {
         _keys = NormalizeKeys(keys).ToArray();
+        _rotateOnSuccess = rotateOnSuccess;
     }
 
+    /// <summary>Use round-robin on successful calls for rate-aware API key distribution.</summary>
+    public GroqApiKeyPool WithRoundRobin() => new(_keys, rotateOnSuccess: true);
+
     public int Count => _keys.Length;
+
+    /// <summary>Configured keys for internal, authenticated metrics labeling.</summary>
+    public IReadOnlyList<string> GetAllKeys() => Array.AsReadOnly(_keys);
 
     /// <summary>
     /// Loads the external file first. If it is missing or empty, the supplied
@@ -91,6 +99,25 @@ public sealed class GroqApiKeyPool
         }
     }
 
+    /// <summary>
+    /// LLM retries only eligible keys: when every key is cooling down, the
+    /// current turn fails fast instead of hammering the entire rejected pool.
+    /// GetCandidates retains its legacy fallback behavior for STT.
+    /// </summary>
+    public IReadOnlyList<string> GetAvailableCandidates(DateTimeOffset? now = null)
+    {
+        lock (_gate)
+        {
+            if (_keys.Length == 0)
+                return [];
+
+            var at = now ?? DateTimeOffset.UtcNow;
+            return OrderedKeys()
+                .Where(key => !_cooldownUntil.TryGetValue(key, out var until) || until <= at)
+                .ToList();
+        }
+    }
+
     public void MarkSuccess(string key)
     {
         lock (_gate)
@@ -99,12 +126,12 @@ public sealed class GroqApiKeyPool
             if (index < 0)
                 return;
 
-            _cursor = index;
+            _cursor = _rotateOnSuccess ? (index + 1) % _keys.Length : index;
             _cooldownUntil.Remove(key);
         }
     }
 
-    public void MarkFailure(string key, int statusCode)
+    public void MarkFailure(string key, int statusCode, TimeSpan? retryAfter = null)
     {
         lock (_gate)
         {
@@ -118,6 +145,8 @@ public sealed class GroqApiKeyPool
                 : statusCode == 429
                     ? TimeSpan.FromSeconds(RateLimitCooldownSeconds)
                     : TimeSpan.FromSeconds(TransientFailureCooldownSeconds);
+            if (statusCode == 429 && retryAfter is { } requested && requested > cooldown)
+                cooldown = requested;
             _cooldownUntil[key] = DateTimeOffset.UtcNow.Add(cooldown);
         }
     }

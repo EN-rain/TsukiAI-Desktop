@@ -22,10 +22,16 @@ export const unauthorizedEvent = "tsuki:unauthorized";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     credentials: "same-origin",
-    headers: init?.body && !(init.body instanceof FormData)
-      ? { "Content-Type": "application/json", ...init?.headers }
-      : init?.headers,
     ...init,
+    // The API requires a non-simple header for browser state changes. External
+    // sites cannot send it with cookies without passing a CORS preflight.
+    headers: {
+      ...((init?.method && !["GET", "HEAD", "OPTIONS"].includes(init.method.toUpperCase()))
+        ? { "X-Tsuki-Client": "web" } : {}),
+      ...(init?.body && !(init.body instanceof FormData)
+        ? { "Content-Type": "application/json" } : {}),
+      ...init?.headers,
+    },
   });
 
   if (response.status === 401) {

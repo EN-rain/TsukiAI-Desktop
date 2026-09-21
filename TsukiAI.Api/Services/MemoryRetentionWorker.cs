@@ -25,6 +25,9 @@ public sealed class MemoryRetentionWorker(
             try
             {
                 await memory.DeleteOlderThanAsync(TimeSpan.FromDays(textChat.RetentionDays), stoppingToken);
+                var removedFiles = textChat.DeleteInactiveHistories();
+                if (removedFiles > 0)
+                    logger.LogInformation("Removed {Count} expired per-user history files", removedFiles);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

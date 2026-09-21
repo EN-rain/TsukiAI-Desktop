@@ -412,6 +412,8 @@ public sealed class InferenceRateLimitException : InferenceException
     /// Initializes a new instance of the <see cref="InferenceRateLimitException"/> class with a specified error message.
     /// </summary>
     /// <param name="message">A description of the rate limit error that occurred.</param>
-    public InferenceRateLimitException(string message)
-        : base($"Rate limit exceeded: {message}") { }
+    public InferenceRateLimitException(string message, TimeSpan? retryAfter = null)
+        : base($"Rate limit exceeded: {message}") => RetryAfter = retryAfter;
+
+    public TimeSpan? RetryAfter { get; }
 }

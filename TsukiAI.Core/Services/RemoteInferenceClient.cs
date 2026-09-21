@@ -47,7 +47,6 @@ public sealed class RemoteInferenceClient : IInferenceClient
             UseJitter = true,
             ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
                 .HandleResult(r => 
-                    r.StatusCode == System.Net.HttpStatusCode.TooManyRequests ||
                     r.StatusCode == System.Net.HttpStatusCode.RequestTimeout ||
                     (int)r.StatusCode >= 500)
                 .Handle<HttpRequestException>()
@@ -66,7 +65,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
             SamplingDuration = TimeSpan.FromSeconds(30),
             BreakDuration = TimeSpan.FromSeconds(30),
             ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                .HandleResult(r => (int)r.StatusCode >= 500 || r.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                .HandleResult(r => (int)r.StatusCode >= 500)
                 .Handle<HttpRequestException>()
                 .Handle<TaskCanceledException>(ex => !ex.CancellationToken.IsCancellationRequested),
             OnOpened = args =>
@@ -110,6 +109,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
         
         ApiKey = apiKey ?? "";
         Model = NormalizeModelForBaseUrl(baseUrl, modelName);
+        _skipGenerateEndpoint = UsesOpenAiChatCompletionsDirectly(BaseUrl);
         _semanticMemory = semanticMemory;
         _tuning = (tuning ?? GenerationTuningSettings.Default).Clamp();
         _replyTonePreset = string.IsNullOrWhiteSpace(replyTonePreset) ? "natural" : replyTonePreset.Trim().ToLowerInvariant();
@@ -126,10 +126,14 @@ public sealed class RemoteInferenceClient : IInferenceClient
             _memoryWriteWorkerTask = Task.Run(MemoryWriteWorkerAsync);
         }
         
-        _httpClient = new HttpClient
-        {
-            Timeout = Timeout.InfiniteTimeSpan // Streaming needs infinite timeout
-        };
+        // The handler sits below Polly and every endpoint fallback, so every
+        // outbound Groq HTTP send is counted once (including retry attempts).
+        _httpClient = Uri.TryCreate(BaseUrl, UriKind.Absolute, out var groqUri) &&
+            groqUri.Host.Equals("api.groq.com", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(ApiKey)
+            ? new HttpClient(new GroqUsageHttpHandler(new HttpClientHandler(), GroqUsageLedger.Default, ApiKey))
+            : new HttpClient();
+        _httpClient.Timeout = Timeout.InfiniteTimeSpan; // Streaming needs infinite timeout
         
         // Add ngrok header to skip browser warning
         _httpClient.DefaultRequestHeaders.Add("ngrok-skip-browser-warning", "true");
@@ -171,7 +175,9 @@ public sealed class RemoteInferenceClient : IInferenceClient
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
             
-            var response = await _httpClient.PostAsync($"{BaseUrl}/generate", content, cts.Token);
+            using var response = _skipGenerateEndpoint
+                ? await _httpClient.GetAsync($"{BaseUrl}/models", cts.Token)
+                : await _httpClient.PostAsync($"{BaseUrl}/generate", content, cts.Token);
             IsWarmedUp = response.IsSuccessStatusCode;
             
             if (response.IsSuccessStatusCode)
@@ -254,7 +260,10 @@ public sealed class RemoteInferenceClient : IInferenceClient
             var json = JsonSerializer.Serialize(testRequest);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await _httpClient.PostAsync($"{BaseUrl}/generate", content, cts.Token);
+            using var response = _skipGenerateEndpoint
+                ? await _httpClient.GetAsync($"{BaseUrl}/models", cts.Token)
+                : await _httpClient.PostAsync($"{BaseUrl}/generate", content, cts.Token);
+            response.EnsureSuccessStatusCode();
             DevLog.WriteLine("RemoteInferenceClient: Keep-alive ping sent");
         }
         catch (Exception ex)
@@ -374,11 +383,11 @@ public sealed class RemoteInferenceClient : IInferenceClient
             
             DevLog.WriteLine($"RemoteInferenceClient: Response status: {response.StatusCode}");
             
-            // Check for rate limit (429) - retry policy will have already attempted retries
+            // Respect provider Retry-After; rotation decides which eligible key to try.
             if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
             {
                 DevLog.WriteLine("RemoteInferenceClient: Rate limit (429) detected");
-                throw new InferenceRateLimitException("Rate limit exceeded (429)");
+                throw new InferenceRateLimitException("Rate limit exceeded (429)", ReadRetryAfter(response));
             }
             
             response.EnsureSuccessStatusCode();
@@ -404,6 +413,10 @@ public sealed class RemoteInferenceClient : IInferenceClient
             EnqueueMemoryWrite(userText, replyText);
 
             return ResponsePostProcessor.CleanAndValidate(new AiReply(replyText, "neutral"), intent, runtimeTuning);
+        }
+        catch (InferenceRateLimitException)
+        {
+            throw;
         }
         catch (HttpRequestException ex)
         {
@@ -472,6 +485,17 @@ public sealed class RemoteInferenceClient : IInferenceClient
         string? systemInstructions = null,
         string? correlationId = null)
     {
+        // LiteRouter exposes OpenAI /chat/completions, not the custom
+        // /chat_stream route. Deliver the completed reply through the callback.
+        if (Uri.TryCreate(BaseUrl, UriKind.Absolute, out var liteRouterEndpoint) &&
+            liteRouterEndpoint.Host.Equals("api.literouter.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var reply = await ChatWithEmotionAsync(userText, personaName, preferredEmotion,
+                history, ct, systemInstructions, correlationId);
+            onPartialReply?.Invoke(reply.Reply);
+            return reply;
+        }
+
         try
         {
             personaName = string.IsNullOrWhiteSpace(personaName) ? "Tsuki" : personaName.Trim();
@@ -529,7 +553,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
                 if (streamResponse.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
                 {
                     DevLog.WriteLine("RemoteInferenceClient: Rate limit (429) detected in streaming");
-                    throw new InferenceRateLimitException("Rate limit exceeded (429)");
+                    throw new InferenceRateLimitException("Rate limit exceeded (429)", ReadRetryAfter(streamResponse));
                 }
                 
                 streamResponse.EnsureSuccessStatusCode();
@@ -589,6 +613,10 @@ public sealed class RemoteInferenceClient : IInferenceClient
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (InferenceRateLimitException)
         {
             throw;
         }
@@ -748,6 +776,7 @@ public sealed class RemoteInferenceClient : IInferenceClient
     {
         BaseUrl = baseUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(baseUrl));
         Model = NormalizeModelForBaseUrl(BaseUrl, Model);
+        _skipGenerateEndpoint = UsesOpenAiChatCompletionsDirectly(BaseUrl);
         DevLog.WriteLine($"RemoteInferenceClient: Base URL updated to: {BaseUrl}");
     }
 
@@ -760,6 +789,25 @@ public sealed class RemoteInferenceClient : IInferenceClient
             _httpClient.DefaultRequestHeaders.Authorization = 
                 new AuthenticationHeaderValue("Bearer", ApiKey);
         }
+    }
+
+    private static bool UsesOpenAiChatCompletionsDirectly(string baseUrl) =>
+        Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) &&
+        (endpoint.Host.Equals("api.groq.com", StringComparison.OrdinalIgnoreCase) ||
+         endpoint.Host.Equals("api.literouter.com", StringComparison.OrdinalIgnoreCase) ||
+         endpoint.AbsolutePath.TrimEnd('/').EndsWith("/openai/v1", StringComparison.OrdinalIgnoreCase) ||
+         ((endpoint.Host.Equals("molab-tts.tsukihime.dpdns.org", StringComparison.OrdinalIgnoreCase) ||
+           endpoint.Host.Equals("colab-tts.tsukihime.dpdns.org", StringComparison.OrdinalIgnoreCase)) &&
+          endpoint.AbsolutePath.TrimEnd('/').Equals("/v1", StringComparison.OrdinalIgnoreCase)));
+
+    private static TimeSpan? ReadRetryAfter(HttpResponseMessage response)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter?.Delta is { } delta && delta > TimeSpan.Zero)
+            return delta;
+        if (retryAfter?.Date is { } date && date > DateTimeOffset.UtcNow)
+            return date - DateTimeOffset.UtcNow;
+        return null;
     }
 
     private async Task<HttpResponseMessage> PostGenerateWithFallbackAsync(
@@ -814,7 +862,11 @@ public sealed class RemoteInferenceClient : IInferenceClient
                 new { role = "system", content = systemPrompt },
                 new { role = "user", content = fullPrompt }
             },
-            max_tokens = GetEffectiveMaxTokens(Model, runtimeTuning),
+            // The explicitly selected notebook Qwen endpoint accepts at most
+            // 512 output tokens. Keep its cap separate from other API models.
+            max_tokens = Model == InferenceClientFactory.QwenAbliteratedModel
+                ? Math.Min(512, GetEffectiveMaxTokens(Model, runtimeTuning))
+                : GetEffectiveMaxTokens(Model, runtimeTuning),
             temperature = runtimeTuning.Temperature,
             top_p = runtimeTuning.TopP,
             presence_penalty = runtimeTuning.PresencePenalty,
@@ -847,7 +899,8 @@ public sealed class RemoteInferenceClient : IInferenceClient
             }
         }
 
-        if (!response.IsSuccessStatusCode && (int)response.StatusCode is 400 or 404 or 422)
+        if (!_skipGenerateEndpoint && !response.IsSuccessStatusCode &&
+            (int)response.StatusCode is 400 or 404 or 422)
         {
             // Log the provider's error body before falling through — e.g. a decommissioned
             // model reports model_not_found here, which is otherwise indistinguishable

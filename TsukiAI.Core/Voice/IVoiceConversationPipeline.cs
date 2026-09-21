@@ -8,7 +8,9 @@ public interface IVoiceConversationPipeline
         string? correlationId = null,
         CancellationToken ct = default,
         bool synthesizeAudio = true,
-        string? memoryScope = null);
+        string? memoryScope = null,
+        bool molabVoiceReply = false,
+        IReadOnlyList<DiscordContextTurn>? contextTurns = null);
 
     Task<byte[]> SynthesizeTextToPcmAsync(
         string text,

@@ -29,6 +29,27 @@ public sealed class GroqApiKeyPoolTests
     }
 
     [Fact]
+    public void All_sixteen_keys_rotate_past_rejected_credentials_without_reusing_them()
+    {
+        var keys = Enumerable.Range(1, 16).Select(index => "test-key-" + index).ToArray();
+        var pool = new GroqApiKeyPool(keys);
+        Assert.Equal(16, pool.Count);
+
+        for (var index = 0; index < 15; index++)
+        {
+            var next = pool.GetCandidates();
+            Assert.Equal(keys[index], next[0]);
+            pool.MarkFailure(keys[index], index % 2 == 0 ? 403 : 429);
+        }
+
+        Assert.Equal([keys[15]], pool.GetCandidates());
+        pool.MarkFailure(keys[15], 403);
+        Assert.Empty(pool.GetAvailableCandidates());
+        pool.MarkSuccess(keys[15]);
+        Assert.Equal([keys[15]], pool.GetCandidates());
+    }
+
+    [Fact]
     public void External_file_is_used_before_inline_fallback_values()
     {
         var path = Path.Combine(Path.GetTempPath(), $"tsukiai-groq-{Guid.NewGuid():N}.keys");

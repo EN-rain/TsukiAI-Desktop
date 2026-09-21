@@ -1,0 +1,701 @@
+/* Focused layout overrides for the source-backed AI tab.
+   Keep the existing visual tokens; avoid another full dashboard redesign layer. */
+
+/* The snapshot already reports bridge, voice and container status. Do not
+   repeat those same readings in four more large overview cards. */
+#dashboard[data-active-tab="overview"] .overview-bridge,
+#dashboard[data-active-tab="overview"] .overview-voice,
+#dashboard[data-active-tab="overview"] .overview-health {
+  display: none;
+}
+#dashboard[data-active-tab="overview"] .overview-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: none;
+}
+#dashboard[data-active-tab="overview"] .overview-actions {
+  grid-column: 1;
+  width: 100%;
+  max-width: none;
+}
+#dashboard[data-active-tab="overview"] .action-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 10px;
+}
+
+/* Two focused configuration tabs instead of one long Discord + AI wall. */
+#dashboard[data-active-tab="ai"] > .ai-panel,
+#dashboard[data-active-tab="ai"] > .context-awareness-plan {
+  width: min(100%, 1060px);
+  min-width: 0;
+  max-width: none;
+  margin: 0 0 14px;
+  padding: clamp(16px, 2vw, 24px);
+  border: 1px solid #414141;
+  border-radius: 10px;
+  background: #171717;
+  box-shadow: none;
+}
+#dashboard[data-active-tab="ai"] .provider-switch {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+#dashboard[data-active-tab="ai"] .provider-option { min-width: 0; }
+#dashboard[data-active-tab="ai"] #engagement-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+  max-width: 760px;
+}
+#dashboard[data-active-tab="ai"] #engagement-settings select,
+#dashboard[data-active-tab="ai"] #engagement-settings input { width: 100%; }
+#dashboard[data-active-tab="ai"] .context-awareness-plan code {
+  overflow-wrap: anywhere;
+}
+
+#personality-settings,
+#personality-override-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+#personality-editor,
+#personality-override-editor {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 13px 14px;
+  line-height: 1.58;
+  font-size: 13px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  background: #101010;
+  color: #f3f3f3;
+  border: 1px solid #555;
+  border-radius: 8px;
+  resize: vertical;
+}
+#personality-editor { min-height: 315px; }
+#personality-override-editor { min-height: 115px; }
+#personality-editor:focus-visible,
+#personality-override-editor:focus-visible {
+  outline: 2px solid #ddd;
+  outline-offset: 2px;
+}
+.persona-toolbar,
+#personality-settings .guild-config-footer,
+#personality-override-settings .guild-config-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px 14px;
+}
+.persona-toolbar > p { margin: 0; flex: 1; }
+.persona-advanced {
+  margin-top: 18px;
+  border-top: 1px solid #414141;
+  padding-top: 16px;
+}
+.persona-advanced > summary {
+  cursor: pointer;
+  display: list-item;
+  font-size: 13px;
+  font-weight: 650;
+  color: #eee;
+}
+.persona-advanced > summary .panel-tag {
+  float: right;
+  pointer-events: none;
+}
+.persona-advanced[open] > summary { margin-bottom: 13px; }
+#dashboard[data-active-tab="discord-voice"] .voice-panel .route-feedback {
+  margin-top: 13px;
+}
+#dashboard[data-active-tab="discord-voice"] .voice-panel .voice-health-line {
+  margin-top: 9px;
+}
+#dashboard[data-active-tab="discord-voice"] .voice-analytics {
+  margin: 0;
+  padding: 15px 20px;
+}
+.voice-analytics > summary {
+  cursor: pointer;
+  color: #eee;
+  font-weight: 650;
+  font-size: 13px;
+}
+.voice-analytics[open] > summary { margin-bottom: 14px; }
+
+@media (max-width: 700px) {
+  #dashboard[data-active-tab="ai"] > .ai-panel,
+  #dashboard[data-active-tab="ai"] > .context-awareness-plan {
+    padding: 14px;
+  }
+  #dashboard[data-active-tab="ai"] .provider-switch {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #personality-editor { min-height: 240px; }
+  #personality-settings .guild-config-footer > div,
+  #personality-override-settings .guild-config-footer > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  .persona-advanced > summary .panel-tag { float: none; margin-left: 10px; }
+  .side-bottom { display: none; }
+}
+
+
+
+/* Balanced control-room layout: group related actions, constrain text, let
+   content determine card height, and do not stretch small cards to tall rows. */
+#dashboard[data-active-tab="discord-voice"] .discord-panel {
+  grid-template-columns: minmax(220px, .76fr) minmax(0, 1.24fr);
+  gap: 10px 14px;
+  align-items: start;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .discord-identity,
+#dashboard[data-active-tab="discord-voice"] .discord-panel .runtime-information {
+  grid-row: 3;
+  padding: 12px 14px;
+  min-height: 0;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .discord-identity {
+  align-self: start;
+  gap: 11px;
+  border-bottom: 1px solid #414141;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .discord-identity .avatar {
+  width: 56px; height: 56px; flex: 0 0 56px;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .discord-identity small {
+  max-width: 36ch;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .runtime-information h3 {
+  margin: 0 0 8px; font-size: 15px;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .facts {
+  display: grid; gap: 0;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .fact {
+  display: grid;
+  grid-template-columns: minmax(90px, .35fr) minmax(0, 1fr);
+  align-items: baseline; gap: 10px;
+  padding: 6px 0; border-bottom: 1px solid #343434;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .fact:last-child {
+  border-bottom: 0;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .fact strong {
+  text-align: left; overflow-wrap: anywhere; min-width: 0;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .runtime-actions {
+  grid-row: 4; grid-column: 1 / -1;
+  min-height: 0; padding: 10px 0 0;
+  gap: 8px 13px; align-items: center;
+  background: transparent; border: 0;
+  border-top: 1px solid #414141; border-radius: 0;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .runtime-actions h3 {
+  font-size: 14px; margin: 0;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .runtime-actions p {
+  margin: 0; flex: 1 1 190px; max-width: 45ch;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .runtime-actions button {
+  margin-left: auto; min-width: 0;
+}
+#dashboard[data-active-tab="discord-voice"] #bot-settings > .choice-group {
+  grid-column: auto; min-width: 0;
+  padding: 11px; border: 1px solid #414141;
+  border-radius: 9px;
+}
+#dashboard[data-active-tab="discord-voice"] #bot-settings .choice-options {
+  grid-template-columns: minmax(0,1fr);
+  gap: 6px;
+}
+#dashboard[data-active-tab="discord-voice"] #bot-settings .choice-option {
+  min-height: 55px; padding: 8px 10px;
+}
+#dashboard[data-active-tab="discord-voice"] #bot-settings .choice-copy small {
+  line-height: 1.35;
+}
+
+/* Each model configuration is a separate tool, not a height-matched tile.
+   Keep native keyboard order and make the select absorb remaining width. */
+#dashboard[data-active-tab="ai"] .inference-model-grid { align-items: start; }
+#dashboard[data-active-tab="ai"] .inference-model-row {
+  display: grid; align-content: start; gap: 5px;
+  padding: 15px;
+}
+#dashboard[data-active-tab="ai"] .inference-model-row label,
+#dashboard[data-active-tab="ai"] .inference-model-row p { margin: 0; }
+#dashboard[data-active-tab="ai"] .inference-model-controls {
+  display: grid; grid-template-columns: auto minmax(0,1fr) auto;
+  align-items: center; gap: 8px; margin: 7px 0 4px;
+}
+#dashboard[data-active-tab="ai"] .inference-model-controls select {
+  width: 100%; max-width: none; min-width: 0;
+}
+#dashboard[data-active-tab="ai"] .inference-model-controls button {
+  min-width: 0; white-space: normal;
+}
+#dashboard[data-active-tab="ai"] .inference-key-form {
+  display: grid; grid-template-columns: minmax(0,1fr) auto;
+  align-items: end; gap: 8px; margin-top: 9px;
+}
+#dashboard[data-active-tab="ai"] .inference-key-form label {
+  grid-column: 1 / -1;
+}
+#dashboard[data-active-tab="ai"] .inference-key-form input {
+  width: 100%; min-width: 0;
+}
+
+/* The page header already says Account; don't repeat it. Two working areas,
+   with the small disclosures stacked beside the session controls. */
+#dashboard[data-active-tab="account"] .secondary {
+  margin-top: 0; max-width: 1440px;
+}
+#dashboard[data-active-tab="account"] .secondary-grid {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+  grid-template-areas: "settings session";
+  gap: 14px; align-items: start;
+}
+#dashboard[data-active-tab="account"] .account-settings-stack {
+  grid-area: settings;
+  display: grid; grid-template-columns: minmax(0,1fr);
+  gap: 10px; min-width: 0;
+}
+#dashboard[data-active-tab="account"] .account-identity,
+#dashboard[data-active-tab="account"] .account-security { grid-area: auto; }
+#dashboard[data-active-tab="account"] .account-session {
+  grid-area: session; grid-column: auto;
+  align-self: start; padding: 16px;
+}
+#dashboard[data-active-tab="account"] .disclosure summary {
+  min-height: 76px; padding: 12px 14px;
+}
+#dashboard[data-active-tab="account"] .account-session .panel-intro {
+  margin: 7px 0 10px;
+}
+#dashboard[data-active-tab="account"] .account-session .section-hint {
+  line-height: 1.6; overflow-wrap: anywhere;
+}
+#dashboard[data-active-tab="account"] .account-session .micro {
+  margin-top: 10px;
+}
+#dashboard[data-active-tab="account"] .session-actions {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 8px;
+}
+@media (max-width: 1200px) {
+  #dashboard[data-active-tab="ai"] .inference-model-controls {
+    grid-template-columns: minmax(0,1fr) auto;
+  }
+  #dashboard[data-active-tab="ai"] .inference-model-controls > button:first-child {
+    grid-column: 1;
+    justify-self: start;
+  }
+  #dashboard[data-active-tab="ai"] .inference-model-controls select {
+    grid-column: 1 / -1; grid-row: 2;
+  }
+  #dashboard[data-active-tab="ai"] .inference-model-controls > button:last-child {
+    grid-column: 2; grid-row: 1;
+  }
+}
+@media (max-width: 1050px) {
+  #dashboard[data-active-tab="discord-voice"] .discord-panel {
+    grid-template-columns: minmax(0,1fr);
+  }
+  #dashboard[data-active-tab="discord-voice"] .discord-panel .discord-identity,
+  #dashboard[data-active-tab="discord-voice"] .discord-panel .runtime-information,
+  #dashboard[data-active-tab="discord-voice"] .discord-panel .runtime-actions {
+    grid-column: 1; grid-row: auto;
+  }
+  #dashboard[data-active-tab="discord-voice"] #bot-settings > .choice-group {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 780px) {
+  #dashboard[data-active-tab="account"] .secondary-grid {
+    grid-template-columns: minmax(0,1fr);
+    grid-template-areas: "settings" "session";
+  }
+  #dashboard[data-active-tab="account"] .account-session {
+    grid-column: 1;
+  }
+}
+@media (max-width: 480px) {
+  #dashboard[data-active-tab="discord-voice"] .discord-panel .fact {
+    grid-template-columns: minmax(0,1fr);
+    gap: 2px;
+  }
+  #dashboard[data-active-tab="discord-voice"] .discord-panel .runtime-actions button {
+    margin-left: 0;
+  }
+  #dashboard[data-active-tab="account"] .session-actions {
+    grid-template-columns: minmax(0,1fr);
+  }
+  #dashboard[data-active-tab="ai"] .inference-model-controls {
+    grid-template-columns: minmax(0,1fr);
+  }
+  #dashboard[data-active-tab="ai"] .inference-model-controls > button:first-child,
+  #dashboard[data-active-tab="ai"] .inference-model-controls > button:last-child,
+  #dashboard[data-active-tab="ai"] .inference-model-controls select {
+    grid-column: 1; grid-row: auto; justify-self: stretch;
+  }
+}
+
+/* Fluid, compact operations layout. These overrides supersede the older mockup
+   breakpoints without changing any runtime controls or form semantics. */
+html { scroll-padding-top: 80px; }
+#dashboard [data-view],
+#dashboard #voice, #dashboard #discord, #dashboard #discord-settings,
+#dashboard #personality, #dashboard #llm, #dashboard #context-awareness {
+  scroll-margin-top: 86px;
+}
+.shell, #dashboard, #dashboard > *, #dashboard .panel,
+#dashboard .guild-config, #dashboard .infra-main { min-width: 0; }
+.sidebar { overflow-y: auto; overscroll-behavior: contain; }
+#dashboard .page-head { flex-wrap: wrap; }
+#dashboard .head-actions { flex-wrap: wrap; }
+#dashboard .panel-head { flex-wrap: wrap; }
+#dashboard .panel-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+#dashboard .panel-intro, #dashboard .section-hint { overflow-wrap: anywhere; }
+#dashboard .page-head, #dashboard .discord-voice-jump { margin-bottom: 12px; }
+#dashboard .panel-intro { margin-top: 8px; margin-bottom: 12px; }
+#dashboard .inference-subtitle { margin-top: 18px; }
+#dashboard .guild-config { align-items: start; }
+
+/* Keep the five navigation shortcuts dense, not a 4+1 desktop grid. */
+#dashboard[data-active-tab="overview"] .action-links {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 8px; margin-top: 12px;
+}
+#dashboard[data-active-tab="overview"] .action-links a {
+  min-height: 60px; padding: 8px 10px;
+  flex-direction: row; align-items: center; gap: 8px;
+}
+#dashboard[data-active-tab="overview"] .action-links a > span:first-child {
+  width: 30px; height: 30px;
+}
+#dashboard[data-active-tab="overview"] .action-links a > span:nth-child(2) {
+  min-width: 0; overflow-wrap: anywhere;
+}
+#dashboard[data-active-tab="overview"] .snapshot-item strong { margin-top: 7px; }
+
+/* The voice route should not demand three tall cards to show three choices. */
+#dashboard[data-active-tab="discord-voice"] .provider-option,
+#dashboard[data-active-tab="ai"] .provider-option {
+  min-height: 82px; gap: 8px; padding: 12px;
+}
+#dashboard[data-active-tab="discord-voice"] .voice-workspace .panel,
+#dashboard[data-active-tab="discord-voice"] .discord-panel,
+#dashboard[data-active-tab="discord-voice"] .guilds-panel,
+#dashboard[data-active-tab="discord-voice"] .context-awareness-plan {
+  padding: clamp(13px, 1.5vw, 20px);
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel {
+  align-items: start;
+}
+#dashboard[data-active-tab="discord-voice"] .discord-panel .runtime-actions {
+  gap: 9px;
+}
+#dashboard[data-active-tab="discord-voice"] .guild-config-heading {
+  flex-wrap: wrap;
+}
+#dashboard[data-active-tab="discord-voice"] #bot-settings,
+#dashboard[data-active-tab="discord-voice"] .guild-config .settings-grid {
+  min-width: 0;
+}
+
+/* Use the available desktop width instead of a permanent 1060px strip.
+   Keep text lines and the actual editor at comfortable reading lengths. */
+#dashboard[data-active-tab="ai"] > .ai-panel,
+#dashboard[data-active-tab="ai"] > .context-awareness-plan {
+  width: min(100%, 1440px);
+  margin: 0 0 12px;
+}
+#dashboard[data-active-tab="ai"] .panel-intro { max-width: 75ch; }
+#dashboard[data-active-tab="ai"] .inference-model-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 435px), 1fr));
+}
+#dashboard[data-active-tab="ai"] .inference-model-row {
+  min-width: 0; align-self: start;
+}
+#personality-editor {
+  height: clamp(200px, 31dvh, 290px);
+  min-height: 200px; max-height: min(75dvh, 720px);
+}
+#personality-override-editor { min-height: 100px; }
+#dashboard[data-active-tab="ai"] #engagement-settings { max-width: 850px; }
+
+/* When VPS actions stack below containers, buttons should not fill entire rows. */
+#dashboard[data-active-tab="vps"] .service-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr));
+  gap: 8px; align-content: start;
+}
+#dashboard[data-active-tab="vps"] .service-actions h3,
+#dashboard[data-active-tab="vps"] .service-actions p { grid-column: 1 / -1; }
+#dashboard[data-active-tab="vps"] .service-actions button {
+  width: auto; min-width: 0; margin: 0;
+}
+#dashboard[data-active-tab="account"] .session-actions {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+}
+body:has(#dashboard[hidden]) .login-view {
+  min-height: min(66vh, 540px);
+  gap: clamp(22px, 4vw, 60px);
+}
+
+/* Collapse navigation based on remaining content width, not phone width.
+   800–960px tablets otherwise have a 246px sidebar and cramped forms. */
+@media (max-width: 960px) {
+  .sidebar {
+    width: min(265px, 86vw);
+    transform: translateX(-103%);
+    transition: transform .2s ease;
+    box-shadow: 16px 0 45px #00000055;
+  }
+  body.sidebar-open .sidebar { transform: translateX(0); }
+  body.sidebar-open::before {
+    content: ''; position: fixed; inset: 0;
+    background: #000000cc; z-index: 35;
+  }
+  .menu-toggle { display: grid; place-items: center; flex: none; }
+  .shell { width: 100%; margin: 0; padding: 0 18px; }
+  .topbar { margin: 0 -18px; padding: 0 18px; }
+  .header-health { display: none; }
+  #dashboard[data-active-tab="overview"] .action-links {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr));
+  }
+  #dashboard[data-active-tab="ai"] .inference-model-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 700px) {
+  .shell { padding: 0 12px; }
+  .topbar { margin: 0 -12px; padding: 0 12px; }
+  #dashboard[data-active-tab="ai"] .provider-option,
+  #dashboard[data-active-tab="discord-voice"] .provider-option {
+    min-height: 62px; flex-direction: row; align-items: center;
+  }
+  #dashboard[data-active-tab="overview"] .action-links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #dashboard[data-active-tab="overview"] .action-links a { min-height: 54px; }
+  #dashboard[data-active-tab="overview"] .action-links a > span:first-child { display: none; }
+  #dashboard[data-active-tab="vps"] .service-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  #dashboard[data-active-tab="vps"] .service-stat {
+    grid-column: 1 / -1; text-align: left;
+  }
+  #dashboard[data-active-tab="account"] .session-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  body:has(#dashboard[hidden]) .login-view { min-height: 0; }
+}
+@media (max-width: 420px) {
+  #dashboard[data-active-tab="account"] .session-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #dashboard[data-active-tab="overview"] .action-links a { padding: 8px; }
+  #dashboard[data-active-tab="overview"] .action-links b { display: none; }
+}
+@media (max-height: 680px) {
+  .side-bottom { display: none; }
+  .topbar { height: 60px; min-height: 60px; }
+  main { padding-top: 16px; padding-bottom: 24px; }
+  #dashboard [data-view],
+  #dashboard #voice, #dashboard #discord, #dashboard #discord-settings,
+  #dashboard #personality, #dashboard #llm, #dashboard #context-awareness {
+    scroll-margin-top: 70px;
+  }
+}
+
+
+/* Model controls live with their provider's keys. LiteRouter's credential
+   entry stays hidden until explicitly opened. */
+#dashboard[data-active-tab="ai"] .provider-key-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #414141;
+}
+#dashboard[data-active-tab="ai"] .provider-key-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+#dashboard[data-active-tab="ai"] .provider-key-heading .inference-subtitle {
+  margin: 0;
+}
+#dashboard[data-active-tab="ai"] .key-add-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  min-width: 94px;
+  padding: 8px 12px;
+}
+#dashboard[data-active-tab="ai"] #literouter-key-form[hidden] {
+  display: none !important;
+}
+#dashboard[data-active-tab="ai"] #literouter-key-form:not([hidden]) {
+  margin: 10px 0 0;
+}
+#dashboard[data-active-tab="ai"] .groq-provider-section .inference-usage {
+  margin: 0 0 14px;
+  padding: 13px 15px;
+}
+#dashboard[data-active-tab="ai"] .usage-summary {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+#dashboard[data-active-tab="ai"] .usage-summary strong {
+  font-size: 21px;
+  line-height: 1.25;
+}
+#dashboard[data-active-tab="ai"] .usage-summary small {
+  line-height: 1.45;
+}
+#dashboard[data-active-tab="ai"] .provider-key-section > .inference-model-row {
+  margin-top: 12px;
+  max-width: 100%;
+}
+#dashboard[data-active-tab="ai"] .provider-key-section > .inference-model-row p {
+  margin-bottom: 0;
+}
+#dashboard[data-active-tab="ai"] .provider-key-section .inference-usage + .section-hint {
+  margin-top: 10px;
+}
+
+/* Groq is the entry point. Keep its model picker visible immediately below
+   the heading, with routing options tucked below the provider key sections. */
+#dashboard[data-active-tab="ai"] .groq-provider-section > .inference-model-row {
+  margin: 9px 0 13px;
+  width: 100%;
+}
+#dashboard[data-active-tab="ai"] .groq-provider-section > .inference-model-row + .groq-key-list {
+  margin-top: 10px;
+}
+#dashboard[data-active-tab="ai"] .groq-provider-section > .inference-usage {
+  margin-top: 12px;
+}
+#dashboard[data-active-tab="ai"] .provider-routing-details {
+  margin-top: 18px;
+  padding: 13px 15px;
+  border: 1px solid #414141;
+  border-radius: 9px;
+  min-width: 0;
+}
+#dashboard[data-active-tab="ai"] .provider-routing-details > summary {
+  cursor: pointer;
+  font-weight: 650;
+  font-size: 13px;
+  color: #f5f5f5;
+}
+#dashboard[data-active-tab="ai"] .provider-routing-details > summary small {
+  margin-left: 8px;
+  color: #bcbcbc;
+  font-weight: 400;
+}
+#dashboard[data-active-tab="ai"] .provider-routing-details[open] > summary {
+  margin-bottom: 12px;
+}
+#dashboard[data-active-tab="ai"] .provider-routing-details .panel-intro {
+  max-width: 75ch;
+}
+
+/* Collapsible provider controls; the activation button remains accessible
+   even while its details content is collapsed. */
+#dashboard[data-active-tab="ai"] .provider-fold-shell {
+  position: relative;
+  min-width: 0;
+  margin-top: 12px;
+}
+#dashboard[data-active-tab="ai"] .provider-fold {
+  margin: 0;
+  padding: 0;
+  border: 1px solid #414141;
+  border-radius: 10px;
+  background: #1b1b1b;
+  min-width: 0;
+}
+#dashboard[data-active-tab="ai"] .provider-fold > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 11px;
+  cursor: pointer;
+  padding: 13px 135px 13px 15px;
+  min-height: 58px;
+  list-style: none;
+}
+#dashboard[data-active-tab="ai"] .provider-fold > summary::-webkit-details-marker { display: none; }
+#dashboard[data-active-tab="ai"] .provider-fold > summary::before {
+  content: '▸';
+  flex: none;
+  font-size: 13px;
+  color: #bcbcbc;
+}
+#dashboard[data-active-tab="ai"] .provider-fold[open] > summary::before {
+  content: '▾';
+}
+#dashboard[data-active-tab="ai"] .provider-fold > summary strong {
+  font-size: 16px;
+  line-height: 1.3;
+}
+#dashboard[data-active-tab="ai"] .provider-fold > summary small {
+  font-size: 11px;
+  color: #c9c9c9;
+}
+#dashboard[data-active-tab="ai"] .provider-fold > .provider-fold-body {
+  min-width: 0;
+  padding: 4px 15px 15px;
+  border-top: 1px solid #383838;
+}
+#dashboard[data-active-tab="ai"] .provider-fold-shell > .provider-enable {
+  position: absolute;
+  z-index: 1;
+  right: 11px;
+  top: 9px;
+  min-height: 40px;
+  min-width: 103px;
+  padding: 7px 11px;
+}
+#dashboard[data-active-tab="ai"] .provider-fold-shell > .provider-enable[aria-pressed="true"] {
+  background: #303030;
+  border-color: #f5f5f5;
+}
+#dashboard[data-active-tab="ai"] .provider-fold-shell > .provider-enable[aria-pressed="false"] {
+  background: #171717;
+}
+#dashboard[data-active-tab="ai"] .provider-fold-body .provider-key-heading {
+  justify-content: flex-start;
+  padding-top: 10px;
+}
+#dashboard[data-active-tab="ai"] .groq-provider-section > .panel-intro {
+  margin: 10px 0 12px;
+  max-width: 82ch;
+}
+@media (max-width: 420px) {
+  #dashboard[data-active-tab="ai"] .provider-fold > summary {
+    padding-right: 112px;
+  }
+  #dashboard[data-active-tab="ai"] .provider-fold-shell > .provider-enable {
+    min-width: 88px;
+    right: 8px;
+  }
+}

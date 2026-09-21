@@ -16,6 +16,7 @@ public sealed class SwitchingInferenceClient : IInferenceClient, IDisposable
     private readonly ISemanticMemoryService? _semanticMemory;
     private readonly ProviderSwitchingService _switcher = new();
     private readonly GroqApiKeyPool _groqKeyPool;
+    private readonly GroqApiKeyPool _liteRouterKeyPool;
     private readonly object _gate = new();
     private readonly Dictionary<string, IInferenceClient> _clients = new(StringComparer.OrdinalIgnoreCase);
 
@@ -31,6 +32,10 @@ public sealed class SwitchingInferenceClient : IInferenceClient, IDisposable
             EnvConfiguration.Get("GROQ_KEYS_HOST_PATH"),
             EnvConfiguration.Get("TSUKI_GROQ_API_KEYS"),
             settings.GroqApiKey);
+        _liteRouterKeyPool = GroqApiKeyPool.LoadFromFileOrValues(
+            EnvConfiguration.Get("TSUKI_LITEROUTER_API_KEYS_FILE"),
+            EnvConfiguration.Get("TSUKI_LITEROUTER_API_KEYS"),
+            EnvConfiguration.Get("TSUKI_LITEROUTER_API_KEY")).WithRoundRobin();
 
         DevLog.WriteLine("SwitchingInferenceClient: Groq LLM key pool loaded ({0} keys)", _groqKeyPool.Count);
     }
@@ -46,7 +51,15 @@ public sealed class SwitchingInferenceClient : IInferenceClient, IDisposable
                 if (_clients.TryGetValue(provider, out var existing))
                     return existing;
 
-                IInferenceClient client = provider.Equals("groq", StringComparison.OrdinalIgnoreCase)
+                IInferenceClient client = provider.Equals("literouter", StringComparison.OrdinalIgnoreCase)
+                    ? new LiteRouterRotatingInferenceClient(
+                        ProviderSwitchingService.GetProviderUrl(provider),
+                        ProviderSwitchingService.GetProviderModel(provider),
+                        _liteRouterKeyPool,
+                        semanticMemory: _semanticMemory,
+                        tuning: _settings.GetGenerationTuning(),
+                        replyTonePreset: _settings.ReplyTonePreset)
+                    : provider.Equals("groq", StringComparison.OrdinalIgnoreCase)
                     ? new GroqRotatingInferenceClient(
                         ProviderSwitchingService.GetProviderUrl(provider),
                         ProviderSwitchingService.GetProviderModel(provider),

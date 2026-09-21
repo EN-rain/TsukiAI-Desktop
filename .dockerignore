@@ -3,6 +3,9 @@
 .env
 .env.*
 !.env.example
+.controls-auth.json
+.docker-cli-controls/
+.deploy-backups/
 **/bin
 **/obj
 **/node_modules

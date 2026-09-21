@@ -2,15 +2,12 @@ import 'dotenv/config';
 import http from 'http';
 import https from 'https';
 import {
-  ActionRowBuilder,
+  ChannelType,
   Client,
   GatewayIntentBits,
   MessageFlags,
-  ModalBuilder,
   PermissionsBitField,
   Routes,
-  TextInputBuilder,
-  TextInputStyle,
 } from 'discord.js';
 import {
   joinVoiceChannel,
@@ -30,6 +27,7 @@ import ffmpegPath from 'ffmpeg-static';
 import axiosRetry from 'axios-retry';
 import prism from 'prism-media';
 import { GroqKeyPool, loadGroqApiKeys } from './groq-key-pool.js';
+import { GroqUsageRecorder, installGroqUsageInterceptor } from './groq-usage.js';
 import { AssemblyKeyPool, loadAssemblyApiKeys } from './assembly-key-pool.js';
 import {
   AssemblyRealtimeSession,
@@ -41,9 +39,21 @@ import {
   shouldEnableAssemblyRealtime,
 } from './voice-presence.js';
 import { shouldAcceptVoiceStart } from './voice-focus.js';
+import { createRealtimeTurnArbiter } from './realtime-turn-arbiter.js';
+import { createEngagementPolicy, selectReplyContext } from './engagement-policy.js';
+import { createEngagementClassifier } from './engagement-classifier.js';
+import { createVoiceAnalytics } from './voice-analytics.js';
 import { DISCORD_VOICE_AUDIO_FILTER } from './audio-encoding.js';
 import { createDiscordPcmStream, inspectDiscordPcm } from './voice-playback.js';
-import { voiceMetadataFromWav } from './voice-message.js';
+import { voiceMetadataFromWav, readWavDurationSeconds } from './voice-message.js';
+import { playMolabHybridPipeline } from './molab-hybrid-pipeline.js';
+import { planTtsUtterances, speechDurationLooksIncomplete, assemblePcmUtterances } from './tts-integrity.js';
+import { matchesMolabHealth } from './molab-health.js';
+import { createVoiceAvailabilityNotifier } from './voice-availability.js';
+import { acceptsDiscordChatChannel } from './voice-chat-policy.js';
+import { createTextTurnQueue } from './text-turn-queue.js';
+import { voiceSession, validateVoiceTarget } from './voice-control.js';
+import { DEFAULT_TEXT_VOICE_KEYWORDS, parseTextVoiceKeywords, wantsTextVoiceReply } from './text-voice-policy.js';
 
 const DEBUG_MODE = (process.env.DEBUG || 'false').toLowerCase() === 'true';
 function debugLog(...args) {
@@ -66,6 +76,9 @@ axiosRetry(axios, {
     console.log(`[HTTP Retry] attempt=${retryCount}, url=${requestConfig.url}, error=${error.message}`);
   }
 });
+// Register after the retry policy: every outbound Groq request and retry is
+// persisted with a key fingerprint before dispatch to the provider.
+installGroqUsageInterceptor(axios, new GroqUsageRecorder());
 
 // Configuration (trim token - copy/paste often adds newlines or spaces)
 function boundedInt(raw, fallback, minimum, maximum) {
@@ -99,8 +112,20 @@ const CONFIG = {
   // 'mention' (default): reply only when @-mentioned. 'any': treat every
   // non-bot message in the channel as input.
   TEXT_REPLY_MODE: (process.env.TEXT_REPLY_MODE || 'mention').trim().toLowerCase(),
+  VOICE_ENGAGEMENT_MODE: (process.env.VOICE_ENGAGEMENT_MODE || 'context_aware').trim().toLowerCase(),
+  CHAT_ENGAGEMENT_MODE: (process.env.CHAT_ENGAGEMENT_MODE || 'context_aware').trim().toLowerCase(),
+  ENGAGEMENT_ALIASES: (process.env.ENGAGEMENT_ALIASES || 'tsuki,tsukihime').trim(),
+  ENGAGEMENT_FOLLOWUP_MS: boundedInt(process.env.ENGAGEMENT_FOLLOWUP_MS, 10000, 0, 30000),
+  ENGAGEMENT_CLASSIFIER_MODEL: (process.env.ENGAGEMENT_CLASSIFIER_MODEL || '').trim(),
   CSHARP_API_URL: (process.env.CSHARP_API_URL || 'http://localhost:5000').trim(),
   CSHARP_API_KEY: (process.env.CSHARP_API_KEY || '').trim(),
+  // Molab is a manually started notebook, like Colab. Supply its distinct
+  // custom Cloudflare hostname here after the DNS/tunnel is configured.
+  // There is no Molab-issued URL or API key and no VPS Molab env variable.
+  MOLAB_CUSTOM_DOMAIN: 'molab-tts.tsukihime.dpdns.org',
+  COLAB_CUSTOM_DOMAIN: 'colab-tts.tsukihime.dpdns.org',
+  // Strict voice routing: exactly one TTS provider, never automatic fallback.
+  TTS_PROVIDER: (process.env.TSUKI_TTS_PROVIDER || 'molab').trim().toLowerCase(),
   ASSEMBLYAI_API_KEY: configuredAssemblyKeys[0] || '',
   ASSEMBLYAI_API_KEYS: configuredAssemblyKeys,
   ASSEMBLYAI_KEYS_FILE: (process.env.ASSEMBLYAI_KEYS_FILE || '').trim(),
@@ -154,7 +179,7 @@ if (HTTP_KEEPALIVE_ENABLED) {
 
 // Determine STT mode and load appropriate module
 let transcribeAudio = null;
-let sttModeName = 'Local (C# Whisper)';
+let sttModeName = 'Unavailable (no local transcriber installed)';
 
 if (CONFIG.STT_MODE === 'azure' && CONFIG.AZURE_SPEECH_KEY.length > 10 && CONFIG.AZURE_SPEECH_REGION) {
   console.log('[INFO] Cloud STT enabled (Azure Speech)');
@@ -184,8 +209,8 @@ if (CONFIG.STT_MODE === 'azure' && CONFIG.AZURE_SPEECH_KEY.length > 10 && CONFIG
     process.exit(1);
   }
 } else {
-  console.log('[INFO] 🏠 Local STT enabled (C# Whisper)');
-  sttModeName = 'Local (C# Whisper)';
+  console.warn('[STT] No configured transcriber. Local STT is not installed; cloud transcription will NOT run while USE_CLOUD_STT=false.');
+  sttModeName = 'Unavailable (no local transcriber installed)';
 }
 
 // ── VAD & chunking settings ────────────────────────────────────────────
@@ -278,6 +303,95 @@ const client = new Client({
   ],
 });
 
+// Only publish state changes, never repeated warnings for every failing turn.
+// A provider outage is distinct from the complete voice path being unavailable.
+const voiceStatusMessages = {
+  stt: {
+    down: 'Voice not available right now. Speech recognition failed.',
+    up: 'Speech recognition is available again.',
+  },
+  assemblyai: {
+    down: 'AssemblyAI is unavailable right now. Trying the configured STT fallback.',
+    up: 'AssemblyAI is available again.',
+  },
+  llm: {
+    down: 'Speech was understood, but the AI reply service failed. Check inference provider access; Molab TTS may still be online.',
+    up: 'AI replies are available again.',
+  },
+  voice: {
+    down: 'Voice not available right now. Voice generation or playback failed.',
+    up: 'Voice is available again.',
+  },
+  chatVoice: {
+    down: 'Voice not available right now for text-chat replies. Text replies will continue.',
+    up: 'Voice messages in text chat are available again.',
+  },
+};
+const voiceAvailability = createVoiceAvailabilityNotifier({
+  send: async content => {
+    if (!client.isReady()) return;
+    // When a separate text channel is omitted, use the voice channel's chat.
+    const channelId = CONFIG.TEXT_CHANNEL_ID || currentConnection?.joinConfig?.channelId || CONFIG.VOICE_CHANNEL_ID;
+    if (!isValidSnowflake(channelId)) return;
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || channel.guildId !== CONFIG.GUILD_ID || typeof channel.send !== 'function') {
+      throw new Error('Voice status channel unavailable');
+    }
+    await channel.send({ content, allowedMentions: { parse: [] } });
+    console.log('[VOICE STATUS] ' + content);
+  },
+  log: message => console.warn('[VOICE STATUS] ' + message),
+});
+function reportVoiceStatus(component, available) {
+  const messages = voiceStatusMessages[component];
+  if (!messages) return;
+  void voiceAvailability.report(component, available, messages);
+}
+
+// When every STT route fails, say a short fixed retry prompt through the
+// strictly selected TTS runtime. Do not speak on every error or at startup.
+let lastUnheardTurnFeedbackAt = 0;
+const UNHEARD_TURN_COOLDOWN_MS = 30000;
+async function reportUnheardVoiceTurn() {
+  reportVoiceStatus('stt', false);
+  if (!currentConnection || CONFIG.TTS_PROVIDER === 'off') return;
+  const now = Date.now();
+  if (now - lastUnheardTurnFeedbackAt < UNHEARD_TURN_COOLDOWN_MS) return;
+  lastUnheardTurnFeedbackAt = now;
+  try {
+    const wav = await requestSelectedVoiceWav(
+      'I could not understand that. Please try speaking again.',
+    );
+    const pcm = await wavToDiscordPcm(wav);
+    await enqueuePlayback('stt-retry-prompt', pcm, { priority: 0 });
+    reportVoiceStatus('voice', true);
+  } catch (error) {
+    console.warn('[STT] Voice retry prompt unavailable: ' + error.message);
+    reportVoiceStatus('voice', false);
+  }
+}
+
+// A working Molab/Colab tunnel does not imply the AI reply API is working.
+// Give a short, rate-limited spoken error without fabricating an AI answer.
+let lastInferenceFailureFeedbackAt = 0;
+async function reportInferenceFailureVoiceTurn() {
+  reportVoiceStatus('llm', false);
+  if (!currentConnection || CONFIG.TTS_PROVIDER === 'off') return;
+  const now = Date.now();
+  if (now - lastInferenceFailureFeedbackAt < 30000) return;
+  lastInferenceFailureFeedbackAt = now;
+  try {
+    const wav = await requestSelectedVoiceWav(
+      'I heard you, but my reply service is unavailable right now.',
+    );
+    await enqueuePlayback('llm-unavailable-prompt', await wavToDiscordPcm(wav), { priority: 0 });
+    reportVoiceStatus('voice', true);
+  } catch (error) {
+    console.warn('[LLM] Voice outage prompt unavailable:', error.message);
+    reportVoiceStatus('voice', false);
+  }
+}
+
 client.on('voiceStateUpdate', (oldState, newState) => {
   if (!assemblyRealtimeRequested) return;
   const channelId = currentConnection?.joinConfig?.channelId;
@@ -314,6 +428,18 @@ let focusedUserId = null;
 // Persistent manual focus list (via /focus, cleared via /unfocus).
 // When non-empty, ONLY these users are listened to.
 const manualFocusList = new Set();
+const voiceAnalytics = createVoiceAnalytics();
+function focusSnapshot() {
+  const channel = getCurrentVoiceChannel();
+  const members = channel?.members ? [...channel.members.values()]
+    .filter(member => !member.user?.bot).map(member => ({
+      id: member.id, name: String(member.displayName || member.user?.username || member.id).slice(0, 80),
+      focused: manualFocusList.has(member.id),
+    })) : [];
+  return { guild_id: CONFIG.GUILD_ID, channel_id: channel?.id || null,
+    mode: manualFocusList.size ? 'selected users only' : 'everyone',
+    user_ids: [...manualFocusList], members };
+}
 // Legacy input gate for the single-speaker STT path. Realtime captures are
 // admitted per user and reject new audio at the capture layer while playback
 // is active.
@@ -323,6 +449,66 @@ const activeAudioCaptures = new Set();
 
 // Per-user state: cooldown timestamps and active turn data
 const userState = new Map();
+// Bounded pending transcripts prevent lost speech during slow LLM/TTS replies.
+const realtimePendingTranscripts = new Map();
+const realtimeTurnArbiter = createRealtimeTurnArbiter();
+const voiceEngagement = createEngagementPolicy({
+  mode: CONFIG.VOICE_ENGAGEMENT_MODE,
+  aliases: CONFIG.ENGAGEMENT_ALIASES,
+  followupMs: CONFIG.ENGAGEMENT_FOLLOWUP_MS,
+});
+const chatEngagement = createEngagementPolicy({
+  mode: CONFIG.CHAT_ENGAGEMENT_MODE,
+  aliases: CONFIG.ENGAGEMENT_ALIASES,
+  followupMs: CONFIG.ENGAGEMENT_FOLLOWUP_MS,
+});
+const engagementMetrics = {
+  since: new Date().toISOString(), voice: {}, chat: {},
+  classifier: { attempts: 0, failures: 0, replies: 0, timed_samples: 0,
+    duration_ms_total: 0 },
+};
+const engagementClassifier = createEngagementClassifier({
+  model: CONFIG.ENGAGEMENT_CLASSIFIER_MODEL,
+  keyPool: new GroqKeyPool(CONFIG.GROQ_API_KEYS),
+  transport: async ({ model, key, deadlineMs, messages }) => {
+    const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+      model, messages, temperature: 0, max_tokens: 120,
+      response_format: { type: 'json_object' },
+    }, { headers: { Authorization: 'Bearer ' + key }, timeout: deadlineMs,
+      signal: AbortSignal.timeout(deadlineMs),
+      'axios-retry': { retries: 0 }, maxContentLength: 4096 });
+    return response.data;
+  },
+  onOutcome: ({ result, elapsedMs }) => {
+    const item = engagementMetrics.classifier;
+    item.attempts++;
+    if (result === 'failure') item.failures++;
+    if (result === 'reply') item.replies++;
+    if (Number.isFinite(elapsedMs) && elapsedMs >= 0) {
+      item.timed_samples++;
+      item.duration_ms_total += elapsedMs;
+    }
+  },
+});
+async function resolveEngagement(policy, gate, input, transport, validSession) {
+  if (gate.decision !== 'observe' || gate.reason !== 'background' ||
+      policy.mode === 'wake_only' || !engagementClassifier.configured) return gate;
+  const followupAllowed = policy.followupEligible(input);
+  const proactiveAllowed = policy.mode === 'proactive' &&
+    (input.text.includes('?') || /\b(?:anyone|everybody|somebody)\b/iu.test(input.text));
+  if (!followupAllowed && !proactiveAllowed) return gate;
+  const revision = policy.snapshot().revision;
+  return engagementClassifier.classify({
+    text: input.text, transportType: transport, userId: input.userId,
+    turns: policy.recent(input), followupAllowed, proactiveAllowed,
+    revisionCurrent: () => policy.snapshot().revision === revision && validSession(),
+  });
+}
+function measureEngagement(transport, reason) {
+  const counts = engagementMetrics[transport];
+  counts[reason] = (counts[reason] || 0) + 1;
+}
+function resetEngagement() { voiceEngagement.reset(); chatEngagement.reset(); }
 
 // Cache of known bot user IDs to avoid repeated lookups and spam logs
 const knownBots = new Set();
@@ -360,6 +546,14 @@ function stopAssemblyRealtimeCaptures(reason) {
   }
 }
 
+function stopNonOwnerAssemblyRealtimeCaptures(userId) {
+  for (const [speakerId, capture] of activeAssemblyCaptures.entries()) {
+    if (speakerId !== userId) {
+      stopAssemblyRealtimeCapture(capture, 'another speaker owns the current reply turn');
+    }
+  }
+}
+
 function stopUnfocusedAssemblyRealtimeCaptures(reason) {
   if (manualFocusList.size === 0) return;
 
@@ -391,6 +585,9 @@ function syncAssemblyRealtimePresence(reason) {
     focusedUserId = null;
     turnGateClosed = false;
     userState.clear();
+    realtimePendingTranscripts.clear();
+    realtimeTurnArbiter.reset();
+    resetEngagement();
   }
 }
 
@@ -447,6 +644,7 @@ async function finalizeTurn(userId) {
 
   const combined = Buffer.concat(segments);
   if (combined.length < VAD.MIN_SEGMENT_BYTES) {
+    voiceAnalytics.drop('unheard');
     debugLog(`[TURN] User ${userId}: discarding tiny turn (${combined.length} bytes)`);
     return;
   }
@@ -454,11 +652,13 @@ async function finalizeTurn(userId) {
   // Check cooldown
   const now = Date.now();
   if (now - state.lastResponseAt < VAD.USER_COOLDOWN_MS) {
+    voiceAnalytics.drop('cooldown');
     debugLog(`[TURN] User ${userId}: cooldown active, skipping`);
     return;
   }
 
   if (state.processing) {
+    voiceAnalytics.drop('busy');
     debugLog(`[TURN] User ${userId}: already processing, skipping`);
     return;
   }
@@ -474,6 +674,9 @@ async function finalizeTurn(userId) {
   } finally {
     state.processing = false;
     turnGateClosed = false;
+    // Legacy STT may finish with an observed (non-addressed) transcript.
+    // A speaking-event focus is never allowed to survive that outcome.
+    if (focusedUserId === userId) focusedUserId = null;
   }
 }
 
@@ -530,6 +733,8 @@ function decodeErrorPayload(payload) {
  * Send audio to STT service (AssemblyAI, Groq Whisper, or C# Whisper)
  */
 async function sendAudioForSTT(userId, audioBuffer) {
+  const sttStartedAt = Date.now();
+  let transcribed = false;
   try {
     console.log(`[STT] Transcribing ${audioBuffer.length} bytes from user ${userId}`);
 
@@ -561,25 +766,56 @@ async function sendAudioForSTT(userId, audioBuffer) {
       language = result.language;
       confidence = result.confidence;
     } else {
-      // Use C# Whisper for STT
-      console.log('[STT] Using C# Whisper...');
-      const audioBase64 = audioBuffer.toString('base64');
-      const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/voice/stt`, {
-        userId: userId.toString(),
-        audioData: audioBase64
-      }, { timeout: 30000 });
-
-      text = response.data.text;
-      language = response.data.language;
-      confidence = response.data.confidence;
+      // /api/voice/stt is Groq CLOUD Whisper, not an offline C# model.
+      // Fail closed rather than sending private audio to Groq under a
+      // misleading "local" / USE_CLOUD_STT=false configuration.
+      console.warn('[STT] No transcription backend enabled. Audio was not uploaded.');
+      voiceAnalytics.drop('stt_disabled');
+      return;
     }
 
-    // Note: Transcription is logged by C# API to UI
+    // Note: Transcription is logged by the configured provider
     console.log(`[STT] Transcription complete (${language}, ${(confidence ?? 0).toFixed(2)})`);
 
     if (text && text.trim().length > 0) {
-      await processWithLLM(userId, text);
+      voiceAnalytics.record('stt', { durationMs: Date.now() - sttStartedAt });
+      transcribed = true;
+      reportVoiceStatus('stt', true);
+      const sessionConnection = currentConnection;
+      const voiceChannelId = sessionConnection?.joinConfig?.channelId;
+      const revision = voiceEngagement.snapshot().revision;
+      if (voiceChannelId) {
+        const input = {
+          guildId: CONFIG.GUILD_ID, channelId: voiceChannelId,
+          transport: 'voice', userId, text,
+          focusAllowed: !manualFocusList.size || manualFocusList.has(userId),
+        };
+        const gate = voiceEngagement.decide(input);
+        const engagement = gate.decision === 'reply' ? gate :
+          await resolveEngagement(voiceEngagement, gate, input, 'voice', () =>
+            currentConnection === sessionConnection &&
+            (!manualFocusList.size || manualFocusList.has(userId)));
+        measureEngagement('voice', engagement.reason);
+        if (engagement.decision === 'reply' &&
+            currentConnection === sessionConnection &&
+            voiceEngagement.snapshot().revision === revision &&
+            (!manualFocusList.size || manualFocusList.has(userId))) {
+          const contextTurns = selectReplyContext(voiceEngagement, input, engagement);
+          const replied = await processWithLLM(userId, text, () =>
+            currentConnection === sessionConnection &&
+            voiceEngagement.snapshot().revision === revision &&
+            (!manualFocusList.size || manualFocusList.has(userId)), contextTurns);
+          if (replied && currentConnection === sessionConnection &&
+              voiceEngagement.snapshot().revision === revision &&
+              (!manualFocusList.size || manualFocusList.has(userId))) {
+            voiceEngagement.completed({ guildId: CONFIG.GUILD_ID,
+              channelId: voiceChannelId, transport: 'voice', userId });
+          }
+        }
+      }
     } else {
+      voiceAnalytics.record('stt', { success: false });
+      voiceAnalytics.drop('no_text');
       // No text detected, release focus
       if (focusedUserId === userId) {
         focusedUserId = null;
@@ -587,6 +823,10 @@ async function sendAudioForSTT(userId, audioBuffer) {
       }
     }
   } catch (error) {
+    if (!transcribed) {
+      voiceAnalytics.record('stt', { success: false });
+      await reportUnheardVoiceTurn();
+    }
     console.error('[STT] Error:', error.message);
     // Release focus on error
     if (focusedUserId === userId) {
@@ -599,17 +839,238 @@ async function sendAudioForSTT(userId, audioBuffer) {
 /**
  * Send text to C# app for LLM processing and get TTS audio back
  */
-async function processWithLLM(userId, text) {
+async function molabIsReady() {
   try {
+    const response = await axios.get(
+      'https://' + CONFIG.MOLAB_CUSTOM_DOMAIN + '/health',
+      { timeout: 5000 },
+    );
+    return matchesMolabHealth(response.data);
+  } catch {
+    return false;
+  }
+}
+
+async function colabIsReady() {
+  try {
+    const response = await axios.get(
+      'https://' + CONFIG.COLAB_CUSTOM_DOMAIN + '/health',
+      { timeout: 5000 },
+    );
+    return response.status === 200 && response.data?.status === 'ready';
+  } catch {
+    return false;
+  }
+}
+
+function invalidVoiceTurn() {
+  return Object.assign(new Error('Voice turn invalidated'), { code: 'VOICE_TURN_INVALIDATED' });
+}
+
+async function processMolabVoiceTurn(userId, text, validTurn = () => true, contextTurns = []) {
+  // C# still owns persona/LLM/memory; do not synthesize there for Molab voice.
+  let replyResponse;
+  const llmStartedAt = Date.now();
+  try {
+    replyResponse = await axios.post(
+      CONFIG.CSHARP_API_URL + '/api/voice/process',
+      { userId: String(userId), text, memoryScope: 'discord', audio: false,
+        molabVoice: true, contextTurns },
+      { timeout: 180000, headers: CONFIG.CSHARP_API_KEY
+        ? { 'X-Api-Key': CONFIG.CSHARP_API_KEY } : {} },
+    );
+  } catch (error) {
+    voiceAnalytics.record('llm', { success: false });
+    await reportInferenceFailureVoiceTurn();
+    error.llmFailed = true;
+    throw error;
+  }
+  const reply = String(replyResponse.data?.text || '').trim();
+  voiceAnalytics.record('llm', {
+    success: Boolean(reply), durationMs: Date.now() - llmStartedAt,
+  });
+  reportVoiceStatus('llm', true);
+  if (!reply) {
+    console.warn('[MOLAB VOICE] LLM returned no response text');
+    return false;
+  }
+  if (!validTurn()) return false;
+  console.log('[MOLAB VOICE] Reply received (chars=' + reply.length + ')');
+
+  const endpoint = 'https://' + CONFIG.MOLAB_CUSTOM_DOMAIN;
+  const health = await axios.get(endpoint + '/health', { timeout: 15000 });
+  if (!matchesMolabHealth(health.data)) {
+    throw new Error('Molab health does not attest to epoch-0 Base/full-ICL voice support');
+  }
+
+  const startedAt = Date.now();
+  const result = await playMolabHybridPipeline({
+    text: reply,
+    maxChars: 140,
+    synthesize: async (sentence, index) => {
+      const language = /[\u3040-\u30ff\u3400-\u9fff]/u.test(sentence)
+        ? 'Japanese' : 'English';
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        const requestStarted = Date.now();
+        const response = await axios.post(
+          endpoint + '/tts',
+          { text: sentence, language },
+          {
+            responseType: 'arraybuffer', timeout: 180000,
+            maxContentLength: 16 * 1024 * 1024,
+          },
+        );
+        const wav = Buffer.from(response.data);
+        if (wav.length < 44 || wav.length > 16 * 1024 * 1024 ||
+            wav.toString('ascii', 0, 4) !== 'RIFF' ||
+            wav.toString('ascii', 8, 12) !== 'WAVE') {
+          throw new Error('Molab sentence ' + (index + 1) + ' returned invalid WAV');
+        }
+        const requestMs = Date.now() - requestStarted;
+        const pcm = await wavToDiscordPcm(wav);
+        const duration = pcm.length / (48000 * 2 * 2);
+        const incomplete = speechDurationLooksIncomplete(sentence, duration);
+        console.log('[MOLAB COVERAGE] ' + JSON.stringify({
+          batch: index + 1, chars: sentence.length, audioSeconds: +duration.toFixed(2),
+          attempt, incomplete,
+        }));
+        if (incomplete) {
+          if (attempt < 2) continue;
+          throw new Error('Molab sentence ' + (index + 1) + ' audio appears incomplete after retry');
+        }
+        const measuredGenerationMs = Number(response.headers['x-tsuki-generation-ms']);
+        return {
+          audio: pcm, audioDurationSeconds: duration,
+          generationMs: Number.isFinite(measuredGenerationMs) && measuredGenerationMs > 0
+            ? measuredGenerationMs : null,
+          requestMs,
+        };
+      }
+      throw new Error('Molab TTS did not return a complete utterance');
+    },
+    synthesizeBatch: async (sentences, startIndex) => {
+      const languages = sentences.map(sentence =>
+        /[\u3040-\u30ff\u3400-\u9fff]/u.test(sentence) ? 'Japanese' : 'English');
+      const requestStarted = Date.now();
+      const response = await axios.post(endpoint + '/tts-batch', {
+        texts: sentences, languages,
+      }, {
+        timeout: 180000, maxContentLength: 72 * 1024 * 1024,
+      });
+      const data = response.data;
+      if (data?.mode !== 'gpu-batch' || data.batch_size !== sentences.length ||
+          !Array.isArray(data.items) || data.items.length !== sentences.length) {
+        throw new Error('Molab did not return a complete GPU batch');
+      }
+      const items = [];
+      for (let index = 0; index < data.items.length; index += 1) {
+        const encoded = data.items[index]?.audio_base64;
+        if (typeof encoded !== 'string' || encoded.length > 24 * 1024 * 1024 ||
+            !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+          throw new Error('Molab GPU batch returned invalid audio base64');
+        }
+        const wav = Buffer.from(encoded, 'base64');
+        if (wav.length < 44 || wav.length > 16 * 1024 * 1024 ||
+            wav.toString('ascii', 0, 4) !== 'RIFF' ||
+            wav.toString('ascii', 8, 12) !== 'WAVE') {
+          throw new Error('Molab GPU batch returned an invalid WAV');
+        }
+        const pcm = await wavToDiscordPcm(wav);
+        const duration = pcm.length / (48000 * 2 * 2);
+        if (speechDurationLooksIncomplete(sentences[index], duration)) {
+          throw new Error('Molab GPU batch audio appears incomplete for sentence ' +
+            (startIndex + index + 1));
+        }
+        items.push({ audio: pcm, audioDurationSeconds: duration });
+      }
+      const measuredGenerationMs = Number(data.generation_ms);
+      return {
+        items, generationMs: Number.isFinite(measuredGenerationMs) &&
+          measuredGenerationMs > 0 ? measuredGenerationMs : null,
+        requestMs: Date.now() - requestStarted,
+      };
+    },
+    play: (pcm, index) => {
+      if (!validTurn()) throw invalidVoiceTurn();
+      if (!currentConnection) throw new Error('Discord voice channel disconnected');
+      return enqueuePlayback('molab-sentence-' + (index + 1), pcm,
+        { priority: 1, validTurn });
+    },
+    onProgress: event => {
+      if (event.stage === 'synthesized' || event.stage === 'batch_synthesized') {
+        voiceAnalytics.record('tts', {
+          durationMs: event.generationMs, requestMs: event.requestMs,
+          audioSeconds: event.audioDurationSeconds,
+        });
+        console.log('[MOLAB METRICS] ' + JSON.stringify(event));
+      } else if (event.stage === 'batch_fallback') {
+        console.warn('[MOLAB GPU BATCH] Falling back to single utterances: ' +
+          event.reason);
+      } else if (event.stage === 'gap' && event.gapSeconds >= 0.05) {
+        console.log('[MOLAB GAP] ' + JSON.stringify(event));
+      } else if (event.stage === 'scheduler') {
+        debugLog('[MOLAB LADDER]', JSON.stringify(event));
+      } else if (event.stage !== 'scheduler') {
+        console.log('[MOLAB VOICE] ' + event.stage + ' ' +
+          event.index + '/' + event.total);
+      }
+    },
+  });
+  console.log('[MOLAB LADDER] ' + JSON.stringify({
+    sentences: result.sentences, batches: result.batches, played: result.played,
+    maxActiveJobs: result.maxActiveJobs,
+    groupedInferenceCalls: result.groupedInferenceCalls,
+    singleInferenceCalls: result.singleInferenceCalls,
+    rollingRtf: result.rtf,
+    playbackGapSeconds: result.gapSeconds,
+    totalMs: Date.now() - startedAt,
+  }));
+  if (result.played > 0) voiceAnalytics.replyCompleted();
+  return result.played > 0;
+}
+
+async function processWithLLM(userId, text, validTurn = () => true, contextTurns = []) {
+  try {
+    if (!validTurn()) return false;
     text = String(text || '').trim();
-    if (!text) return;
+    if (!text) return false;
     if (text.length > 4000) text = text.slice(0, 4000);
-    // Note: Text and response are logged by C# API to UI
-    console.log(`[LLM] Processing request...`);
+    console.log(`[LLM] Processing request with TTS provider=${CONFIG.TTS_PROVIDER}...`);
+
+    if (CONFIG.TTS_PROVIDER === 'off') {
+      console.log('[TTS] Voice route is intentionally disabled in controls.');
+      if (focusedUserId === userId) focusedUserId = null;
+      return false;
+    }
+
+    if (CONFIG.TTS_PROVIDER === 'molab') {
+      if (!await molabIsReady()) {
+        console.warn('[TTS] Selected Molab endpoint is unavailable; no fallback is allowed.');
+        reportVoiceStatus('voice', false);
+        if (focusedUserId === userId) focusedUserId = null;
+        return false;
+      }
+      if (!validTurn()) return false;
+      const played = await processMolabVoiceTurn(userId, text, validTurn, contextTurns);
+      reportVoiceStatus('voice', played);
+      if (focusedUserId === userId) focusedUserId = null;
+      return played;
+    }
+
+    if (CONFIG.TTS_PROVIDER !== 'colab') {
+      throw new Error('Invalid TSUKI_TTS_PROVIDER: ' + CONFIG.TTS_PROVIDER);
+    }
+    if (!await colabIsReady()) {
+      console.warn('[TTS] Selected Colab endpoint is unavailable; no fallback is allowed.');
+      reportVoiceStatus('voice', false);
+      if (focusedUserId === userId) focusedUserId = null;
+      return false;
+    }
 
     const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/voice/process-binary`, {
       userId: userId.toString(),
       text: text,
+      contextTurns,
       memoryScope: 'discord'
     }, {
       timeout: 180000, // 3 minutes timeout for LLM processing
@@ -617,9 +1078,10 @@ async function processWithLLM(userId, text) {
       validateStatus: (status) => status >= 200 && status < 300
     });
 
+    if (!validTurn()) return false;
     const llmResponse = response.headers['x-tsuki-text'] || '';
     if (llmResponse) {
-      console.log('[LLM] Response text:', llmResponse);
+      console.log('[LLM] Reply received (chars=' + llmResponse.length + ')');
     }
 
     const audioBytes = Buffer.isBuffer(response.data)
@@ -628,10 +1090,13 @@ async function processWithLLM(userId, text) {
 
     if (response.status === 204 || !response.data || audioBytes === 0) {
       console.log('[LLM] No audio returned');
+      reportVoiceStatus('voice', false);
     } else {
       console.log(`[LLM] Response received (${audioBytes} bytes), queueing audio...`);
       const audioBuffer = Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data);
-      await enqueuePlayback('tsuki-reply', audioBuffer, { priority: 1 });
+      await enqueuePlayback('tsuki-reply', audioBuffer, { priority: 1, validTurn });
+      voiceAnalytics.replyCompleted();
+      reportVoiceStatus('voice', true);
     }
     
     // Release focus after processing complete
@@ -639,8 +1104,11 @@ async function processWithLLM(userId, text) {
       focusedUserId = null;
       console.log(`[FOCUS] Released (processing complete)`);
     }
+    return response.status !== 204 && audioBytes > 0;
   } catch (error) {
+    if (error.code === 'VOICE_TURN_INVALIDATED') return false;
     console.error('[LLM] Error:', error.message);
+    if (!error.llmFailed) reportVoiceStatus('voice', false);
     // Log detailed error response if available
     if (error.response) {
       console.error('[LLM DEBUG] Status:', error.response.status);
@@ -652,6 +1120,7 @@ async function processWithLLM(userId, text) {
       focusedUserId = null;
       console.log(`[FOCUS] Released (LLM error)`);
     }
+    return false;
   }
 }
 
@@ -662,6 +1131,7 @@ function enqueuePlayback(source, audioBuffer, options = {}) {
       source,
       audioBuffer,
       priority: options.priority ?? 1,
+      validTurn: options.validTurn,
       resolve,
       reject,
     });
@@ -685,6 +1155,7 @@ async function drainPlaybackQueue() {
       }
 
       try {
+        if (next.validTurn && !next.validTurn()) throw invalidVoiceTurn();
         console.log(`[TTS Queue] playing source=${next.source} remaining=${playbackQueue.length}`);
         await playTTSAudio(next.audioBuffer);
         next.resolve();
@@ -749,7 +1220,7 @@ async function playTTSAudio(audioBuffer) {
       `rms=${stats.rms.toFixed(2)}, peak=${stats.peak}, connection=${connection.state.status})...`,
     );
 
-    const audioStream = createDiscordPcmStream(audioBuffer);
+    const audioStream = createDiscordPcmStream(audioBuffer, { tailPaddingMs: 200 });
 
     // Create audio resource from stream
     // The buffer should be PCM 48kHz stereo
@@ -800,6 +1271,10 @@ async function playTTSAudio(audioBuffer) {
       }
     });
 
+    if (currentConnection !== connection ||
+        connection.state.status !== VoiceConnectionStatus.Ready) {
+      throw new Error('Playback interrupted by voice disconnect');
+    }
     console.log(
       `[TTS] Playback complete (player=${audioPlayer.state.status}, connection=${connection.state.status}, ` +
       `ping=${formatVoicePing(connection.ping)})`,
@@ -811,15 +1286,31 @@ async function playTTSAudio(audioBuffer) {
 }
 
 /**
- * Start HTTP server so C# app can send "play TTS in Discord" requests
- * POST /play-tts body: { text: "..." }
+ * Container-loopback HTTP: C# direct speech and authenticated controls'
+ * live voice status / leave / manual TTS (forwarded via Docker exec).
+ * POST /play-tts body: { text: "...", guild_id?: "..." }
  */
 function startBridgeHttpServer() {
   const server = http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
-    if (req.method !== 'POST' || req.url !== '/play-tts') {
+    if (req.method === 'GET' && req.url === '/analytics') {
+      res.writeHead(200);
+      res.end(JSON.stringify({ ...voiceAnalytics.snapshot(), engagement: engagementMetrics }));
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/focus') {
+      res.writeHead(200);
+      res.end(JSON.stringify(focusSnapshot()));
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/voice-session') {
+      res.writeHead(200);
+      res.end(JSON.stringify(voiceSession(currentConnection, CONFIG.GUILD_ID, VoiceConnectionStatus.Ready)));
+      return;
+    }
+    if (req.method !== 'POST' || !['/play-tts', '/leave-voice', '/focus'].includes(req.url)) {
       res.writeHead(404);
-      res.end(JSON.stringify({ error: 'Not found. Use POST /play-tts with body { text: \"...\" }' }));
+      res.end(JSON.stringify({ error: 'Not found' }));
       return;
     }
     let body = '';
@@ -841,6 +1332,62 @@ function startBridgeHttpServer() {
           return;
         }
         const data = JSON.parse(body || '{}');
+        const session = voiceSession(currentConnection, CONFIG.GUILD_ID, VoiceConnectionStatus.Ready);
+        if (req.url === '/focus') {
+          const action = data.action;
+          const userId = data.user_id;
+          if (data.guild_id !== CONFIG.GUILD_ID ||
+              !['add', 'remove', 'clear'].includes(action) ||
+              (action === 'clear' && (userId !== undefined ||
+                Object.keys(data).length !== 2)) ||
+              (action !== 'clear' && (!isValidSnowflake(userId) ||
+                Object.keys(data).length !== 3))) {
+            res.writeHead(400);
+            res.end(JSON.stringify({ error: 'Invalid focus command or server' }));
+            return;
+          }
+          if (action === 'add') {
+            const guild = client.guilds.cache.get(CONFIG.GUILD_ID);
+            const member = await guild?.members.fetch(userId).catch(() => null);
+            if (!member || member.user?.bot) {
+              res.writeHead(404);
+              res.end(JSON.stringify({ error: 'Human user not found in configured server' }));
+              return;
+            }
+            manualFocusList.add(userId);
+          } else if (action === 'remove') manualFocusList.delete(userId);
+          else manualFocusList.clear();
+          resetEngagement();
+          syncAssemblyRealtimePresence('dashboard focus changed');
+          res.writeHead(200);
+          res.end(JSON.stringify(focusSnapshot()));
+          return;
+        }
+        if (req.url === '/leave-voice') {
+          const invalid = validateVoiceTarget(data, session);
+          if (invalid) {
+            res.writeHead(invalid.status);
+            res.end(JSON.stringify({ error: invalid.error }));
+            return;
+          }
+          leaveVoice(CONFIG.GUILD_ID);
+          focusedUserId = null;
+          turnGateClosed = false;
+          userState.clear();
+          audioPlayer.stop(true);
+          res.writeHead(200);
+          res.end(JSON.stringify({ ok: true, left_channel_id: session.channel_id }));
+          return;
+        }
+        if (data.guild_id !== undefined) {
+          const invalid = validateVoiceTarget(data, session);
+          if (invalid) {
+            res.writeHead(invalid.status);
+            res.end(JSON.stringify({ error: invalid.error }));
+            return;
+          }
+        }
+        const speechConnection = currentConnection;
         const text = typeof data.text === 'string' ? data.text.trim() : '';
         if (!text) {
           res.writeHead(400);
@@ -853,26 +1400,38 @@ function startBridgeHttpServer() {
           return;
         }
         if (!currentConnection) {
+          reportVoiceStatus('voice', false);
           res.writeHead(503);
           res.end(JSON.stringify({ error: 'Not in a voice channel. Start the bridge and join first.' }));
           return;
         }
-        const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/voice/test-tts`, { text });
-        const audioBase64 = response.data?.audio;
-        if (typeof audioBase64 !== 'string' || audioBase64.length === 0) {
-          res.writeHead(502);
-          res.end(JSON.stringify({ error: 'C# API did not return audio' }));
+        if (CONFIG.TTS_PROVIDER === 'off') {
+          res.writeHead(503);
+          res.end(JSON.stringify({ error: 'Voice disabled in controls' }));
           return;
         }
-        const audioBuffer = decodeBase64Audio(audioBase64);
-        await enqueuePlayback('manual-tts', audioBuffer, { priority: 0 });
+        // Synthesize the whole request before playback. Queuing each segment
+        // separately lets concurrent manual/LLM requests interleave sentences;
+        // a later synthesis failure would also leave an incomplete reply spoken.
+        const speech = await synthesizeSelectedSpeech(text);
+        if (currentConnection !== speechConnection ||
+            currentConnection?.state?.status !== VoiceConnectionStatus.Ready) {
+          res.writeHead(409);
+          res.end(JSON.stringify({ error: 'Voice connection changed before playback.' }));
+          return;
+        }
+        await enqueuePlayback('manual-tts', speech.pcm, { priority: 0 });
+        reportVoiceStatus('voice', true);
         res.writeHead(200);
-        res.end(JSON.stringify({ ok: true, played: true, queued: playbackQueue.length }));
+        res.end(JSON.stringify({ ok: true, played: true,
+          segments_played: speech.segments, queued: playbackQueue.length }));
       } catch (err) {
         console.error('[BRIDGE HTTP] Error:', err.message);
-        const status = err instanceof SyntaxError ? 400 : 502;
+        const status = err instanceof SyntaxError ? 400 : err instanceof RangeError ? 413 : 502;
+        if (status === 502) reportVoiceStatus('voice', false);
         res.writeHead(status);
-        res.end(JSON.stringify({ error: status === 400 ? 'Invalid JSON' : 'Play TTS failed' }));
+        res.end(JSON.stringify({ error: status === 400 ? 'Invalid JSON' :
+          status === 413 ? err.message : 'Play TTS failed' }));
       }
     });
   });
@@ -888,22 +1447,93 @@ function startBridgeHttpServer() {
   });
 }
 
-async function processRealtimeTranscript(userId, rawText) {
+async function processRealtimeTranscript(userId, rawText, provider = 'assemblyai') {
   const text = String(rawText || '').trim();
-  if (!text) return;
-
+  if (manualFocusList.size && !manualFocusList.has(userId)) {
+    voiceAnalytics.drop('focus');
+    return;
+  }
+  const voiceChannelId = currentConnection?.joinConfig?.channelId;
+  if (!voiceChannelId) return;
+  const sessionConnection = currentConnection;
+  const revision = voiceEngagement.snapshot().revision;
+  const input = {
+    guildId: CONFIG.GUILD_ID, channelId: voiceChannelId, transport: 'voice',
+    userId, text, focusAllowed: !manualFocusList.size || manualFocusList.has(userId),
+  };
+  const gate = voiceEngagement.decide(input);
+  const engagement = gate.decision === 'reply' ? gate :
+    await resolveEngagement(voiceEngagement, gate, input, 'voice', () =>
+      currentConnection === sessionConnection &&
+      (!manualFocusList.size || manualFocusList.has(userId)));
+  measureEngagement('voice', engagement.reason);
+  if (engagement.decision !== 'reply' ||
+      currentConnection !== sessionConnection ||
+      voiceEngagement.snapshot().revision !== revision ||
+      (manualFocusList.size && !manualFocusList.has(userId))) return;
+  const contextTurns = selectReplyContext(voiceEngagement, input, engagement);
+  // Only an addressed and eligible final transcript can atomically claim
+  // the shared reply lock; unrelated speakers never stop other captures.
+  const claim = realtimeTurnArbiter.claim(userId, text);
+  if (!claim.accepted) {
+    voiceAnalytics.drop(claim.reason);
+    return;
+  }
+  if (claim.owner) stopNonOwnerAssemblyRealtimeCaptures(userId);
   const state = getUserState(userId);
-  if (state.processing) return;
+  if (state.processing) {
+    const queue = realtimePendingTranscripts.get(userId) || [];
+    if (queue.length >= 2) {
+      voiceAnalytics.drop('busy');
+      console.warn('[STT] Realtime turn queue full; at most two owner turns can wait');
+      return;
+    }
+    queue.push({ text, provider, contextTurns });
+    realtimePendingTranscripts.set(userId, queue);
+    return;
+  }
 
   state.processing = true;
   turnGateClosed = true;
+  let next = { text, provider, contextTurns };
   try {
-    console.log(`[STT] Final AssemblyAI transcript received for user ${userId}`);
-    await processWithLLM(userId, text);
-    state.lastResponseAt = Date.now();
+    while (next && realtimeTurnArbiter.owns(userId, claim.token)) {
+      if (!currentConnection) {
+        voiceAnalytics.drop('other');
+        break;
+      }
+      if (manualFocusList.size && !manualFocusList.has(userId)) {
+        voiceAnalytics.drop('focus');
+      } else {
+        console.log('[STT] Final addressed realtime transcript accepted');
+        if (next.provider === 'assemblyai') reportVoiceStatus('assemblyai', true);
+        voiceAnalytics.record('stt'); // Realtime STT elapsed time not available.
+        reportVoiceStatus('stt', true);
+        const replied = await processWithLLM(userId, next.text, () =>
+          currentConnection === sessionConnection &&
+          voiceEngagement.snapshot().revision === revision &&
+          realtimeTurnArbiter.owns(userId, claim.token) &&
+          (!manualFocusList.size || manualFocusList.has(userId)), next.contextTurns);
+        if (replied && currentConnection === sessionConnection &&
+            voiceEngagement.snapshot().revision === revision &&
+            (!manualFocusList.size || manualFocusList.has(userId)) &&
+            realtimeTurnArbiter.owns(userId, claim.token)) {
+          voiceEngagement.completed({ guildId: CONFIG.GUILD_ID,
+            channelId: voiceChannelId, transport: 'voice', userId });
+        }
+        state.lastResponseAt = Date.now();
+      }
+      const queue = realtimePendingTranscripts.get(userId) || [];
+      next = queue.shift() || null;
+      if (!queue.length) realtimePendingTranscripts.delete(userId);
+    }
   } finally {
+    realtimePendingTranscripts.delete(userId);
     state.processing = false;
-    turnGateClosed = false;
+    if (realtimeTurnArbiter.owns(userId, claim.token)) {
+      turnGateClosed = false;
+      realtimeTurnArbiter.release(userId, claim.token);
+    }
   }
 }
 
@@ -913,7 +1543,8 @@ async function processRealtimeTranscript(userId, rawText) {
  * converter sends 16 kHz mono PCM16 frames to the WebSocket.
  */
 function handleAssemblyRealtimeUserAudio(userId, audioStream) {
-  if (!assemblyRealtimeEnabled || audioPlayer.state.status === AudioPlayerStatus.Playing) {
+  if (!assemblyRealtimeEnabled || !realtimeTurnArbiter.canCapture(userId) ||
+      audioPlayer.state.status === AudioPlayerStatus.Playing) {
     audioStream.destroy();
     activeAudioCaptures.delete(userId);
     return;
@@ -931,16 +1562,17 @@ function handleAssemblyRealtimeUserAudio(userId, audioStream) {
     connectTimeoutMs: boundedInt(process.env.ASSEMBLYAI_CONNECT_TIMEOUT_MS, 12000, 1000, 60000),
     closeTimeoutMs: boundedInt(process.env.ASSEMBLYAI_CLOSE_TIMEOUT_MS, 8000, 1000, 60000),
     onPartial: (event) => {
-      debugLog(`[STT] AssemblyAI partial user=${userId}: ${event.transcript}`);
+      debugLog('[STT] AssemblyAI partial received');
     },
     onFinal: (event) => {
       if (finalHandled || capture?.aborted) return;
       finalHandled = true;
-      debugLog(`[STT] AssemblyAI final user=${userId}: ${event.transcript}`);
+      debugLog('[STT] AssemblyAI final received');
       void processRealtimeTranscript(userId, event.transcript);
     },
     onError: (error) => {
       if (capture && !capture.connectionError) capture.connectionError = error;
+      reportVoiceStatus('assemblyai', false);
     },
   });
 
@@ -959,6 +1591,7 @@ function handleAssemblyRealtimeUserAudio(userId, audioStream) {
   const connectPromise = session.connect().catch((error) => {
     capture.connectionError = error;
     console.error('[STT] AssemblyAI realtime connection failed; rotating keys was exhausted:', error.message);
+    reportVoiceStatus('assemblyai', false);
     return null;
   });
 
@@ -989,11 +1622,14 @@ function handleAssemblyRealtimeUserAudio(userId, audioStream) {
           );
           if (fallbackResult?.text) {
             finalHandled = true;
-            await processRealtimeTranscript(userId, fallbackResult.text);
+            await processRealtimeTranscript(userId, fallbackResult.text, 'fallback');
           }
         } catch (error) {
           console.error('[STT] Fallback transcription failed:', error.message);
         }
+      }
+      if (!capture.aborted && capture.connectionError && !finalHandled) {
+        await reportUnheardVoiceTurn();
       }
     })().finally(() => {
       activeAssemblyCaptures.delete(userId);
@@ -1044,6 +1680,7 @@ function handleAssemblyRealtimeUserAudio(userId, audioStream) {
         capture.audioSendFailed = true;
         capture.connectionError ||= error;
         console.error('[STT] AssemblyAI audio send failed:', error.message);
+        reportVoiceStatus('assemblyai', false);
       }
     })
     .on('end', () => {
@@ -1246,6 +1883,32 @@ async function joinVoice(guildId, channelId) {
       throw new Error(`Guild ${guildId} is not available to this bot`);
     }
 
+    // Invalid/deleted channels must fail the join itself. Previously this was
+    // only a warning and joinVoiceChannel silently remained disconnected.
+    const voiceChat = await guild.channels.fetch(channelId).catch(() => null);
+    if (!voiceChat || voiceChat.type !== ChannelType.GuildVoice) {
+      throw new Error("Selected voice channel is unavailable. Choose a current voice channel in controls.");
+    }
+    const joinPermissions = voiceChat.permissionsFor(client.user);
+    if (!joinPermissions?.has(PermissionsBitField.Flags.Connect)) {
+      throw new Error("Tsuki lacks permission to connect to the selected voice channel.");
+    }
+
+    try {
+      const permissions = voiceChat.permissionsFor(client.user);
+      const needed = ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'AttachFiles'];
+      const missing = needed.filter(flag => !permissions?.has(PermissionsBitField.Flags[flag]));
+      if (voiceChat?.type !== ChannelType.GuildVoice || typeof voiceChat.send !== 'function') {
+        console.warn('[VOICE CHAT] This channel does not expose attached text chat');
+      } else if (missing.length) {
+        console.warn('[VOICE CHAT] Missing channel permissions: ' + missing.join(', '));
+      } else {
+        console.log('[VOICE CHAT] Attached text chat available for channel ' + channelId);
+      }
+    } catch (error) {
+      console.warn('[VOICE CHAT] Permission check unavailable:', error.message);
+    }
+
     const connection = joinVoiceChannel({
       channelId,
       guildId,
@@ -1256,6 +1919,11 @@ async function joinVoice(guildId, channelId) {
       debug: false,
     });
 
+    if (currentConnection && currentConnection !== connection) {
+      realtimePendingTranscripts.clear();
+      realtimeTurnArbiter.reset();
+      resetEngagement();
+    }
     currentConnection = connection;
     subscribeAudioPlayer(connection);
 
@@ -1274,7 +1942,11 @@ async function joinVoice(guildId, channelId) {
       }
       audioPlayer.stop(true);
       assemblyRealtimeEnabled = false;
-      stopAssemblyRealtimeCaptures('voice connection disconnected');
+      if (!currentConnection || currentConnection === connection) {
+        stopAssemblyRealtimeCaptures('voice connection disconnected');
+        realtimeTurnArbiter.reset();
+        resetEngagement();
+      }
     });
 
     connection.on('error', (error) => {
@@ -1302,7 +1974,7 @@ async function joinVoice(guildId, channelId) {
         assemblyRealtimeRequested,
         focusedUserId,
         turnGateClosed,
-      })) {
+      }) || (assemblyRealtimeRequested && !realtimeTurnArbiter.canCapture(userId))) {
         return;
       }
 
@@ -1333,6 +2005,8 @@ async function joinVoice(guildId, channelId) {
         }
       }
 
+      // A member lookup may have awaited Discord after another speaker won.
+      if (assemblyRealtimeRequested && !realtimeTurnArbiter.canCapture(userId)) return;
       console.log(`[VOICE] User ${userId} started speaking`);
 
       // Legacy STT is single-speaker. AssemblyAI realtime creates one
@@ -1373,12 +2047,20 @@ async function joinVoice(guildId, channelId) {
  * Leave voice channel
  */
 function leaveVoice(guildId) {
+  realtimePendingTranscripts.clear();
+  realtimeTurnArbiter.reset();
+  resetEngagement();
   assemblyRealtimeEnabled = false;
   stopAssemblyRealtimeCaptures('voice channel left');
-  const connection = getVoiceConnection(guildId);
+  const connection = getVoiceConnection(guildId) ||
+    (currentConnection?.joinConfig?.guildId === guildId ? currentConnection : null);
   if (connection) {
-    connection.destroy();
     currentConnection = null;
+    audioPlayer.stop(true);
+    for (const pending of playbackQueue.splice(0)) {
+      pending.reject(new Error('Voice channel left before playback'));
+    }
+    if (connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
     if (audioPlayerConnection === connection) {
       audioPlayerConnection = null;
     }
@@ -1407,7 +2089,7 @@ client.once('clientReady', async () => {
       console.error('[BOT] Failed to auto-join voice:', error.message);
     }
   } else {
-    console.log('[BOT] No default voice channel configured; waiting for /t join.');
+    console.log('[BOT] No default voice channel configured; waiting for /tjoin.');
   }
   startBridgeHttpServer();
 
@@ -1417,47 +2099,43 @@ client.once('clientReady', async () => {
     if (guild) {
       await guild.commands.set([
         {
-          name: 't',
-          description: 'Control Tsuki voice chat and direct speech',
-          options: [
-            {
-              name: 'join',
-              description: 'Join the configured voice channel, or provide a channel ID',
-              type: 1,
-              options: [{ name: 'channel_id', description: 'Optional voice channel ID', type: 3, required: false }],
-            },
-            {
-              name: 'leave',
-              description: 'Leave the current voice channel',
-              type: 1,
-              options: [{ name: 'channel_id', description: 'Optional channel ID to leave', type: 3, required: false }],
-            },
-            {
-              name: 'focus',
-              description: 'Only listen to this user',
-              type: 1,
-              options: [{ name: 'user_id', description: 'User ID', type: 3, required: true }],
-            },
-            {
-              name: 'unfocus',
-              description: 'Stop focusing on this user',
-              type: 1,
-              options: [{ name: 'user_id', description: 'User ID', type: 3, required: true }],
-            },
-            {
-              name: 'focuslist',
-              description: 'Show which users Tsuki is focused on',
-              type: 1,
-            },
-            {
-              name: 'say',
-              description: 'Make Tsuki speak text directly',
-              type: 1,
-            },
-          ],
+          name: 'tjoin',
+          description: 'Join the configured voice channel, or provide a channel ID',
+          options: [{ name: 'channel_id', description: 'Optional voice channel ID', type: 3, required: false }],
+        },
+        {
+          name: 'tleave',
+          description: 'Leave the current voice channel',
+          options: [{ name: 'channel_id', description: 'Optional channel ID to leave', type: 3, required: false }],
+        },
+        {
+          name: 'tfocus',
+          description: 'Only listen to this user',
+          options: [{ name: 'user_id', description: 'User ID', type: 3, required: true }],
+        },
+        {
+          name: 'tunfocus',
+          description: 'Stop focusing on this user',
+          options: [{ name: 'user_id', description: 'User ID', type: 3, required: true }],
+        },
+        {
+          name: 'tfocuslist',
+          description: 'Show which users Tsuki is focused on',
+        },
+        {
+          name: 'tsayvc',
+          description: 'Speak a short message in the connected voice channel',
+          options: [{ name: 'text', description: 'What Tsuki should say in voice chat',
+                      type: 3, required: true, max_length: DIRECT_TTS_MAX_CHARS }],
+        },
+        {
+          name: 'tsayc',
+          description: 'Send a short voice message in this chat channel',
+          options: [{ name: 'text', description: 'What Tsuki should say in this chat',
+                      type: 3, required: true, max_length: DIRECT_TTS_MAX_CHARS }],
         },
       ]);
-      console.log('[BOT] Slash commands registered');
+      console.log('[BOT] Slash commands registered (/tjoin, /tleave, /tfocus, /tunfocus, /tfocuslist, /tsayvc, /tsayc)');
     }
   } catch (error) {
     console.error('[BOT] Slash command registration failed:', error.message);
@@ -1478,6 +2156,9 @@ function validateStartupConfig() {
   }
   if (CONFIG.STT_MODE === 'assemblyai' && ASSEMBLY_KEY_POOL.size === 0) {
     missing.push('ASSEMBLYAI_KEYS_FILE or ASSEMBLYAI_API_KEY');
+  }
+  if (!['molab', 'colab', 'off'].includes(CONFIG.TTS_PROVIDER)) {
+    missing.push('TSUKI_TTS_PROVIDER must be molab, colab, or off');
   }
   if (hasCSharpIntegration) {
     try {
@@ -1502,8 +2183,7 @@ async function resolveUserName(guild, userId) {
 }
 
 client.on('interactionCreate', async (interaction) => {
-  const isSayModal = interaction.isModalSubmit() && interaction.customId === 't_say_modal';
-  if (!isSayModal && !interaction.isChatInputCommand()) return;
+  if (!interaction.isChatInputCommand()) return;
 
   // GUARDRAIL: only members with Manage Channels can control Tsuki.
   if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageChannels)) {
@@ -1514,38 +2194,56 @@ client.on('interactionCreate', async (interaction) => {
   const guild = interaction.guild;
   if (!guild) return;
 
-  if (isSayModal) {
+  const isSayVc = interaction.commandName === 'tsayvc';
+  const isSayChat = interaction.commandName === 'tsayc';
+  if (isSayVc || isSayChat) {
     try {
-      const rawText = interaction.fields.getTextInputValue('t_say_text');
-      const text = limitDirectTtsText(rawText);
+      // Required slash-command text is typed inline; do not show a modal.
+      const text = String(interaction.options.getString('text', true)).replace(/\s+/g, ' ').trim();
       if (!text) {
         await interaction.reply({ content: 'Text is empty after validation.', ephemeral: true });
         return;
       }
+      if (isSayVc && !currentConnection) {
+        await interaction.reply({ content: 'Tsuki is not in a voice channel. Use `/tjoin` first.', ephemeral: true });
+        return;
+      }
 
       await interaction.deferReply({ ephemeral: true });
-      const pcm = await requestDirectTts(text);
-      await sendVoiceMessage(interaction.channelId, pcmToWav(pcm), 'Voice message from Tsuki');
-      await interaction.editReply('Voice message sent here.');
-    } catch (error) {
-      console.error('[SLASH] Direct voice message failed:', error.message);
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: 'I could not create an audible voice message.' }).catch(() => {});
+      const speech = await synthesizeSelectedSpeech(text);
+      if (isSayVc) {
+        await enqueuePlayback('slash-tsayvc', speech.pcm, { priority: 0 });
+        reportVoiceStatus('voice', true);
+        await interaction.editReply('Spoken in the connected voice channel.');
       } else {
-        await interaction.reply({ content: 'I could not create an audible voice message.', ephemeral: true }).catch(() => {});
+        await sendVoiceMessage(interaction.channelId, pcmToWav(speech.pcm), 'Voice message from Tsuki');
+        reportVoiceStatus('chatVoice', true);
+        await interaction.editReply('Voice message sent in this chat.');
+      }
+    } catch (error) {
+      console.error('[SLASH] Direct speech failed:', error.message);
+      if (CONFIG.TTS_PROVIDER !== 'off') {
+        reportVoiceStatus(isSayVc ? 'voice' : 'chatVoice', false);
+      }
+      const failure = CONFIG.TTS_PROVIDER === 'off'
+        ? 'Voice is disabled in controls. Select Molab or Colab first.'
+        : isSayVc
+          ? 'Could not play speech in the voice channel. Check the voice connection and selected TTS provider.'
+          : 'Could not send a voice message. Check the selected TTS provider.';
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: failure }).catch(() => {});
+      } else {
+        await interaction.reply({ content: failure, ephemeral: true }).catch(() => {});
       }
     }
     return;
   }
 
-  if (interaction.commandName !== 't') return;
-
-  const subcommand = interaction.options.getSubcommand();
   const arg = interaction.options.getString('channel_id') || interaction.options.getString('user_id') || '';
 
   try {
-    switch (subcommand) {
-      case 'join': {
+    switch (interaction.commandName) {
+      case 'tjoin': {
         const channelId = arg || CONFIG.VOICE_CHANNEL_ID;
         if (!isValidSnowflake(channelId)) {
           await interaction.reply({ content: 'That does not look like a valid channel ID (numbers only).', ephemeral: true });
@@ -1566,7 +2264,7 @@ client.on('interactionCreate', async (interaction) => {
         }
         return;
       }
-      case 'leave': {
+      case 'tleave': {
         const channelId = arg || currentConnection?.joinConfig?.channelId || '';
         if (!isValidSnowflake(channelId)) {
           await interaction.reply({ content: 'I am not in a voice channel right now.', ephemeral: true });
@@ -1584,7 +2282,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.reply(`Left <#${channelId}>. See you later!`);
         return;
       }
-      case 'focus': {
+      case 'tfocus': {
         if (!isValidSnowflake(arg)) {
           await interaction.reply({ content: 'That does not look like a valid user ID.', ephemeral: true });
           return;
@@ -1595,16 +2293,18 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
         manualFocusList.add(arg);
+        resetEngagement();
         syncAssemblyRealtimePresence('manual focus list changed');
         const names = await Promise.all([...manualFocusList].map((id) => resolveUserName(guild, id)));
         await interaction.reply(`Now only listening to: **${names.join(', ')}**`);
         return;
       }
-      case 'unfocus': {
+      case 'tunfocus': {
         if (!manualFocusList.delete(arg)) {
           await interaction.reply({ content: `\`${arg}\` was not on the focus list.`, ephemeral: true });
           return;
         }
+        resetEngagement();
         syncAssemblyRealtimePresence('manual focus list changed');
         const names = manualFocusList.size
           ? await Promise.all([...manualFocusList].map((id) => resolveUserName(guild, id)))
@@ -1616,27 +2316,13 @@ client.on('interactionCreate', async (interaction) => {
         );
         return;
       }
-      case 'focuslist': {
+      case 'tfocuslist': {
         if (manualFocusList.size === 0) {
-          await interaction.reply('Manual focus is off — I listen to everyone. Use `/t focus user_id` to restrict it.');
+          await interaction.reply('Manual focus is off — I listen to everyone. Use `/tfocus user_id` to restrict it.');
           return;
         }
         const names = await Promise.all([...manualFocusList].map((id) => resolveUserName(guild, id)));
         await interaction.reply(`Listening only to: **${names.join(', ')}**`);
-        return;
-      }
-      case 'say': {
-        const modal = new ModalBuilder()
-          .setCustomId('t_say_modal')
-          .setTitle('Tsuki voice message');
-        const textInput = new TextInputBuilder()
-          .setCustomId('t_say_text')
-          .setLabel('What should Tsuki say?')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-          .setMaxLength(DIRECT_TTS_MAX_CHARS);
-        modal.addComponents(new ActionRowBuilder().addComponents(textInput));
-        await interaction.showModal(modal);
         return;
       }
     }
@@ -1654,31 +2340,24 @@ client.on('error', (error) => {
   console.error('[BOT] Client error:', error.message);
 });
 
-// Text mentions: when Tsuki is @-mentioned in the configured text channel,
-// run the message through the same LLM pipeline as voice turns and reply in text.
-// TEXT_REPLY_MODE='any' widens this to every non-bot message in the channel.
+// Accept the configured text channel AND the attached text chat of Tsuki's
+// joined/configured voice channel, never unrelated channels or other guilds.
+// TEXT_REPLY_MODE='any' widens this to every non-bot message there.
 // Guardrails: one turn at a time globally, per-user cooldown, short error reply.
 const TEXT_USER_COOLDOWN_MS = boundedInt(process.env.TEXT_USER_COOLDOWN_MS, 3000, 1000, 60000);
-// Voice replies in text chat: 'all' = every reply gets a voice message,
-// 'keywords' = only when the user's message contains a keyword (TEXT_VOICE_KEYWORDS),
-// 'off' = text only. Keywords are comma-separated, case-insensitive substrings.
-const TEXT_VOICE_MODE = (process.env.TEXT_VOICE_MODE || 'all').trim().toLowerCase();
-const TEXT_VOICE_KEYWORDS = (process.env.TEXT_VOICE_KEYWORDS || '')
-  .split(',')
-  .map((k) => k.trim().toLowerCase())
-  .filter(Boolean);
+// Automatic voice replies in text chat are keywords-only or off.
+// Normalize removed legacy 'all' to keywords so upgrades never speak every reply.
+const TEXT_VOICE_MODE = (process.env.TEXT_VOICE_MODE || 'keywords').trim().toLowerCase() === 'off'
+  ? 'off' : 'keywords';
+const TEXT_VOICE_KEYWORDS = parseTextVoiceKeywords(
+  process.env.TEXT_VOICE_KEYWORDS || DEFAULT_TEXT_VOICE_KEYWORDS,
+);
 
 function wantsVoiceReply(text) {
-  if (TEXT_VOICE_MODE === 'off') return false;
-  if (TEXT_VOICE_MODE === 'keywords') {
-    if (TEXT_VOICE_KEYWORDS.length === 0) return false;
-    const hay = text.toLowerCase();
-    return TEXT_VOICE_KEYWORDS.some((k) => hay.includes(k));
-  }
-  return true;
+  return wantsTextVoiceReply(text, TEXT_VOICE_MODE, TEXT_VOICE_KEYWORDS);
 }
 
-let textTurnInFlight = false;
+const textTurnQueue = createTextTurnQueue({ capacity: 8 });
 const lastTextTurnAt = new Map(); // userId -> epoch ms
 
 // Convert the synthesized WAV to ogg/opus for Discord voice messages. The WAV
@@ -1739,6 +2418,59 @@ function wavToOggOpus(wavBuffer) {
   });
 }
 
+// Molab returns 24-kHz mono WAV; Discord voice playback needs 48-kHz
+// stereo signed PCM. Leave chat-channel OGG voice messages untouched.
+function wavToDiscordPcm(wavBuffer) {
+  return new Promise((resolve, reject) => {
+    const bin = process.env.FFMPEG_PATH || ffmpegPath;
+    if (!bin) return reject(new Error('ffmpeg binary unavailable'));
+    const child = spawnProcess(bin, [
+      '-hide_banner', '-loglevel', 'error', '-i', 'pipe:0',
+      '-f', 's16le', '-acodec', 'pcm_s16le', '-ar', '48000', '-ac', '2',
+      'pipe:1',
+    ]);
+    const chunks = [];
+    let totalBytes = 0;
+    let errorText = '';
+    let settled = false;
+    const finish = (error, pcm) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(pcm);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(new Error('Molab WAV conversion timed out'));
+    }, 45000);
+    child.stdout.on('data', (chunk) => {
+      totalBytes += chunk.length;
+      if (totalBytes > 32 * 1024 * 1024) {
+        child.kill('SIGKILL');
+        finish(new Error('Molab PCM exceeds playback size limit'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    child.stderr.on('data', (chunk) => {
+      errorText = (errorText + chunk.toString()).slice(-1000);
+    });
+    child.on('error', finish);
+    child.stdin.on('error', finish);
+    child.on('close', code => {
+      if (settled) return;
+      if (code !== 0) return finish(new Error('Molab WAV conversion failed: ' + errorText));
+      const pcm = Buffer.concat(chunks);
+      if (!pcm.length || pcm.length % 4 !== 0) {
+        return finish(new Error('Molab WAV conversion produced invalid PCM'));
+      }
+      finish(null, pcm);
+    });
+    child.stdin.end(wavBuffer);
+  });
+}
+
 const DIRECT_TTS_MAX_CHARS = 280;
 const MAX_AUDIO_BYTES = 16 * 1024 * 1024;
 
@@ -1754,15 +2486,6 @@ function decodeBase64Audio(value) {
     throw new Error('Invalid audio payload');
   }
   return audio;
-}
-
-function limitDirectTtsText(value) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  if (text.length <= DIRECT_TTS_MAX_CHARS) return text;
-  const suffix = '...';
-  const contentLimit = DIRECT_TTS_MAX_CHARS - suffix.length;
-  const cut = text.lastIndexOf(' ', contentLimit);
-  return (cut > 0 ? text.slice(0, cut) : text.slice(0, contentLimit)).trim() + suffix;
 }
 
 function pcmToWav(pcmBuffer, sampleRate = 48000, channels = 2) {
@@ -1798,6 +2521,75 @@ async function requestDirectTts(text) {
   return decodeBase64Audio(audioBase64);
 }
 
+// All Discord TTS surfaces use the selected runtime; text is still returned
+// when voice is off or unavailable. Never silently send Molab turns to Colab.
+async function requestSelectedVoiceWav(text) {
+  const requestStartedAt = Date.now();
+  // A structurally valid WAV can still contain only the first few words.
+  // Retry a clearly under-duration utterance once, then fail explicitly rather
+  // than claiming complete playback of text the model did not likely speak.
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const wav = await requestSelectedVoiceWavOnce(text);
+    const duration = readWavDurationSeconds(wav);
+    console.log('[TTS COVERAGE] ' + JSON.stringify({
+      chars: text.length, durationSeconds: duration, attempt,
+      incomplete: speechDurationLooksIncomplete(text, duration),
+    }));
+    if (!speechDurationLooksIncomplete(text, duration)) {
+      const elapsed = Date.now() - requestStartedAt;
+      voiceAnalytics.record('tts', { durationMs: elapsed, requestMs: elapsed, audioSeconds: duration });
+      return wav;
+    }
+    if (attempt === 2) {
+      voiceAnalytics.record('tts', { success: false });
+      throw new Error('TTS audio appears incomplete after retry; playback was not claimed as complete');
+    }
+  }
+}
+
+async function requestSelectedVoiceWavOnce(text) {
+  if (CONFIG.TTS_PROVIDER === 'off') {
+    throw new Error('Voice disabled in controls');
+  }
+  if (CONFIG.TTS_PROVIDER === 'colab') {
+    if (!await colabIsReady()) throw new Error('Selected Colab notebook unavailable');
+    return pcmToWav(await requestDirectTts(text));
+  }
+  if (CONFIG.TTS_PROVIDER === 'molab') {
+    if (!await molabIsReady()) throw new Error('Selected Molab notebook unavailable');
+    const language = /[\u3040-\u30ff\u3400-\u9fff]/u.test(text) ? 'Japanese' : 'English';
+    const response = await axios.post(
+      'https://' + CONFIG.MOLAB_CUSTOM_DOMAIN + '/tts',
+      { text, language },
+      { responseType: 'arraybuffer', timeout: 180000,
+        maxContentLength: 16 * 1024 * 1024 },
+    );
+    const wav = Buffer.from(response.data);
+    if (wav.length < 44 || wav.length > 16 * 1024 * 1024 ||
+        wav.toString('ascii', 0, 4) !== 'RIFF' ||
+        wav.toString('ascii', 8, 12) !== 'WAVE') {
+      throw new Error('Selected Molab notebook returned invalid WAV');
+    }
+    return wav;
+  }
+  throw new Error('Invalid TTS provider');
+}
+
+async function synthesizeSelectedSpeech(text) {
+  const segments = planTtsUtterances(text);
+  const chunks = [];
+  for (const segment of segments) {
+    const wav = await requestSelectedVoiceWav(segment);
+    chunks.push(await wavToDiscordPcm(wav));
+  }
+  const pcm = assemblePcmUtterances(chunks, { maxAudioBytes: MAX_AUDIO_BYTES });
+  console.log('[TTS COVERAGE] ' + JSON.stringify({
+    plannedCharacters: text.length, utterances: segments.length,
+    audioSeconds: +(pcm.length / (48000 * 2 * 2)).toFixed(2),
+  }));
+  return { pcm, segments: segments.length };
+}
+
 async function sendVoiceMessage(channelId, wavBuffer, description = 'Voice message from Tsuki') {
   const meta = voiceMetadataFromWav(wavBuffer, 1);
   const ogg = await wavToOggOpus(wavBuffer);
@@ -1821,64 +2613,138 @@ async function sendVoiceMessage(channelId, wavBuffer, description = 'Voice messa
   });
 }
 
+// Provider readiness is visible in controls.tsukihime.dpdns.org.
+// Do not send startup text announcements or synthetic voice samples to Discord.
 client.on('messageCreate', async (message) => {
+  let ownsTextTurn = false;
   try {
-    if (!CONFIG.TEXT_CHANNEL_ID || message.channel.id !== CONFIG.TEXT_CHANNEL_ID) return;
-    if (message.author.bot) return;
+    if (!acceptsDiscordChatChannel({
+      channelId: message.channel.id,
+      channelType: message.channel.type,
+      guildId: message.guildId,
+      configuredGuildId: CONFIG.GUILD_ID,
+      configuredTextId: CONFIG.TEXT_CHANNEL_ID,
+      activeVoiceId: currentConnection?.joinConfig?.channelId,
+      configuredVoiceId: CONFIG.VOICE_CHANNEL_ID,
+      guildVoiceType: ChannelType.GuildVoice,
+    })) return;
+    if (message.author.bot ||
+        (manualFocusList.size && !manualFocusList.has(message.author.id))) return;
 
     const mentioned = message.mentions.has(client.user);
-    if (CONFIG.TEXT_REPLY_MODE !== 'any' && !mentioned) return;
-
-    // Strip the mention itself so Tsuki doesn't read "@Tsuki ..." as content.
+    let repliedToBot = false;
+    if (message.reference?.messageId) {
+      // Missing Read Message History permission must not invent a reply target.
+      const referenced = await message.fetchReference().catch(() => null);
+      repliedToBot = referenced?.author?.id === client.user.id;
+    }
+    // Strip mention markup only after gathering Discord's trusted metadata.
     const text = message.content.replace(/<@!?(\d+)>/g, ' ').replace(/\s+/g, ' ').trim();
     if (!text) return;
+    // Strict mention mode stays strict, regardless of an audio keyword.
+    if (CONFIG.TEXT_REPLY_MODE !== 'any' && !mentioned && !repliedToBot) return;
+    const addressedOther = !mentioned && !repliedToBot &&
+      message.mentions.users.some(user => user.id !== client.user.id);
+    const input = {
+      guildId: message.guildId, channelId: message.channel.id, transport: 'chat',
+      userId: message.author.id, text, mentioned, repliedToBot, addressedOther,
+      focusAllowed: !manualFocusList.size || manualFocusList.has(message.author.id),
+    };
+    const revision = chatEngagement.snapshot().revision;
+    const sessionValid = () =>
+      chatEngagement.snapshot().revision === revision &&
+      (!manualFocusList.size || manualFocusList.has(message.author.id)) &&
+      acceptsDiscordChatChannel({
+        channelId: message.channel.id, channelType: message.channel.type,
+        guildId: message.guildId, configuredGuildId: CONFIG.GUILD_ID,
+        configuredTextId: CONFIG.TEXT_CHANNEL_ID,
+        activeVoiceId: currentConnection?.joinConfig?.channelId,
+        configuredVoiceId: CONFIG.VOICE_CHANNEL_ID,
+        guildVoiceType: ChannelType.GuildVoice,
+      });
+    const gate = chatEngagement.decide(input);
+    const engagement = gate.decision === 'reply' ? gate :
+      await resolveEngagement(chatEngagement, gate, input, 'chat', sessionValid);
+    measureEngagement('chat', engagement.reason);
+    if (engagement.decision !== 'reply' || !sessionValid()) return;
+    // Text-voice keywords only choose delivery AFTER engagement authorization.
+    const triggeredVoice = wantsVoiceReply(text) && CONFIG.TTS_PROVIDER !== 'off';
 
     const now = Date.now();
     const lastAt = lastTextTurnAt.get(message.author.id) || 0;
     if (now - lastAt < TEXT_USER_COOLDOWN_MS) {
+      voiceAnalytics.drop('cooldown');
       debugLog(`[TEXT] cooldown drop for ${message.author.tag} (${now - lastAt}ms < ${TEXT_USER_COOLDOWN_MS}ms)`);
       return;
     }
-    if (textTurnInFlight) {
-      debugLog('[TEXT] drop: another text turn already in flight');
+    if (!await textTurnQueue.claim()) {
+      voiceAnalytics.drop('busy');
+      debugLog('[TEXT] bounded turn queue full');
       return;
     }
-
-    lastTextTurnAt.set(message.author.id, now);
-    textTurnInFlight = true;
-    console.log(`[TEXT] ${CONFIG.TEXT_REPLY_MODE === 'any' ? 'Message' : 'Mention'} from ${message.author.tag}: ${text}`);
+    ownsTextTurn = true;
+    if (!sessionValid()) {
+      textTurnQueue.release();
+      ownsTextTurn = false;
+      return;
+    }
+    const admittedAt = Date.now();
+    if (admittedAt - (lastTextTurnAt.get(message.author.id) || 0) < TEXT_USER_COOLDOWN_MS) {
+      voiceAnalytics.drop('cooldown');
+      textTurnQueue.release();
+      ownsTextTurn = false;
+      return;
+    }
+    // Keep cooldown records bounded independently of the lifetime of Discord.
+    if (lastTextTurnAt.size > 4096) {
+      for (const [id, timestamp] of lastTextTurnAt) {
+        if (admittedAt - timestamp > TEXT_USER_COOLDOWN_MS)
+          lastTextTurnAt.delete(id);
+      }
+    }
+    lastTextTurnAt.set(message.author.id, admittedAt);
+    console.log('[TEXT] Authorized engagement, reason=' + engagement.reason);
 
     try {
-      await message.channel.sendTyping().catch(() => {});
+      if (typeof message.channel.sendTyping === 'function') {
+        await message.channel.sendTyping().catch(() => {});
+      }
+      if (!sessionValid()) return;
 
       // Per-user memory endpoint: userId keys Tsuki's memory for this person,
       // userName lets her address them by name; voice per TEXT_VOICE_MODE.
-      const wantVoice = wantsVoiceReply(text);
+      const wantVoice = triggeredVoice;
+      const contextTurns = selectReplyContext(chatEngagement, input, engagement);
       const response = await axios.post(`${CONFIG.CSHARP_API_URL}/api/chat/discord`, {
         userId: message.author.id,
         userName: message.member?.displayName || message.author.globalName || message.author.username,
         text,
-        voice: wantVoice,
+        contextTurns,
+        voice: false, // C# owns chat/memory, selected notebook owns all TTS.
       }, { timeout: 180000 });
+      if (!sessionValid()) return;
 
       const reply = response?.data?.text;
+      reportVoiceStatus('llm', true);
       if (reply) {
         // Voice replies replace the text entirely (user preference); text is
         // the fallback when synthesis/conversion fails.
         let voiceSent = false;
-        if (wantVoice && response?.data?.audio) {
+        if (wantVoice) {
           try {
-            const wav = decodeBase64Audio(response.data.audio);
+            const speech = await synthesizeSelectedSpeech(String(reply));
+            const wav = pcmToWav(speech.pcm);
             // Some engines (Kokoro) return WAV variants the API's analyzer
             // can't parse — compute metadata from the audio itself as fallback.
-            let durationSecs = response.data.duration_secs || 0;
-            let waveform = response.data.waveform;
+            let durationSecs = 0;
+            let waveform;
             if (!durationSecs || !waveform) {
               const meta = voiceMetadataFromWav(wav, 1);
               if (!durationSecs) durationSecs = meta.durationSecs;
               if (!waveform) waveform = meta.waveform;
             }
             const ogg = await wavToOggOpus(wav);
+            if (!sessionValid()) return;
             if (ogg.length > 0) {
               // Raw REST: discord.js cannot send waveform/duration metadata.
               // NOTE: @discordjs/rest expects the buffer under `data`
@@ -1901,29 +2767,41 @@ client.on('messageCreate', async (message) => {
                 auth: true,
               });
               voiceSent = true;
+              chatEngagement.completed({ guildId: message.guildId,
+                channelId: message.channel.id, transport: 'chat', userId: message.author.id });
+              reportVoiceStatus('chatVoice', true);
               console.log(`[TEXT] Sent voice message (${ogg.length} bytes, ${durationSecs}s)`);
             }
           } catch (voiceError) {
             console.error('[TEXT] Voice message failed:', voiceError?.response?.status, voiceError?.message);
+            reportVoiceStatus('chatVoice', false);
           }
         }
 
+        if (wantVoice && !voiceSent) reportVoiceStatus('chatVoice', false);
         if (!voiceSent) {
+          if (!sessionValid()) return;
           // Discord hard-caps messages at 2000 chars.
           await message.reply(String(reply).slice(0, 1900));
-          console.log(`[TEXT] Replied to ${message.author.tag} with text (${reply.length} chars)`);
+          chatEngagement.completed({ guildId: message.guildId,
+            channelId: message.channel.id, transport: 'chat', userId: message.author.id });
+          console.log(`[TEXT] Replied with text (${reply.length} chars)`);
         }
       } else {
         console.log('[TEXT] Empty response, not replying');
       }
     } catch (turnError) {
       console.error('[TEXT] Turn failed:', turnError?.message);
-      await message.reply('my brain hiccuped — try again in a moment ✨').catch(() => {});
+      // An inference HTTP 502 is not evidence that Molab/Colab TTS is down.
+      reportVoiceStatus('llm', false);
+      if (sessionValid())
+        await message.reply('I received your message, but my AI reply service is unavailable right now.').catch(() => {});
     } finally {
-      textTurnInFlight = false;
+      textTurnQueue.release();
+      ownsTextTurn = false;
     }
   } catch (error) {
-    textTurnInFlight = false;
+    if (ownsTextTurn) textTurnQueue.release();
     console.error('[TEXT] Failed to handle message:', error?.message);
   }
 });

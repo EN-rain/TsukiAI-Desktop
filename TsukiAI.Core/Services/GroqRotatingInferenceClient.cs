@@ -11,13 +11,14 @@ namespace TsukiAI.Core.Services;
 /// 401/403/429 marks only that key as cooling down and retries the same request
 /// with the next available key. Key values are never written to logs.
 /// </summary>
-public sealed class GroqRotatingInferenceClient : IInferenceClient
+public class GroqRotatingInferenceClient : IInferenceClient
 {
     private readonly string _baseUrl;
     private readonly string _fallbackApiKey;
     private readonly ISemanticMemoryService? _semanticMemory;
     private readonly GenerationTuningSettings _tuning;
     private readonly string _replyTonePreset;
+    private readonly string _providerName;
     private readonly GroqApiKeyPool _keyPool;
     private readonly object _gate = new();
     private readonly Dictionary<string, RemoteInferenceClient> _clients = new(StringComparer.Ordinal);
@@ -31,7 +32,8 @@ public sealed class GroqRotatingInferenceClient : IInferenceClient
         string fallbackApiKey = "",
         ISemanticMemoryService? semanticMemory = null,
         GenerationTuningSettings? tuning = null,
-        string replyTonePreset = "natural")
+        string replyTonePreset = "natural",
+        string providerName = "Groq")
     {
         if (string.IsNullOrWhiteSpace(baseUrl))
             throw new ArgumentException("Base URL cannot be empty.", nameof(baseUrl));
@@ -43,6 +45,7 @@ public sealed class GroqRotatingInferenceClient : IInferenceClient
         _semanticMemory = semanticMemory;
         _tuning = (tuning ?? GenerationTuningSettings.Default).Clamp();
         _replyTonePreset = string.IsNullOrWhiteSpace(replyTonePreset) ? "natural" : replyTonePreset.Trim().ToLowerInvariant();
+        _providerName = providerName;
     }
 
     public string Model => GetCurrentClient().Model;
@@ -126,17 +129,16 @@ public sealed class GroqRotatingInferenceClient : IInferenceClient
 
     private RemoteInferenceClient GetCurrentClient()
     {
-        var key = GetCandidates().First();
+        // Metadata/warmup may inspect the client even while the pool cools.
+        var key = _keyPool.GetCandidates().FirstOrDefault() ?? _fallbackApiKey;
         return GetClient(key);
     }
 
     private IReadOnlyList<string> GetCandidates()
     {
-        var candidates = _keyPool.GetCandidates().ToList();
-        if (candidates.Count == 0 && _fallbackApiKey.Length > 0)
+        var candidates = _keyPool.GetAvailableCandidates().ToList();
+        if (candidates.Count == 0 && _keyPool.Count == 0 && _fallbackApiKey.Length > 0)
             candidates.Add(_fallbackApiKey);
-        if (candidates.Count == 0)
-            candidates.Add(string.Empty);
         return candidates;
     }
 
@@ -180,19 +182,23 @@ public sealed class GroqRotatingInferenceClient : IInferenceClient
             }
             catch (Exception ex) when (TryGetRotationStatus(ex, out var statusCode))
             {
-                _keyPool.MarkFailure(apiKey, statusCode);
+                _keyPool.MarkFailure(apiKey, statusCode,
+                    ex is InferenceRateLimitException rateLimit ? rateLimit.RetryAfter : null);
                 lastError = ex;
                 DevLog.WriteLine(
-                    "Groq LLM key failed; rotating (status={0}, available_keys={1})",
+                    "{0} LLM key failed; rotating (status={1}, available_keys={2})",
+                    _providerName,
                     statusCode,
-                    _keyPool.GetCandidates().Count);
+                    _keyPool.GetAvailableCandidates().Count);
             }
         }
 
         if (lastError is not null)
             throw lastError;
 
-        throw new InferenceException("Groq inference key pool is empty.");
+        throw new InferenceException(_keyPool.Count > 0
+            ? $"All {_providerName} inference keys are cooling down after provider rejections."
+            : $"{_providerName} inference key pool is empty.");
     }
 
     private static bool TryGetRotationStatus(Exception exception, out int statusCode)
@@ -208,7 +214,9 @@ public sealed class GroqRotatingInferenceClient : IInferenceClient
             if (current is HttpRequestException http && http.StatusCode is { } status)
             {
                 statusCode = (int)status;
-                return statusCode is 401 or 403 or 429;
+                // Authentication, quota, and transient upstream/server failures
+                // can be key-specific; do not rotate on malformed requests (400).
+                return statusCode is 401 or 403 or 408 or 429 or 500 or 502 or 503 or 504;
             }
         }
 

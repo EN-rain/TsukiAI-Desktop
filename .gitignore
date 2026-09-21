@@ -83,6 +83,9 @@ bld/
 !.env.example
 !.env.template
 *.pem
+/.controls-auth.json
+/.docker-cli-controls/
+/.deploy-backups/
 *.key
 *.p12
 *.pfx
