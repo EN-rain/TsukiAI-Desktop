@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import Script from "next/script";
 import "../styles.css";
 
 export const metadata: Metadata = {
@@ -10,7 +11,16 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" data-theme="dark">
-      <body>{children}</body>
+      <body>
+        <Script src="https://www.googletagmanager.com/gtag/js?id=G-NRTXK8Y1GZ" strategy="afterInteractive" />
+        <Script id="ga4-init" strategy="afterInteractive">
+          {`window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', 'G-NRTXK8Y1GZ');`}
+        </Script>
+        {children}
+      </body>
     </html>
   );
 }
